@@ -1,0 +1,16 @@
+RestaurantAI is a restaurant management and AI assistant system.
+
+It helps a restaurant manage:
+- menu items
+- categories
+- orders
+- customers
+- inventory
+- coupons
+- reports
+- sales prediction
+- chatbot support
+- OCR menu digitization
+- voice recommendation system
+
+The system is designed for a single restaurant and can be expanded later.

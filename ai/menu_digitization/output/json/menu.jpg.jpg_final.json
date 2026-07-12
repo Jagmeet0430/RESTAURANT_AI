@@ -1,0 +1,479 @@
+[
+    {
+        "name": "Potato Puff",
+        "category": "Puffs Patties & Rolls",
+        "price": 25,
+        "column": 0,
+        "x": 110.0,
+        "y": 126.5,
+        "original_name": "Potato Puff"
+    },
+    {
+        "name": "Paneer Puff Pastry",
+        "category": "Puffs Patties & Rolls",
+        "price": 60,
+        "column": 0,
+        "x": 145.5,
+        "y": 155.0,
+        "original_name": "Paneom Puff Pastry"
+    },
+    {
+        "name": "Mushroom Puff Pastry",
+        "category": "Puffs Patties & Rolls",
+        "price": 60,
+        "column": 0,
+        "x": 148.5,
+        "y": 183.0,
+        "original_name": "Mashrom Puff Pastry"
+    },
+    {
+        "name": "Assorted Corn Pattie",
+        "category": "Puffs Patties & Rolls",
+        "price": 60,
+        "column": 0,
+        "x": 141.0,
+        "y": 210.0,
+        "original_name": "Aasrtn Cort Pattie"
+    },
+    {
+        "name": "Paneer Roll",
+        "category": "Puffs Patties & Rolls",
+        "price": 80,
+        "column": 0,
+        "x": 117.5,
+        "y": 237.5,
+        "original_name": "PanconnRoll"
+    },
+    {
+        "name": "Cheese Bun Patties Sandwich",
+        "category": "Puffs Patties & Rolls",
+        "price": 80,
+        "column": 0,
+        "x": 185.5,
+        "y": 265.5,
+        "original_name": "ChiceedBain Patss Sandwich"
+    },
+    {
+        "name": "Cheese Patties Roll",
+        "category": "Puffs Patties & Rolls",
+        "price": 60,
+        "column": 0,
+        "x": 145.5,
+        "y": 294.0,
+        "original_name": "Chieese Patrier Rdl"
+    },
+    {
+        "name": "Cheese Corn Roll",
+        "category": "Puffs Patties & Rolls",
+        "price": 90,
+        "column": 0,
+        "x": 142.5,
+        "y": 323.0,
+        "original_name": "Cheess Coneer Roll"
+    },
+    {
+        "name": "Regular Pastry",
+        "category": "Pastries",
+        "price": 20,
+        "column": 1,
+        "x": 124.5,
+        "y": 451.5,
+        "original_name": "RegularPastry"
+    },
+    {
+        "name": "Chocolate Pineapple Strawberry",
+        "category": "Pastries",
+        "price": 60,
+        "column": 1,
+        "x": 190.0,
+        "y": 480.5,
+        "original_name": "(ChocoalarPineappleSrawberry)"
+    },
+    {
+        "name": "Pineapple Pastry",
+        "category": "Pastries",
+        "price": 60,
+        "column": 1,
+        "x": 130.5,
+        "y": 511.5,
+        "original_name": "Piuttearide Pastry"
+    },
+    {
+        "name": "Butterscotch Pastry",
+        "category": "Pastries",
+        "price": 60,
+        "column": 1,
+        "x": 144.0,
+        "y": 541.0,
+        "original_name": "Butberr Scorch Pastry)"
+    },
+    {
+        "name": "Fresh Fruit Pastry",
+        "category": "Pastries",
+        "price": 60,
+        "column": 1,
+        "x": 142.5,
+        "y": 571.5,
+        "original_name": "FrentFeiailf Pastry"
+    },
+    {
+        "name": "Black Velvet Pastry",
+        "category": "Pastries",
+        "price": 75,
+        "column": 1,
+        "x": 139.0,
+        "y": 666.5,
+        "original_name": "Black Velver Pastry"
+    },
+    {
+        "name": "Cassiss Pastry",
+        "category": "Pastries",
+        "price": 80,
+        "column": 1,
+        "x": 116.0,
+        "y": 697.0,
+        "original_name": "Casiss Pastry"
+    },
+    {
+        "name": "Biscoff Pastry",
+        "category": "Pastries",
+        "price": 100,
+        "column": 1,
+        "x": 116.0,
+        "y": 725.5,
+        "original_name": "BucolfPastry"
+    },
+    {
+        "name": "Cheese Cake Pastry",
+        "category": "Pastries",
+        "price": 110,
+        "column": 1,
+        "x": 144.0,
+        "y": 755.5,
+        "original_name": "Cheese Cake Pastry"
+    },
+    {
+        "name": "Vanilla Swiss Roll",
+        "category": "Swiss Roll",
+        "price": 40,
+        "column": 2,
+        "x": 141.5,
+        "y": 904.0,
+        "original_name": "Vanilla Swiss Roll"
+    },
+    {
+        "name": "Chocolate Swiss Roll",
+        "category": "Swiss Roll",
+        "price": 60,
+        "column": 2,
+        "x": 159.0,
+        "y": 936.5,
+        "original_name": "Ahocolate Swiss Roll"
+    },
+    {
+        "name": "Jam Roll",
+        "category": "Swiss Roll",
+        "price": 45,
+        "column": 2,
+        "x": 100.5,
+        "y": 965.5,
+        "original_name": "Jam Roll"
+    },
+    {
+        "name": "Chocolate",
+        "category": "Donuts",
+        "price": 50,
+        "column": 3,
+        "x": 604.5,
+        "y": 142.0,
+        "original_name": "Chocolate"
+    },
+    {
+        "name": "Straco Chips",
+        "category": "Donuts",
+        "price": 50,
+        "column": 3,
+        "x": 611.0,
+        "y": 167.5,
+        "original_name": "StracoChips"
+    },
+    {
+        "name": "Apple Pie",
+        "category": "Pies / Tarts",
+        "price": 120,
+        "column": 4,
+        "x": 603.5,
+        "y": 311.0,
+        "original_name": "ApploPie"
+    },
+    {
+        "name": "Black Forest Pie",
+        "category": "Pies / Tarts",
+        "price": 120,
+        "column": 4,
+        "x": 628.5,
+        "y": 337.0,
+        "original_name": "BladkForestpie"
+    },
+    {
+        "name": "Chocolate Pie",
+        "category": "Pies / Tarts",
+        "price": 120,
+        "column": 4,
+        "x": 625.5,
+        "y": 362.0,
+        "original_name": "ChocolatatPiet"
+    },
+    {
+        "name": "Belgian Fruit Tart",
+        "category": "Pies / Tarts",
+        "price": 60,
+        "column": 4,
+        "x": 633.5,
+        "y": 387.5,
+        "original_name": "BelganFnuntard"
+    },
+    {
+        "name": "Belgian Chocolate Pie",
+        "category": "Pies / Tarts",
+        "price": 90,
+        "column": 4,
+        "x": 652.0,
+        "y": 416.5,
+        "original_name": "Belgian Chocolate Ple"
+    },
+    {
+        "name": "Vanilla Muffins",
+        "category": "Muffins / Cupcakes",
+        "price": 40,
+        "column": 5,
+        "x": 630.0,
+        "y": 548.5,
+        "original_name": "Vanilla Muffins"
+    },
+    {
+        "name": "Chocolate Muffins",
+        "category": "Muffins / Cupcakes",
+        "price": 50,
+        "column": 5,
+        "x": 646.5,
+        "y": 577.0,
+        "original_name": "Chocolate Muffins"
+    },
+    {
+        "name": "Chocolate Muffins",
+        "category": "Muffins / Cupcakes",
+        "price": 50,
+        "column": 5,
+        "x": 645.5,
+        "y": 606.0,
+        "original_name": "Chocolate Muffins"
+    },
+    {
+        "name": "Oreo Muffins",
+        "category": "Muffins / Cupcakes",
+        "price": 60,
+        "column": 5,
+        "x": 623.0,
+        "y": 635.5,
+        "original_name": "Orro Muffins"
+    },
+    {
+        "name": "Red Velvet Pudding",
+        "category": "Puddings",
+        "price": 50,
+        "column": 6,
+        "x": 641.0,
+        "y": 737.5,
+        "original_name": "Red. Velyet Pudding"
+    },
+    {
+        "name": "Chocolate Pudding",
+        "category": "Puddings",
+        "price": 50,
+        "column": 6,
+        "x": 639.5,
+        "y": 768.5,
+        "original_name": "Chocolate Pudding"
+    },
+    {
+        "name": "Veg Cheese Pizza",
+        "category": "Perfect Pizzas",
+        "price": 250,
+        "column": 7,
+        "x": 641.0,
+        "y": 914.0,
+        "original_name": "Veg Cheess Pizza"
+    },
+    {
+        "name": "Mexican Pizza",
+        "category": "Perfect Pizzas",
+        "price": 220,
+        "column": 7,
+        "x": 629.5,
+        "y": 945.5,
+        "original_name": "Mexicaer Pizza"
+    },
+    {
+        "name": "Paneer Tikka Pizza",
+        "category": "Perfect Pizzas",
+        "price": 220,
+        "column": 7,
+        "x": 646.5,
+        "y": 976.5,
+        "original_name": "Pencer Tiikka Pizza"
+    },
+    {
+        "name": "Onion and Capsicum Pizza",
+        "category": "Perfect Pizzas",
+        "price": 220,
+        "column": 7,
+        "x": 676.5,
+        "y": 1007.0,
+        "original_name": "Onion and Capsdian Pizza"
+    },
+    {
+        "name": "Veggie Supreme Pizza",
+        "category": "Perfect Pizzas",
+        "price": 250,
+        "column": 7,
+        "x": 662.0,
+        "y": 1039.0,
+        "original_name": "Veggie Supreme Pizza"
+    },
+    {
+        "name": "Spicy Veg Burger",
+        "category": "Burger & Sandwiches",
+        "price": 60,
+        "column": 8,
+        "x": 1101.0,
+        "y": 376.5,
+        "original_name": "SgseyVeg.Burger"
+    },
+    {
+        "name": "Cheesy French Fries (Plate)",
+        "category": "Burger & Sandwiches",
+        "price": 130,
+        "column": 8,
+        "x": 1135.0,
+        "y": 401.0,
+        "original_name": "CheesyFredch Fries(Plate))"
+    },
+    {
+        "name": "Samosa Chaat",
+        "category": "Chaat",
+        "price": 50,
+        "column": 9,
+        "x": 1085.5,
+        "y": 628.0,
+        "original_name": "Samosa Chaat"
+    },
+    {
+        "name": "Tikki Aloo Chaat",
+        "category": "Chaat",
+        "price": 120,
+        "column": 9,
+        "x": 1095.5,
+        "y": 653.0,
+        "original_name": "Tgll Acoket Chaat"
+    },
+    {
+        "name": "Raj Kachori Chaat",
+        "category": "Chaat",
+        "price": 80,
+        "column": 9,
+        "x": 1077.5,
+        "y": 677.0,
+        "original_name": "RalKaa Chaat"
+    },
+    {
+        "name": "Sev Puri",
+        "category": "Chaat",
+        "price": 60,
+        "column": 9,
+        "x": 1061.5,
+        "y": 702.0,
+        "original_name": "Senu Purt"
+    },
+    {
+        "name": "Papdi Puri",
+        "category": "Chaat",
+        "price": 60,
+        "column": 9,
+        "x": 1058.5,
+        "y": 724.5,
+        "original_name": "PaptPurt"
+    },
+    {
+        "name": "Dahi Golgappe (Per 6 Pcs)",
+        "category": "Chaat",
+        "price": 60,
+        "column": 9,
+        "x": 1139.5,
+        "y": 750.0,
+        "original_name": "Dahi Golgappe (Per 6 Pcs)"
+    },
+    {
+        "name": "Jhal / Suji Golgappe (Per 6 Pcs)",
+        "category": "Chaat",
+        "price": 30,
+        "column": 9,
+        "x": 1158.5,
+        "y": 777.0,
+        "original_name": "Jhahl/ Duji Galgappe (Per 6 Pes)"
+    },
+    {
+        "name": "Veggie Noodles",
+        "category": "Chinese",
+        "price": 120,
+        "column": 10,
+        "x": 1090.5,
+        "y": 893.0,
+        "original_name": "Veggie Noodles"
+    },
+    {
+        "name": "Hakka Noodles",
+        "category": "Chinese",
+        "price": 150,
+        "column": 10,
+        "x": 1089.0,
+        "y": 921.0,
+        "original_name": "Hakka Noodles"
+    },
+    {
+        "name": "Cheese Chilli",
+        "category": "Chinese",
+        "price": 150,
+        "column": 10,
+        "x": 1079.0,
+        "y": 949.0,
+        "original_name": "Cheess Chill"
+    },
+    {
+        "name": "Manchurian (Plate)",
+        "category": "Chinese",
+        "price": 180,
+        "column": 10,
+        "x": 1107.0,
+        "y": 976.5,
+        "original_name": "Manchurrian (Pate)"
+    },
+    {
+        "name": "Fried Momos (Plate)",
+        "category": "Chinese",
+        "price": 100,
+        "column": 10,
+        "x": 1110.0,
+        "y": 1006.0,
+        "original_name": "Fried Momss (Plate)"
+    },
+    {
+        "name": "Spring Roll",
+        "category": "Chinese",
+        "price": 80,
+        "column": 10,
+        "x": 1071.0,
+        "y": 1037.0,
+        "original_name": "Spring Roll"
+    }
+]

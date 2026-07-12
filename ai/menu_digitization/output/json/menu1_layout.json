@@ -1,0 +1,209 @@
+[
+    {
+        "name": "Potato Puff",
+        "category": "Puffs Patties & Rolls",
+        "price": 25,
+        "column": 0,
+        "x": 110.0,
+        "y": 126.5,
+        "original_name": "Potato Puff"
+    },
+    {
+        "name": "Assorted Corn Pattie",
+        "category": "Puffs Patties & Rolls",
+        "price": 60,
+        "column": 0,
+        "x": 141.0,
+        "y": 210.0,
+        "original_name": "Aasrtn Cort Pattie"
+    },
+    {
+        "name": "Paneer Roll",
+        "category": "Puffs Patties & Rolls",
+        "price": 80,
+        "column": 0,
+        "x": 117.5,
+        "y": 237.5,
+        "original_name": "PanconnRoll"
+    },
+    {
+        "name": "Chocolate Pineapple Strawberry",
+        "category": "Pastries",
+        "price": 60,
+        "column": 1,
+        "x": 190.0,
+        "y": 480.5,
+        "original_name": "(ChocoalarPineappleSrawberry)"
+    },
+    {
+        "name": "Fresh Fruit Pastry",
+        "category": "Pastries",
+        "price": 60,
+        "column": 1,
+        "x": 142.5,
+        "y": 571.5,
+        "original_name": "FrentFeiailf Pastry"
+    },
+    {
+        "name": "Black Velvet Pastry",
+        "category": "Pastries",
+        "price": 75,
+        "column": 1,
+        "x": 139.0,
+        "y": 666.5,
+        "original_name": "Black Velver Pastry"
+    },
+    {
+        "name": "Cheese Cake Pastry",
+        "category": "Pastries",
+        "price": 100,
+        "column": 1,
+        "x": 144.0,
+        "y": 755.5,
+        "original_name": "Cheese Cake Pastry"
+    },
+    {
+        "name": "Apple Pie",
+        "category": "Pies / Tarts",
+        "price": 120,
+        "column": 4,
+        "x": 603.5,
+        "y": 311.0,
+        "original_name": "ApploPie"
+    },
+    {
+        "name": "Chocolate Pie",
+        "category": "Pies / Tarts",
+        "price": 120,
+        "column": 4,
+        "x": 625.5,
+        "y": 362.0,
+        "original_name": "ChocolatatPiet"
+    },
+    {
+        "name": "Belgian Fruit Tart",
+        "category": "Pies / Tarts",
+        "price": 60,
+        "column": 4,
+        "x": 633.5,
+        "y": 387.5,
+        "original_name": "BelganFnuntard"
+    },
+    {
+        "name": "Belgian Chocolate Pie",
+        "category": "Pies / Tarts",
+        "price": 90,
+        "column": 4,
+        "x": 652.0,
+        "y": 416.5,
+        "original_name": "Belgian Chocolate Ple"
+    },
+    {
+        "name": "Vanilla Muffins",
+        "category": "Muffins / Cupcakes",
+        "price": 40,
+        "column": 5,
+        "x": 630.0,
+        "y": 548.5,
+        "original_name": "Vanilla Muffins"
+    },
+    {
+        "name": "Chocolate Muffins",
+        "category": "Muffins / Cupcakes",
+        "price": 50,
+        "column": 5,
+        "x": 646.5,
+        "y": 577.0,
+        "original_name": "Chocolate Muffins"
+    },
+    {
+        "name": "Chocolate Muffins",
+        "category": "Muffins / Cupcakes",
+        "price": 50,
+        "column": 5,
+        "x": 645.5,
+        "y": 606.0,
+        "original_name": "Chocolate Muffins"
+    },
+    {
+        "name": "Onion and Capsicum Pizza",
+        "category": "Perfect Pizzas",
+        "price": 220,
+        "column": 7,
+        "x": 676.5,
+        "y": 1007.0,
+        "original_name": "Onion and Capsdian Pizza"
+    },
+    {
+        "name": "Spicy Veg Burger",
+        "category": "Burger & Sandwiches",
+        "price": 60,
+        "column": 8,
+        "x": 1101.0,
+        "y": 376.5,
+        "original_name": "SgseyVeg.Burger"
+    },
+    {
+        "name": "Cheesy French Fries (Plate)",
+        "category": "Burger & Sandwiches",
+        "price": 130,
+        "column": 8,
+        "x": 1135.0,
+        "y": 401.0,
+        "original_name": "CheesyFredch Fries(Plate))"
+    },
+    {
+        "name": "Sev Puri",
+        "category": "Chaat",
+        "price": 60,
+        "column": 9,
+        "x": 1061.5,
+        "y": 702.0,
+        "original_name": "Senu Purt"
+    },
+    {
+        "name": "Dahi Golgappe (Per 6 Pcs)",
+        "category": "Chaat",
+        "price": 60,
+        "column": 9,
+        "x": 1139.5,
+        "y": 750.0,
+        "original_name": "Dahi Golgappe (Per 6 Pcs)"
+    },
+    {
+        "name": "Jhal / Suji Golgappe (Per 6 Pcs)",
+        "category": "Chaat",
+        "price": 30,
+        "column": 9,
+        "x": 1158.5,
+        "y": 777.0,
+        "original_name": "Jhahl/ Duji Galgappe (Per 6 Pes)"
+    },
+    {
+        "name": "Veggie Noodles",
+        "category": "Chinese",
+        "price": 120,
+        "column": 10,
+        "x": 1090.5,
+        "y": 893.0,
+        "original_name": "Veggie Noodles"
+    },
+    {
+        "name": "Hakka Noodles",
+        "category": "Chinese",
+        "price": 150,
+        "column": 10,
+        "x": 1089.0,
+        "y": 921.0,
+        "original_name": "Hakka Noodles"
+    },
+    {
+        "name": "Fried Momos (Plate)",
+        "category": "Chinese",
+        "price": 100,
+        "column": 10,
+        "x": 1110.0,
+        "y": 1006.0,
+        "original_name": "Fried Momss (Plate)"
+    }
+]

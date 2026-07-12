@@ -1,0 +1,90 @@
+I* ,s Sofly Csp. | x=114.00 | y=124.00
+Vanillo Sof ly Ie Cream  nr | x=166.00 | y=182.50
+#ns Softf Cup | x=92.00 | y=138.50
+Rasmalnt Glass (Angoon) | x=190.00 | y=169.00
+Hot GaJrelo I 100 gm) | x=213.00 | y=155.00
+Sponge Rasgulla (2 Piece) | x=238.00 | y=167.50
+Hol Gulab Jamun PlaIt | x=262.00 | y=158.50
+Imarll | x=283.50 | y=92.50
+Jalab! | x=307.50 | y=95.00
+Chenna Mala Roll | x=333.50 | y=140.00
+Chenna Sandwich Ro! | x=357.00 | y=156.50
+Moong-- dal Halwa (Per Plalo | x=383.00 | y=185.00
+Sambar Plate (Extra) | x=469.00 | y=158.00
+Channa Plate (Extra) | x=494.00 | y=158.50
+Extra Pav | x=515.50 | y=115.00
+Pav Bhaji | x=540.00 | y=115.00
+Extra Purl | x=564.00 | y=116.00
+Bedmi Puri | x=590.00 | y=122.00
+Tlkki wilh Channa | x=617.00 | y=145.00
+Tikkl with Chutney | x=641.00 | y=147.50
+Samosa wilh Channa | x=667.50 | y=159.00
+Samosa wilh Chutney | x=691.00 | y=159.00
+Chhole Bhature Plate | x=717.50 | y=159.00
+* wyy C | x=66.50 | y=161.00
+Stulfed Bread Pakoda (Per Piece) | x=769.00 | y=214.00
+Chhole Kulcha Plate | x=810.00 | y=160.00
+Masala Dhokla | x=830.00 | y=138.00
+Sandwlch Dhokla | x=851.50 | y=151.50
+Paneer Dhokla Plate | x=874.50 | y=159.00
+Dhokla Plain Plate | x=896.00 | y=154.00
+.+. | x=45.50 | y=135.00
+Delectable Deserts | x=420.00 | y=289.50
+Indian Snacks | x=951.50 | y=276.50
+Soutbindian | x=1143.00 | y=285.50
+20 | x=783.00 | y=368.50
+120 | x=805.50 | y=368.50
+Half | x=763.00 | y=409.00
+3.ni k9 | x=302.50 | y=473.50
+oy | x=801.00 | y=461.50
+388888 | x=1073.00 | y=472.50
+Green Tea | x=1025.00 | y=586.00
+Hol Coffee | x=1049.00 | y=585.00
+Hot Mllk | x=1075.50 | y=576.50
+Carrol (Gajar) Juice | x=920.50 | y=637.50
+Cold Coffee frappe | x=350.00 | y=645.50
+Banana Milk Shake | x=407.00 | y=647.50
+Chocolate Oreo Milk shake | x=435.00 | y=674.50
+Chocolate Milk Shake | x=462.00 | y=657.50
+Bulterscotch Milk Shake | x=488.50 | y=660.00
+Bubblegum Milk Shake | x=515.00 | y=656.50
+Burberry Milk Shake | x=541.50 | y=651.50
+Strawberry Milk Shake | x=566.50 | y=653.50
+Milk Badam | x=594.00 | y=611.00
+Cold Drink | x=751.00 | y=610.00
+Masala Lass! | x=774.50 | y=617.50
+Sweel Lassi | x=799.50 | y=614.00
+MosamI Julce | x=824.00 | y=620.00
+Mixed Frult Juice | x=848.00 | y=629.00
+Blue Curacao | x=173.50 | y=629.00
+Min Mojito | x=202.50 | y=622.50
+Frappe Caramel | x=291.50 | y=635.00
+Frappe Mocha | x=319.50 | y=630.50
+Mango Mllk Shake | x=379.00 | y=642.50
+Spicy guava Punch | x=87.50 | y=656.00
+Spicy Mango Punch | x=118.50 | y=658.00
+Fruil Ice Tea | x=145.50 | y=630.50
+Chilled Beverages | x=962.50 | y=751.50
+Hot Beverages | x=1118.50 | y=741.00
+Milk Shakes | x=688.00 | y=777.50
+Mocktails | x=262.00 | y=815.00
+Plain | x=655.50 | y=878.50
+8 | x=848.00 | y=873.50
+M.R.P | x=759.50 | y=890.50
+37 | x=429.50 | y=888.00
+Cream | x=638.50 | y=962.00
+Ice | x=663.00 | y=951.50
+Since : 1993 | x=648.50 | y=1131.50
+JAJA CHOWK, OPP. STATE BANK OF INDIA, | x=348.00 | y=1284.00
+MAHESH | x=523.00 | y=1267.00
+TANDA, PUNJAB-144024, INDIA | x=318.00 | y=1296.00
+Sweets & Bakers | x=395.00 | y=1283.00
+. | x=588.00 | y=1189.50
+G | x=119.50 | y=1222.50
+@ | x=159.50 | y=1218.00
+3 | x=196.00 | y=1216.00
+Mahesh Sweets.Tanda | x=135.50 | y=1342.00
+Mahesh Sweets Tanda | x=175.00 | y=1337.50
+Mahesh.Sweets. Tanda | x=213.00 | y=1334.00
+Follow & Luke us on | x=250.00 | y=1311.50
+100% | x=661.50 | y=1333.50

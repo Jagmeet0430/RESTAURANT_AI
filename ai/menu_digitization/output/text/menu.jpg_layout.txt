@@ -1,0 +1,132 @@
+Puffs Patfies &Rolls | x=280.50 | y=63.50
+Donuts | x=638.50 | y=54.50
+Burger&Sandwiches | x=1218.00 | y=65.50
+Potato Puff | x=110.00 | y=126.50
+25 | x=483.00 | y=123.00
+Vanilla/Choco, | x=625.00 | y=115.00
+Club Sandwich(3Piece) | x=1123.50 | y=140.00
+88888888888 | x=1382.50 | y=262.00
+Paneom Puff Pastry | x=145.50 | y=155.00
+60 | x=482.00 | y=153.00
+Chocolate | x=604.50 | y=142.00
+50 | x=945.00 | y=148.00
+60 | x=483.50 | y=180.00
+StracoChips | x=611.00 | y=167.50
+50 | x=946.00 | y=174.00
+Butterd Toast | x=1075.50 | y=169.00
+Mashrom Puff Pastry | x=148.50 | y=183.00
+Channa Sandwich | x=1091.50 | y=195.00
+Aasrtn Cort Pattie | x=141.00 | y=210.00
+60 | x=482.50 | y=208.50
+Channa Masiney Sandwich | x=1129.50 | y=220.00
+PanconnRoll | x=117.50 | y=237.50
+80 | x=482.00 | y=237.00
+Pies/ Tarts | x=763.00 | y=243.50
+Potwto Churwich | x=1094.00 | y=247.50
+ChiceedBain Patss Sandwich | x=185.50 | y=265.50
+80 | x=482.50 | y=264.50
+Chilil Paneen Sandwich | x=1124.50 | y=272.50
+Chieese Patrier Rdl | x=145.50 | y=294.00
+60 | x=482.00 | y=294.00
+120 | x=950.00 | y=301.50
+Realah Paneer'Sandwich | x=1127.00 | y=298.50
+ApploPie | x=603.50 | y=311.00
+Cheess Coneer Roll | x=142.50 | y=323.00
+90 | x=482.50 | y=322.50
+120 | x=949.50 | y=329.00
+MasslaRegullar Burger | x=1123.00 | y=324.00
+BladkForestpie | x=628.50 | y=337.00
+120 | x=952.00 | y=358.50
+Wegala Hatoger | x=1088.50 | y=349.50
+ChocolatatPiet | x=625.50 | y=362.00
+Pastries | x=271.50 | y=392.50
+60 | x=952.00 | y=384.00
+SgseyVeg.Burger | x=1101.00 | y=376.50
+BelganFnuntard | x=633.50 | y=387.50
+CheesyFredch Fries(Plate)) | x=1135.00 | y=401.00
+(60 | x=1384.50 | y=400.00
+Belgian Chocolate Ple | x=652.00 | y=416.50
+90 | x=952.50 | y=412.00
+Cheesy French Fiates | x=1105.50 | y=427.50
+130 | x=1385.00 | y=422.50
+RegularPastry | x=124.50 | y=451.50
+20 | x=476.00 | y=450.50
+(60 | x=477.00 | y=481.00
+Muffins / Cupcakes | x=750.50 | y=476.00
+(ChocoalarPineappleSrawberry) | x=190.00 | y=480.50
+Chaat | x=1082.00 | y=485.00
+Piuttearide Pastry | x=130.50 | y=511.50
+60 | x=476.00 | y=510.50
+Butberr Scorch Pastry) | x=144.00 | y=541.00
+60 | x=476.50 | y=544.50
+Vanilla Muffins | x=630.00 | y=548.50
+40 | x=948.50 | y=547.00
+FrentFeiailf Pastry | x=142.50 | y=571.50
+60 | x=476.50 | y=577.00
+Chocolate Muffins | x=646.50 | y=577.00
+50 | x=949.00 | y=575.50
+PurerChocolalae | x=131.00 | y=604.00
+Chocolate Muffins | x=645.50 | y=606.00
+50 | x=949.50 | y=607.00
+Rela Velt Pastry | x=134.50 | y=634.00
+Orro Muffins | x=623.00 | y=635.50
+60 | x=950.00 | y=634.00
+Samosa Chaat | x=1085.50 | y=628.00
+50 | x=1382.00 | y=629.50
+Black Velver Pastry | x=139.00 | y=666.50
+Tgll Acoket Chaat | x=1095.50 | y=653.00
+120 | x=1378.50 | y=654.00
+Puddings | x=765.50 | y=692.50
+RalKaa Chaat | x=1077.50 | y=677.00
+75 | x=477.50 | y=696.00
+80 | x=1381.00 | y=678.00
+Casiss Pastry | x=116.00 | y=697.00
+Senu Purt | x=1061.50 | y=702.00
+60 | x=1381.50 | y=703.00
+BucolfPastry | x=116.00 | y=725.50
+80 | x=477.00 | y=725.50
+50 | x=948.00 | y=735.50
+PaptPurt | x=1058.50 | y=724.50
+60 | x=1382.50 | y=726.50
+Red. Velyet Pudding | x=641.00 | y=737.50
+Cheese Cake Pastry | x=144.00 | y=755.50
+100) | x=474.00 | y=754.50
+Dahi Golgappe (Per 6 Pcs) | x=1139.50 | y=750.00
+60 | x=1382.50 | y=751.00
+Chocolate Pudding | x=639.50 | y=768.50
+50 | x=948.00 | y=766.50
+Red Velvet Pastry | x=138.00 | y=785.50
+110 | x=477.00 | y=784.50
+Jhahl/ Duji Galgappe (Per 6 Pes) | x=1158.50 | y=777.00
+30. | x=1382.50 | y=775.00
+Swiss Roll | x=295.00 | y=854.00
+Perfect Pizzas | x=761.00 | y=851.00
+Chinese | x=1219.50 | y=846.00
+40 | x=475.50 | y=902.00
+Veggie Noodles | x=1090.50 | y=893.00
+Vanilla Swiss Roll | x=141.50 | y=904.00
+120 | x=1379.50 | y=895.50
+Veg Cheess Pizza | x=641.00 | y=914.00
+250 | x=952.50 | y=914.00
+Hakka Noodles | x=1089.00 | y=921.00
+60 | x=476.00 | y=934.00
+150 | x=1379.00 | y=924.50
+Ahocolate Swiss Roll | x=159.00 | y=936.50
+Mexicaer Pizza | x=629.50 | y=945.50
+220 | x=952.50 | y=946.50
+Cheess Chill | x=1079.00 | y=949.00
+150 | x=1380.00 | y=951.50
+Jam Roll | x=100.50 | y=965.50
+45 | x=477.00 | y=965.00
+Pencer Tiikka Pizza | x=646.50 | y=976.50
+220 | x=952.00 | y=975.50
+Manchurrian (Pate) | x=1107.00 | y=976.50
+180 | x=1380.00 | y=978.50
+Onion and Capsdian Pizza | x=676.50 | y=1007.00
+220 | x=952.50 | y=1006.50
+Fried Momss (Plate) | x=1110.00 | y=1006.00
+100 | x=1380.50 | y=1007.50
+Veggie Supreme Pizza | x=662.00 | y=1039.00
+250 | x=952.50 | y=1037.50
+Spring Roll | x=1071.00 | y=1037.00
+80 | x=1383.00 | y=1039.50

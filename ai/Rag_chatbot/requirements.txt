@@ -1,0 +1,12 @@
+fastapi
+uvicorn[standard]
+pydantic
+python-dotenv
+langchain-core
+langchain-community
+langchain-chroma
+chromadb
+sentence-transformers
+numpy
+psycopg2-binary
+pytest

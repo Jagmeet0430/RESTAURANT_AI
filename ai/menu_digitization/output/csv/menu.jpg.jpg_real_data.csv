@@ -1,0 +1,68 @@
+name,category,price,column,x,y,original_name
+Potato Puff,Puffs Patties & Rolls,25,0,,,Potato Puff
+Paneer Puff Pastry,Puffs Patties & Rolls,60,0,,,Paneom Puff Pastry
+Mushroom Puff Pastry,Puffs Patties & Rolls,50,0,,,Mashtrom Puff Pastry
+Assorted Corn Pattie,Puffs Patties & Rolls,60,0,,,Aasrtn Cont Pattie
+Paneer Roll,Puffs Patties & Rolls,80,0,,,Paneonn Roll
+Cheese Bun Patties Sandwich,Puffs Patties & Rolls,80,0,,,Chiceed Buit Patss Sandwich
+Cheese Patties Roll,Puffs Patties & Rolls,80,0,,,Chieese Patdee Roll
+Cheese Corn Roll,Puffs Patties & Rolls,90,0,,,Cheess Coneer Roll
+Regular Pastry,Pastries,20,1,,,Regular Pastry
+Chocolate Pineapple Strawberry,Pastries,60,1,,,(Chocolear Pineapple Strawberry)
+Pineapple Pastry,Pastries,60,1,,,Piutteapple Pastry
+Butterscotch Pastry,Pastries,60,1,,,Butperr Scotch Pastry
+Fresh Fruit Pastry,Pastries,60,1,,,Freht Feiailf Pastry
+Pure Chocolate,Pastries,60,1,,,Pure Chocolalae
+Red Velvet,Pastries,70,1,,,Reld Velvet
+Black Velvet Pastry,Pastries,70,1,,,Black Velver Pastry
+Cassiss Pastry,Pastries,75,1,,,Casiss Pastry
+Biscoff Pastry,Pastries,80,1,,,Bicoff Pastry
+Cheese Cake Pastry,Pastries,100,1,,,Cheese Cake Pastry
+Red Velvet Pastry,Pastries,110,1,,,Red Velvet Pastry
+Vanilla Swiss Roll,Swiss Roll,40,2,,,Vanilla Swiss Roll
+Chocolate Swiss Roll,Swiss Roll,60,2,,,Ahocolate Swiss Roll
+Jam Roll,Swiss Roll,45,2,,,Jam Roll
+Vanilla / Choco,Donuts,70,3,,,Vanilla / Choco
+Chocolate,Donuts,50,3,,,Chocolate
+Straco Chips,Donuts,50,3,,,Straco Chips
+Apple Pie,Pies / Tarts,120,4,,,Apple Pie
+Black Forest Pie,Pies / Tarts,120,4,,,Black Forest Pie
+Chocolate Pie,Pies / Tarts,120,4,,,Chocolatat Piet
+Belgian Fruit Tart,Pies / Tarts,60,4,,,Belgian Fruit Tart
+Belgian Chocolate Pie,Pies / Tarts,90,4,,,Belgian Chocolate Pie
+Vanilla Muffins,Muffins / Cupcakes,40,5,,,Vanilla Muffins
+Chocolate Muffins,Muffins / Cupcakes,50,5,,,Chocolate Muffins
+Chocolate Muffins,Muffins / Cupcakes,50,5,,,Chocolate Muffins
+Oreo Muffins,Muffins / Cupcakes,60,5,,,Orro Muffins
+Red Velvet Pudding,Puddings,50,6,,,Red Velvet Pudding
+Chocolate Pudding,Puddings,50,6,,,Chocolate Pudding
+Veg Cheese Pizza,Perfect Pizzas,250,7,,,Veg Cheess Pizza
+Mexican Pizza,Perfect Pizzas,220,7,,,Mexicaer Pizza
+Paneer Tikka Pizza,Perfect Pizzas,220,7,,,Peneer Tiikka Pizza
+Onion and Capsicum Pizza,Perfect Pizzas,220,7,,,Onion and Capscian Pizza
+Veggie Supreme Pizza,Perfect Pizzas,250,7,,,Veggie Supreme Pizza
+Club Sandwich (3 Piece),Burger & Sandwiches,40,8,,,Club Sandwich (3 Piece)
+Buttered Toast,Burger & Sandwiches,30,8,,,Butterd Toast
+Channa Sandwich,Burger & Sandwiches,80,8,,,Caanna Sandwich
+Channa Masney Sandwich,Burger & Sandwiches,80,8,,,Channa Masney Sandwich
+Potato Chutwich,Burger & Sandwiches,60,8,,,Potato Chutwich
+Chilli Paneer Sandwich,Burger & Sandwiches,120,8,,,Chilly Paneer Sandwich
+Resh Paneer Sandwich,Burger & Sandwiches,120,8,,,Realah Paneer Sandwich
+Masala Regular Burger,Burger & Sandwiches,120,8,,,Massla Regullar Burger
+Vegalo Hotger,Burger & Sandwiches,80,8,,,Wegalo Hotoger
+Spicy Veg Burger,Burger & Sandwiches,80,8,,,Sgsy Veg. Burger
+Cheesy French Fries (Plate),Burger & Sandwiches,60,8,,,Cheesy Fredch Fries (Plate)
+Cheesy French Fiates,Burger & Sandwiches,130,8,,,Cheesy French Fiates
+Samosa Chaat,Chaat,50,9,,,Samosa Chaat
+Tikki Aloo Chaat,Chaat,120,9,,,Tigli Acoket Chaat
+Raj Kachori Chaat,Chaat,80,9,,,Raj Kaa Chaat
+Sev Puri,Chaat,60,9,,,Senu Puri
+Papdi Puri,Chaat,60,9,,,Papf Puri
+Dahi Golgappe (Per 6 Pcs),Chaat,60,9,,,Dahi Golgappe (Per 6 Pcs)
+Jhal / Suji Golgappe (Per 6 Pcs),Chaat,30,9,,,Jhahl / Juji Golgappe (Per 6 Pcs)
+Veggie Noodles,Chinese,120,10,,,Veggie Noodles
+Hakka Noodles,Chinese,150,10,,,Hakka Noodles
+Cheese Chilli,Chinese,150,10,,,Cheess Chilli
+Manchurian (Plate),Chinese,180,10,,,Manchurian (Pate)
+Fried Momos (Plate),Chinese,100,10,,,Fried Momss (Plate)
+Spring Roll,Chinese,80,10,,,Spring Roll

@@ -1,0 +1,11 @@
+# Add your project dependencies here
+opencv-python
+pillow
+numpy
+pandas
+paddleocr
+paddlepaddle
+psycopg2
+fastapi
+uvicorn
+python-dotenv

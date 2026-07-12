@@ -1,0 +1,17 @@
+speechrecognition
+pyttsx3
+pyaudio
+flask
+requests
+scikit-learn
+python-dotenv
+edge-tts
+edge-tts
+
+pygame
+
+edge-tts
+
+fastapi
+
+uvicorn

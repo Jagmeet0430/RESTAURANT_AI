@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MAHESH | Fresh Bakery, Snacks and Fast Food</title>
+    <meta
+      name="description"
+      content="MAHESH customer website for fresh bakery items, pizzas, chaat, Chinese snacks, pastries, and quick ordering."
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="#home" aria-label="MAHESH home">
+        <img class="brand-logo" src="assets/mahesh-logo.svg" alt="MAHESH logo" />
+        <span class="brand-text">
+          <strong>MAHESH</strong>
+          <small>Bakery and Quick Bites</small>
+        </span>
+      </a>
+
+      <nav class="main-nav" aria-label="Main navigation">
+        <a href="#home">Home</a>
+        <a href="#menu">Menu</a>
+        <a href="#ai">AI Assistant</a>
+        <a href="#quality">Quality</a>
+        <a href="#contact">Contact</a>
+      </nav>
+
+      <a class="header-cta" href="#menu">Order now</a>
+    </header>
+
+    <main>
+      <section id="home" class="hero-section scroll-mt-24">
+        <div class="hero-copy">
+          <span class="eyebrow">Fresh food, clear menu, fast service</span>
+          <h1>Bakery treats, pizzas, chaat and snacks made easy to order.</h1>
+          <p>
+            Browse the full MAHESH menu by category, add your favorites,
+            and understand prices in minutes.
+          </p>
+          <div class="hero-actions">
+            <a class="primary-btn" href="#menu">Explore menu</a>
+            <a class="secondary-btn" href="#contact">Plan an order</a>
+          </div>
+          <div class="trust-row" aria-label="Restaurant highlights">
+            <span>66 menu items</span>
+            <span>11 categories</span>
+            <span>Veg friendly</span>
+          </div>
+        </div>
+        <div class="hero-media">
+          <img src="assets/hero-food.png" alt="Assorted bakery, pizza, snacks and chaat on a restaurant table" />
+        </div>
+      </section>
+
+      <section class="quick-info" aria-label="Ordering benefits">
+        <article>
+          <strong>Clear categories</strong>
+          <span>Find bakery, pizzas, chaat, Chinese and desserts quickly.</span>
+        </article>
+        <article>
+          <strong>Transparent prices</strong>
+          <span>Every item shows its price before you add it.</span>
+        </article>
+        <article>
+          <strong>Fast counter flow</strong>
+          <span>Build a cart and share it with the restaurant team.</span>
+        </article>
+      </section>
+
+      <section id="menu" class="menu-section scroll-mt-24">
+        <div class="section-heading">
+          <span class="eyebrow">Live menu</span>
+          <h2>Choose by category</h2>
+          <p>Use filters or search. Add items to the cart and see the total instantly.</p>
+          <div class="menu-summary" aria-live="polite">
+            <span id="activeCategoryLabel">Showing all categories</span>
+            <strong id="menuCount">66 items</strong>
+          </div>
+        </div>
+
+        <div class="menu-tools">
+          <label class="search-box">
+            <span>Search food</span>
+            <input id="searchInput" type="search" placeholder="Search pizza, pastry, chaat..." />
+          </label>
+          <div id="categoryFilters" class="category-filters" aria-label="Menu category filters"></div>
+        </div>
+
+        <div class="menu-layout">
+          <section class="menu-list" aria-label="Menu items">
+            <div id="menuGrid" class="menu-grid"></div>
+          </section>
+
+          <aside class="cart-panel" aria-label="Cart summary">
+            <div class="cart-card">
+              <div class="cart-head">
+                <div>
+                  <span class="eyebrow">Your order</span>
+                  <h3>Cart summary</h3>
+                </div>
+                <span id="cartCount" class="cart-count">0 items</span>
+              </div>
+
+              <div class="customer-fields">
+                <label>
+                  Name
+                  <input id="customerName" type="text" placeholder="Your name" />
+                </label>
+                <label>
+                  Phone
+                  <input id="customerPhone" type="tel" placeholder="Your phone" />
+                </label>
+                <label>
+                  Order type
+                  <select id="orderType">
+                    <option value="Pickup">Pickup</option>
+                    <option value="Dine-in">Dine-in</option>
+                    <option value="Delivery">Delivery</option>
+                  </select>
+                </label>
+              </div>
+
+              <div id="cartItems" class="cart-items">
+                <p class="empty-cart">Add items from the menu to start an order.</p>
+              </div>
+              <div class="cart-totals">
+                <div class="cart-total-line">
+                  <span>Subtotal</span>
+                  <strong id="cartSubtotal">Rs. 0</strong>
+                </div>
+                <div class="cart-total-line">
+                  <span>GST 5%</span>
+                  <strong id="cartTax">Rs. 0</strong>
+                </div>
+                <div class="cart-total-line">
+                  <span>Packing</span>
+                  <strong id="cartPacking">Rs. 0</strong>
+                </div>
+                <div class="cart-total-line grand-total">
+                  <span>Grand total</span>
+                  <strong id="cartTotal">Rs. 0</strong>
+                </div>
+              </div>
+              <div class="cart-actions">
+                <button id="clearCart" class="secondary-btn full-width" type="button">Clear cart</button>
+                <button id="placeOrder" class="primary-btn full-width" type="button">Send order request</button>
+              </div>
+              <p id="cartHint" class="cart-hint">Add at least one item before sending an order request.</p>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <section id="how-it-works" class="steps-section scroll-mt-24">
+        <div class="section-heading">
+          <span class="eyebrow">Easy for everyone</span>
+          <h2>Order in three simple steps</h2>
+        </div>
+        <div class="steps-grid">
+          <article>
+            <span>1</span>
+            <h3>Pick a category</h3>
+            <p>Start with pastries, pizza, chaat, Chinese, burgers or bakery snacks.</p>
+          </article>
+          <article>
+            <span>2</span>
+            <h3>Add your items</h3>
+            <p>Use the add button to build a quick order with live pricing.</p>
+          </article>
+          <article>
+            <span>3</span>
+            <h3>Send the request</h3>
+            <p>Share the cart at the counter or send it to the restaurant team.</p>
+          </article>
+        </div>
+      </section>
+
+      <section id="quality" class="quality-section scroll-mt-24">
+        <div class="quality-copy">
+          <span class="eyebrow">Quality and supply</span>
+          <h2>Fresh batches, organized stock, and clear service flow.</h2>
+          <p>
+            The website is connected conceptually to the admin system: menu,
+            categories, orders, suppliers, inventory and kitchen operations all
+            stay understandable for customers and staff.
+          </p>
+        </div>
+        <div class="quality-cards">
+          <article>
+            <strong>Bakery focused</strong>
+            <span>Puffs, pastries, muffins, pies and rolls.</span>
+          </article>
+          <article>
+            <strong>Quick meals</strong>
+            <span>Pizzas, burgers, sandwiches and Chinese snacks.</span>
+          </article>
+          <article>
+            <strong>Street snacks</strong>
+            <span>Chaat, golgappe, sev puri and more.</span>
+          </article>
+        </div>
+      </section>
+
+      <section id="ai" class="ai-section scroll-mt-24">
+        <div>
+          <span class="eyebrow">RAG chatbot and voice ordering</span>
+          <h2>Restaurant AI Assistant</h2>
+          <p>
+            Ask anything about the menu, budget, dietary preferences, combos,
+            or ordering. The assistant uses the backend AI service and can also
+            update your cart from natural language.
+          </p>
+        </div>
+
+        <div id="chatPanel" class="ai-chat-card" aria-label="Restaurant AI chat window">
+          <div class="chat-header">
+            <span class="chat-header-avatar" aria-hidden="true">
+              <svg viewBox="0 0 48 48" focusable="false">
+                <path d="M15 9h18a6 6 0 0 1 6 6v14a6 6 0 0 1-6 6h-5l-4 5-4-5h-5a6 6 0 0 1-6-6V15a6 6 0 0 1 6-6Z" />
+                <path d="M17 21h14M17 27h9" />
+                <circle cx="17" cy="17" r="1.8" />
+                <circle cx="31" cy="17" r="1.8" />
+              </svg>
+            </span>
+            <div>
+              <span class="eyebrow">Ask anything...</span>
+              <h3>Restaurant AI Assistant</h3>
+              <small id="chatStatus">Backend AI ready</small>
+            </div>
+          </div>
+
+          <div id="chatMessages" class="chat-messages" aria-live="polite">
+            <div class="chat-message bot">
+              What can I help you with? Ask for budget ideas, spicy snacks, dietary options, combos, or say: Add two burgers and one cold coffee.
+            </div>
+          </div>
+
+          <div class="popular-questions">
+            <strong>💡 Popular Questions</strong>
+            <div id="chatPrompts" class="chat-prompts" aria-label="Popular AI questions">
+              <button type="button" data-question="Show pizza under Rs. 200">Show pizza under Rs. 200</button>
+              <button type="button" data-question="Recommend spicy snacks">Recommend spicy snacks</button>
+              <button type="button" data-question="Which cakes are eggless?">Which cakes are eggless?</button>
+              <button type="button" data-question="Suggest a birthday combo">Suggest a birthday combo</button>
+              <button type="button" data-question="What is today's special?">What is today's special?</button>
+            </div>
+          </div>
+
+          <form id="chatForm" class="chat-form">
+            <button id="voiceButton" class="voice-button" type="button" aria-label="Ask with voice">Mic</button>
+            <input id="chatInput" type="text" placeholder="Type your question..." autocomplete="off" />
+            <button type="submit">Send</button>
+          </form>
+
+          <div class="chat-footer-actions">
+            <button id="voiceToggle" type="button" aria-pressed="true">Voice reply: On</button>
+            <span>Answers come from backend AI. Cart actions update instantly.</span>
+          </div>
+        </div>
+      </section>
+
+      <section id="contact" class="contact-section scroll-mt-24">
+        <div>
+          <span class="eyebrow">Since 1993</span>
+          <h2>MAHESH Sweets &amp; Bakers, Tanda.</h2>
+          <p>
+            Fresh sweets, bakery items, shakes, snacks and quick bites from
+            Jaja Chowk. The menu is 100% vegetarian and ready for pickup,
+            dine-in or order requests.
+          </p>
+        </div>
+        <div class="contact-card">
+          <img class="contact-logo" src="assets/mahesh-logo.svg" alt="MAHESH logo" />
+          <span class="since-label">Since : 1993</span>
+          <strong>MAHESH Sweets &amp; Bakers</strong>
+          <span class="veg-badge">100% Veg. Food</span>
+
+          <address class="restaurant-address">
+            Jaja Chowk,<br />
+            Opp. State Bank of India,<br />
+            Tanda, Punjab-144024, India
+          </address>
+
+          <div class="social-list" aria-label="Social media handles">
+            <span>Follow &amp; Like us on</span>
+            <a href="https://www.instagram.com/mahesh_sweets.tanda" target="_blank" rel="noopener">
+              <strong>IG</strong> Mahesh_Sweets.Tanda
+            </a>
+            <a href="https://www.facebook.com/search/top?q=mahesh_sweets.tanda" target="_blank" rel="noopener">
+              <strong>FB</strong> Mahesh_Sweets.Tanda
+            </a>
+            <a href="https://www.google.com/search?q=Mahesh_Sweets.Tanda" target="_blank" rel="noopener">
+              <strong>G</strong> Mahesh_Sweets.Tanda
+            </a>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <span>MAHESH</span>
+      <span>Fresh menu website built for customers, staff and suppliers.</span>
+    </footer>
+
+    <section class="chat-widget" aria-label="MAHESH AI assistant shortcut">
+      <button id="chatToggle" class="chat-toggle" type="button" aria-label="Open MAHESH AI assistant">
+        <span class="ai-avatar" aria-hidden="true">
+          <svg viewBox="0 0 64 64" focusable="false">
+            <circle class="ai-orbit" cx="32" cy="32" r="23" />
+            <path class="ai-core" d="M25 21h14a4 4 0 0 1 4 4v14a4 4 0 0 1-4 4H25a4 4 0 0 1-4-4V25a4 4 0 0 1 4-4Z" />
+            <path d="M28 33h8M32 29v8" />
+            <circle cx="18" cy="18" r="3" />
+            <circle cx="46" cy="18" r="3" />
+            <circle cx="18" cy="46" r="3" />
+            <circle cx="46" cy="46" r="3" />
+            <path d="M21 20l7 6M43 20l-7 6M21 44l7-6M43 44l-7-6" />
+          </svg>
+        </span>
+      </button>
+    </section>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <script src="script.js"></script>
+  </body>
+</html>

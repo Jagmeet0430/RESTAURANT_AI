@@ -1,0 +1,54 @@
+name,category,price,column,x,y,original_name
+Potato Puff,Puffs Patties & Rolls,25,0,110.0,126.5,Potato Puff
+Paneer Puff Pastry,Puffs Patties & Rolls,60,0,145.5,155.0,Paneom Puff Pastry
+Mushroom Puff Pastry,Puffs Patties & Rolls,60,0,148.5,183.0,Mashrom Puff Pastry
+Assorted Corn Pattie,Puffs Patties & Rolls,60,0,141.0,210.0,Aasrtn Cort Pattie
+Paneer Roll,Puffs Patties & Rolls,80,0,117.5,237.5,PanconnRoll
+Cheese Bun Patties Sandwich,Puffs Patties & Rolls,80,0,185.5,265.5,ChiceedBain Patss Sandwich
+Cheese Patties Roll,Puffs Patties & Rolls,60,0,145.5,294.0,Chieese Patrier Rdl
+Cheese Corn Roll,Puffs Patties & Rolls,90,0,142.5,323.0,Cheess Coneer Roll
+Regular Pastry,Pastries,20,1,124.5,451.5,RegularPastry
+Chocolate Pineapple Strawberry,Pastries,60,1,190.0,480.5,(ChocoalarPineappleSrawberry)
+Pineapple Pastry,Pastries,60,1,130.5,511.5,Piuttearide Pastry
+Butterscotch Pastry,Pastries,60,1,144.0,541.0,Butberr Scorch Pastry)
+Fresh Fruit Pastry,Pastries,60,1,142.5,571.5,FrentFeiailf Pastry
+Black Velvet Pastry,Pastries,75,1,139.0,666.5,Black Velver Pastry
+Cassiss Pastry,Pastries,80,1,116.0,697.0,Casiss Pastry
+Biscoff Pastry,Pastries,100,1,116.0,725.5,BucolfPastry
+Cheese Cake Pastry,Pastries,110,1,144.0,755.5,Cheese Cake Pastry
+Vanilla Swiss Roll,Swiss Roll,40,2,141.5,904.0,Vanilla Swiss Roll
+Chocolate Swiss Roll,Swiss Roll,60,2,159.0,936.5,Ahocolate Swiss Roll
+Jam Roll,Swiss Roll,45,2,100.5,965.5,Jam Roll
+Chocolate,Donuts,50,3,604.5,142.0,Chocolate
+Straco Chips,Donuts,50,3,611.0,167.5,StracoChips
+Apple Pie,Pies / Tarts,120,4,603.5,311.0,ApploPie
+Black Forest Pie,Pies / Tarts,120,4,628.5,337.0,BladkForestpie
+Chocolate Pie,Pies / Tarts,120,4,625.5,362.0,ChocolatatPiet
+Belgian Fruit Tart,Pies / Tarts,60,4,633.5,387.5,BelganFnuntard
+Belgian Chocolate Pie,Pies / Tarts,90,4,652.0,416.5,Belgian Chocolate Ple
+Vanilla Muffins,Muffins / Cupcakes,40,5,630.0,548.5,Vanilla Muffins
+Chocolate Muffins,Muffins / Cupcakes,50,5,646.5,577.0,Chocolate Muffins
+Chocolate Muffins,Muffins / Cupcakes,50,5,645.5,606.0,Chocolate Muffins
+Oreo Muffins,Muffins / Cupcakes,60,5,623.0,635.5,Orro Muffins
+Red Velvet Pudding,Puddings,50,6,641.0,737.5,Red. Velyet Pudding
+Chocolate Pudding,Puddings,50,6,639.5,768.5,Chocolate Pudding
+Veg Cheese Pizza,Perfect Pizzas,250,7,641.0,914.0,Veg Cheess Pizza
+Mexican Pizza,Perfect Pizzas,220,7,629.5,945.5,Mexicaer Pizza
+Paneer Tikka Pizza,Perfect Pizzas,220,7,646.5,976.5,Pencer Tiikka Pizza
+Onion and Capsicum Pizza,Perfect Pizzas,220,7,676.5,1007.0,Onion and Capsdian Pizza
+Veggie Supreme Pizza,Perfect Pizzas,250,7,662.0,1039.0,Veggie Supreme Pizza
+Spicy Veg Burger,Burger & Sandwiches,60,8,1101.0,376.5,SgseyVeg.Burger
+Cheesy French Fries (Plate),Burger & Sandwiches,130,8,1135.0,401.0,CheesyFredch Fries(Plate))
+Samosa Chaat,Chaat,50,9,1085.5,628.0,Samosa Chaat
+Tikki Aloo Chaat,Chaat,120,9,1095.5,653.0,Tgll Acoket Chaat
+Raj Kachori Chaat,Chaat,80,9,1077.5,677.0,RalKaa Chaat
+Sev Puri,Chaat,60,9,1061.5,702.0,Senu Purt
+Papdi Puri,Chaat,60,9,1058.5,724.5,PaptPurt
+Dahi Golgappe (Per 6 Pcs),Chaat,60,9,1139.5,750.0,Dahi Golgappe (Per 6 Pcs)
+Jhal / Suji Golgappe (Per 6 Pcs),Chaat,30,9,1158.5,777.0,Jhahl/ Duji Galgappe (Per 6 Pes)
+Veggie Noodles,Chinese,120,10,1090.5,893.0,Veggie Noodles
+Hakka Noodles,Chinese,150,10,1089.0,921.0,Hakka Noodles
+Cheese Chilli,Chinese,150,10,1079.0,949.0,Cheess Chill
+Manchurian (Plate),Chinese,180,10,1107.0,976.5,Manchurrian (Pate)
+Fried Momos (Plate),Chinese,100,10,1110.0,1006.0,Fried Momss (Plate)
+Spring Roll,Chinese,80,10,1071.0,1037.0,Spring Roll

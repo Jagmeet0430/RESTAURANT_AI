@@ -1,0 +1,5 @@
+pandas
+faker
+scikit-learn
+joblib
+pytest

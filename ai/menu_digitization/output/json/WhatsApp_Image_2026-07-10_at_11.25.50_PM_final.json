@@ -1,0 +1,272 @@
+[
+    {
+        "name": "Plain Dosa",
+        "category": "Puffs Patties & Rolls",
+        "price": 80,
+        "column": 0,
+        "x": 96.0,
+        "y": 87.0,
+        "original_name": "Plain Dosa"
+    },
+    {
+        "name": "Masala Dosa",
+        "category": "Puffs Patties & Rolls",
+        "price": 100,
+        "column": 0,
+        "x": 105.5,
+        "y": 115.5,
+        "original_name": "Masala Dosa"
+    },
+    {
+        "name": "Paneer Dosa.",
+        "category": "Puffs Patties & Rolls",
+        "price": 120,
+        "column": 0,
+        "x": 105.5,
+        "y": 144.0,
+        "original_name": "Paneer Dosa."
+    },
+    {
+        "name": "Onion Dosa",
+        "category": "Puffs Patties & Rolls",
+        "price": 120,
+        "column": 0,
+        "x": 99.5,
+        "y": 173.5,
+        "original_name": "Onion Dosa"
+    },
+    {
+        "name": "Uttapam",
+        "category": "Puffs Patties & Rolls",
+        "price": 150,
+        "column": 0,
+        "x": 85.0,
+        "y": 204.5,
+        "original_name": "Uttapam"
+    },
+    {
+        "name": "Sambhar Vada",
+        "category": "Puffs Patties & Rolls",
+        "price": 70,
+        "column": 0,
+        "x": 116.5,
+        "y": 232.0,
+        "original_name": "Sambhar Vada"
+    },
+    {
+        "name": "Tea",
+        "category": "Puffs Patties & Rolls",
+        "price": 10,
+        "column": 0,
+        "x": 56.5,
+        "y": 331.0,
+        "original_name": "Tea"
+    },
+    {
+        "name": "Tea Milk",
+        "category": "Pastries",
+        "price": 20,
+        "column": 1,
+        "x": 80.5,
+        "y": 357.0,
+        "original_name": "Tea Milk"
+    },
+    {
+        "name": "Hot Coffee",
+        "category": "Pastries",
+        "price": 50,
+        "column": 1,
+        "x": 94.5,
+        "y": 385.0,
+        "original_name": "Hot Coffee"
+    },
+    {
+        "name": "Green Tea.",
+        "category": "Pastries",
+        "price": 40,
+        "column": 1,
+        "x": 90.5,
+        "y": 413.0,
+        "original_name": "Green Tea."
+    },
+    {
+        "name": "Carrot (Gajar) Juice.",
+        "category": "Pastries",
+        "price": 50,
+        "column": 1,
+        "x": 124.0,
+        "y": 521.0,
+        "original_name": "Carrot (Gajar) Juice."
+    },
+    {
+        "name": "Pineapple Juice.",
+        "category": "Pastries",
+        "price": 50,
+        "column": 1,
+        "x": 106.5,
+        "y": 544.5,
+        "original_name": "Pineapple Juice."
+    },
+    {
+        "name": "Orange Juice",
+        "category": "Pastries",
+        "price": 50,
+        "column": 1,
+        "x": 95.5,
+        "y": 567.5,
+        "original_name": "Orange Juice"
+    },
+    {
+        "name": "Mixed Fruit Juice.",
+        "category": "Pastries",
+        "price": 50,
+        "column": 1,
+        "x": 112.5,
+        "y": 591.0,
+        "original_name": "Mixed Fruit Juice."
+    },
+    {
+        "name": "Mosambi Juice",
+        "category": "Pastries",
+        "price": 50,
+        "column": 1,
+        "x": 103.0,
+        "y": 614.0,
+        "original_name": "Mosambi Juice"
+    },
+    {
+        "name": "Sweet Lime",
+        "category": "Pastries",
+        "price": 80,
+        "column": 1,
+        "x": 89.0,
+        "y": 637.0,
+        "original_name": "Sweet Lime"
+    },
+    {
+        "name": "Masala Lassi",
+        "category": "Pastries",
+        "price": 40,
+        "column": 1,
+        "x": 94.5,
+        "y": 662.0,
+        "original_name": "Masala Lassi"
+    },
+    {
+        "name": "Cold Drink",
+        "category": "Pastries",
+        "price": 30,
+        "column": 1,
+        "x": 86.0,
+        "y": 685.0,
+        "original_name": "Cold Drink"
+    },
+    {
+        "name": "Mocktails",
+        "category": "Pastries",
+        "price": 70,
+        "column": 1,
+        "x": 161.5,
+        "y": 758.0,
+        "original_name": "Mocktails"
+    },
+    {
+        "name": "Mint Mojito",
+        "category": "Pastries",
+        "price": 70,
+        "column": 1,
+        "x": 92.0,
+        "y": 787.5,
+        "original_name": "Mint Mojito"
+    },
+    {
+        "name": "Blue Ice Tea",
+        "category": "Swiss Roll",
+        "price": 70,
+        "column": 2,
+        "x": 93.0,
+        "y": 836.0,
+        "original_name": "Blue Ice Tea"
+    },
+    {
+        "name": "Spicy Mango Punch",
+        "category": "Swiss Roll",
+        "price": 70,
+        "column": 2,
+        "x": 120.5,
+        "y": 858.0,
+        "original_name": "Spicy Mango Punch"
+    },
+    {
+        "name": "Guava Punch",
+        "category": "Swiss Roll",
+        "price": 70,
+        "column": 2,
+        "x": 96.0,
+        "y": 882.5,
+        "original_name": "Guava Punch"
+    },
+    {
+        "name": "Split Guava Punch",
+        "category": "Swiss Roll",
+        "price": 70,
+        "column": 2,
+        "x": 118.0,
+        "y": 904.0,
+        "original_name": "Split Guava Punch"
+    },
+    {
+        "name": "Half",
+        "category": "Pies / Tarts",
+        "price": 40,
+        "column": 4,
+        "x": 810.0,
+        "y": 236.5,
+        "original_name": "Half"
+    },
+    {
+        "name": "iFull",
+        "category": "Pies / Tarts",
+        "price": 60,
+        "column": 4,
+        "x": 807.5,
+        "y": 258.5,
+        "original_name": "iFull"
+    },
+    {
+        "name": "Rasmalai Plate",
+        "category": "Perfect Pizzas",
+        "price": 50,
+        "column": 7,
+        "x": 725.0,
+        "y": 906.5,
+        "original_name": "Rasmalai Plate"
+    },
+    {
+        "name": "Rasmalai Glass [(Angoori)!",
+        "category": "Perfect Pizzas",
+        "price": 40,
+        "column": 7,
+        "x": 759.5,
+        "y": 932.0,
+        "original_name": "Rasmalai Glass [(Angoori)!"
+    },
+    {
+        "name": "Vanilla Softy Ice Cream Cone",
+        "category": "Perfect Pizzas",
+        "price": 40,
+        "column": 7,
+        "x": 771.0,
+        "y": 953.0,
+        "original_name": "Vanilla Softy Ice Cream Cone"
+    },
+    {
+        "name": "350Kg",
+        "category": "Perfect Pizzas",
+        "price": 50,
+        "column": 7,
+        "x": 625.0,
+        "y": 975.5,
+        "original_name": "350Kg"
+    }
+]

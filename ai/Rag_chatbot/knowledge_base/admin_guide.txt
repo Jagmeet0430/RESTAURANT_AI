@@ -1,0 +1,23 @@
+Admin Guide:
+
+Login:
+The admin logs in using registered email and password.
+
+Dashboard:
+The dashboard shows total sales, total orders, customers, revenue, and popular food items.
+
+Menu Management:
+Admin can add new food items.
+Admin can edit food item details.
+Admin can delete food items.
+Admin can upload menu item images.
+Admin can filter menu items by category, availability, veg type, and featured status.
+
+Orders:
+Admin can view orders, update order status, and track order history.
+
+Reports:
+Admin can view sales reports and compare actual sales with predicted sales.
+
+AI Dashboard:
+Admin can view AI-based predictions, chatbot insights, and OCR menu digitization results.

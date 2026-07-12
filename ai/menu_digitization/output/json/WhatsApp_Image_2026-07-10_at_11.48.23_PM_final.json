@@ -1,0 +1,236 @@
+[
+    {
+        "name": "Plain Dosa",
+        "category": "Puffs Patties & Rolls",
+        "price": 80,
+        "column": 0,
+        "x": 76.5,
+        "y": 87.0,
+        "original_name": "Plain Dosa"
+    },
+    {
+        "name": "Masala Dosa",
+        "category": "Puffs Patties & Rolls",
+        "price": 100,
+        "column": 0,
+        "x": 84.5,
+        "y": 116.5,
+        "original_name": "Masala Dosa"
+    },
+    {
+        "name": "Paneer Roll",
+        "category": "Puffs Patties & Rolls",
+        "price": 120,
+        "column": 0,
+        "x": 83.0,
+        "y": 147.0,
+        "original_name": "Paneer Dosa"
+    },
+    {
+        "name": "Onion Dosa",
+        "category": "Puffs Patties & Rolls",
+        "price": 120,
+        "column": 0,
+        "x": 81.0,
+        "y": 180.0,
+        "original_name": "Onion Dosa"
+    },
+    {
+        "name": "Uttapam",
+        "category": "Puffs Patties & Rolls",
+        "price": 150,
+        "column": 0,
+        "x": 69.5,
+        "y": 210.0,
+        "original_name": "Uttapam"
+    },
+    {
+        "name": "Sambhar Vada",
+        "category": "Puffs Patties & Rolls",
+        "price": 70,
+        "column": 0,
+        "x": 91.0,
+        "y": 239.0,
+        "original_name": "Sambhar Vada"
+    },
+    {
+        "name": "Dhokla Plain Plate",
+        "category": "Puffs Patties & Rolls",
+        "price": 20,
+        "column": 0,
+        "x": 97.5,
+        "y": 345.5,
+        "original_name": "Dhokla Plain Plate"
+    },
+    {
+        "name": "Dry Fruit Dhokla Plate",
+        "category": "Pastries",
+        "price": 30,
+        "column": 1,
+        "x": 111.0,
+        "y": 372.0,
+        "original_name": "Dry Fruit Dhokla Plate"
+    },
+    {
+        "name": "Sandwich Dhokla",
+        "category": "Pastries",
+        "price": 30,
+        "column": 1,
+        "x": 94.0,
+        "y": 398.0,
+        "original_name": "Sandwich Dhokla"
+    },
+    {
+        "name": "KhandviPlate",
+        "category": "Pastries",
+        "price": 50,
+        "column": 1,
+        "x": 83.5,
+        "y": 424.0,
+        "original_name": "KhandviPlate"
+    },
+    {
+        "name": "Chhole Kulcha Plate",
+        "category": "Pastries",
+        "price": 50,
+        "column": 1,
+        "x": 104.0,
+        "y": 450.0,
+        "original_name": "Chhole Kulcha Plate"
+    },
+    {
+        "name": "Stuffed Paneer Kulcha Plate (250. gm)",
+        "category": "Pastries",
+        "price": 120,
+        "column": 1,
+        "x": 162.0,
+        "y": 475.0,
+        "original_name": "Stuffed Paneer Kulcha Plate (250. gm)"
+    },
+    {
+        "name": "Stuffed Bread Pakoda (Per Piece",
+        "category": "Pastries",
+        "price": 20,
+        "column": 1,
+        "x": 146.0,
+        "y": 501.0,
+        "original_name": "Stuffed Bread Pakoda (Per Piece"
+    },
+    {
+        "name": "!Half",
+        "category": "Pastries",
+        "price": 60,
+        "column": 1,
+        "x": 291.0,
+        "y": 532.5,
+        "original_name": "!Half"
+    },
+    {
+        "name": "Chhole Bhature Plate",
+        "category": "Pastries",
+        "price": 40,
+        "column": 1,
+        "x": 106.5,
+        "y": 551.0,
+        "original_name": "Chhole Bhature Plate"
+    },
+    {
+        "name": "Samosa with Chutney",
+        "category": "Pastries",
+        "price": 15,
+        "column": 1,
+        "x": 107.0,
+        "y": 578.0,
+        "original_name": "Samosa with Chutney"
+    },
+    {
+        "name": "$amosa with Channa",
+        "category": "Pastries",
+        "price": 30,
+        "column": 1,
+        "x": 105.0,
+        "y": 605.5,
+        "original_name": "$amosa with Channa"
+    },
+    {
+        "name": "Tikki with Chutney",
+        "category": "Pastries",
+        "price": 30,
+        "column": 1,
+        "x": 98.0,
+        "y": 630.5,
+        "original_name": "Tikki with Chutney"
+    },
+    {
+        "name": "Tikki with Channa",
+        "category": "Pastries",
+        "price": 60,
+        "column": 1,
+        "x": 96.0,
+        "y": 655.5,
+        "original_name": "Tikki with Channa"
+    },
+    {
+        "name": "Bedmi Puri.",
+        "category": "Pastries",
+        "price": 60,
+        "column": 1,
+        "x": 70.5,
+        "y": 699.0,
+        "original_name": "Bedmi Puri."
+    },
+    {
+        "name": "Extra Purii",
+        "category": "Pastries",
+        "price": 20,
+        "column": 1,
+        "x": 68.5,
+        "y": 728.0,
+        "original_name": "Extra Purii"
+    },
+    {
+        "name": "Pav Bhaji.",
+        "category": "Pastries",
+        "price": 60,
+        "column": 1,
+        "x": 65.5,
+        "y": 755.5,
+        "original_name": "Pav Bhaji."
+    },
+    {
+        "name": "Extra Pav",
+        "category": "Pastries",
+        "price": 15,
+        "column": 1,
+        "x": 66.5,
+        "y": 779.5,
+        "original_name": "Extra Pav"
+    },
+    {
+        "name": "Channa Plate (Extra)",
+        "category": "Pastries",
+        "price": 30,
+        "column": 1,
+        "x": 103.0,
+        "y": 806.0,
+        "original_name": "Channa Plate (Extra)"
+    },
+    {
+        "name": "Pav Plate Extra",
+        "category": "Swiss Roll",
+        "price": 30,
+        "column": 2,
+        "x": 91.5,
+        "y": 833.0,
+        "original_name": "Pav Plate Extra"
+    },
+    {
+        "name": "Sambar.Plate (Extra)",
+        "category": "Swiss Roll",
+        "price": 30,
+        "column": 2,
+        "x": 104.0,
+        "y": 859.0,
+        "original_name": "Sambar.Plate (Extra)"
+    }
+]

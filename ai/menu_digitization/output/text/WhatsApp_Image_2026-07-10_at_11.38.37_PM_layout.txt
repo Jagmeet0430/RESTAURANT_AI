@@ -1,0 +1,170 @@
+South Indian | x=157.00 | y=49.00
+Indian Snacks | x=501.50 | y=49.50
+Hot Beverages | x=875.50 | y=50.50
+Plain Dosa | x=80.00 | y=97.00
+.80 | x=262.00 | y=96.50
+Dhokla Plain Plate | x=395.00 | y=89.00
+20 | x=676.00 | y=89.50
+Tea. | x=747.00 | y=94.00
+10 | x=1004.50 | y=93.50
+Paneer Dhokla Plate | x=403.50 | y=115.00
+40 | x=675.50 | y=115.00
+Masala Dosa | x=88.00 | y=133.00
+100 | x=257.50 | y=133.50
+Hot Milk | x=768.50 | y=125.00
+20 | x=1004.50 | y=125.00
+Sandwich Dhokla | x=391.50 | y=141.00
+30 | x=675.00 | y=142.00
+Hot Coffee | x=778.00 | y=157.00
+50 | x=1004.50 | y=156.00
+Paneer Dosa. | x=89.50 | y=172.00
+120 | x=256.00 | y=170.50
+Masala Dhokla | x=381.00 | y=169.00
+30 | x=674.00 | y=168.50
+Chhole Kulcha Plate | x=403.00 | y=196.00
+50 | x=674.50 | y=194.00
+Green Tea | x=776.50 | y=189.00
+40 | x=1005.50 | y=188.00
+Onion Dosa | x=85.00 | y=209.00
+120 | x=257.50 | y=209.50
+Stuffed Paneer Pakoda (250 gm) | x=451.50 | y=222.00
+120 | x=670.50 | y=222.50
+Uttapam | x=71.50 | y=249.50
+150 | x=257.50 | y=248.00
+Stuffed Bread Pakoda (Per Piece) | x=453.50 | y=247.00
+20 | x=674.00 | y=248.50
+Chilled Beverages | x=867.50 | y=253.00
+Chhole Bhature.Plate | x=404.50 | y=278.00
+Half 40 | x=568.50 | y=277.50
+Full 60 | x=657.00 | y=278.00
+Samber Vadda | x=97.00 | y=287.00
+70 | x=261.50 | y=287.00
+Samosa with Chutney | x=405.00 | y=307.50
+Full 30 | x=657.00 | y=307.50
+Carrot (Gajar) Juice | x=811.50 | y=301.00
+50 | x=1004.50 | y=300.50
+Half 15 | x=568.50 | y=308.50
+Samosa with Channa | x=402.50 | y=338.50
+Full 50 | x=656.00 | y=339.00
+Pineapple Juice | x=797.00 | y=334.50
+50 | x=1004.50 | y=332.00
+Half 30 | x=568.50 | y=339.50
+Tikki with Chutney | x=391.50 | y=368.00
+Half 30 | x=568.50 | y=369.00
+Full 50 | x=657.00 | y=369.00
+Orange Juice. | x=785.50 | y=368.00
+50 | x=1004.00 | y=366.50
+Tikki with Channa | x=391.00 | y=399.00
+Half 60 | x=569.00 | y=398.50
+Full 90 | x=656.00 | y=398.50
+Mixed Fruit Juice | x=802.50 | y=401.00
+50 | x=1004.50 | y=400.00
+Bedmi Puri | x=366.00 | y=428.00
+60 | x=675.00 | y=429.00
+Mosambi Juice | x=792.00 | y=434.00
+80 | x=1004.50 | y=434.00
+Extra Puri | x=362.00 | y=456.00
+20 | x=675.00 | y=454.00
+Sweet Lassi | x=780.50 | y=467.50
+40 | x=1004.00 | y=467.00
+Pav Bhaji | x=357.00 | y=483.00
+60 | x=675.50 | y=483.00
+Masala Lassi | x=785.00 | y=501.00
+30 | x=1004.50 | y=499.50
+Extra Pav | x=358.50 | y=510.00
+15 | x=675.00 | y=510.00
+Channa Plate (Extra) | x=404.50 | y=537.50
+30 | x=675.00 | y=536.50
+Cold Drink | x=775.50 | y=533.00
+M.R.P. | x=985.00 | y=533.50
+Sambar Plate (Extra) | x=404.50 | y=565.00
+30 | x=675.00 | y=563.00
+Milk Shakes | x=289.50 | y=633.00
+Mocktails | x=797.00 | y=627.00
+Mint Mojito | x=643.50 | y=663.00
+70 | x=1004.00 | y=662.50
+Plain | x=395.00 | y=671.50
+Ice Cream | x=498.50 | y=672.00
+Blue Curacao | x=651.00 | y=686.50
+70. | x=1003.00 | y=687.00
+Milk Badam | x=82.50 | y=700.00
+60 | x=395.00 | y=701.00
+90 | x=500.00 | y=700.00
+Fruit Ice Tea. | x=648.00 | y=710.00
+70 | x=1003.00 | y=711.00
+Strawberry Milk Shake | x=127.00 | y=733.00
+70 | x=395.00 | y=732.50
+90. | x=500.00 | y=732.00
+Spicy Mango Punch | x=678.00 | y=733.00
+70 | x=1003.50 | y=733.00
+Burberry Milk Shake. | x=120.00 | y=765.00
+70 | x=395.00 | y=763.50
+90 | x=500.00 | y=763.50
+Spicy Guava Punch | x=676.50 | y=758.00
+70 | x=1004.00 | y=757.00
+Bubblegum Milk Shake | x=130.00 | y=798.00
+70 | x=395.00 | y=797.50
+90 | x=500.00 | y=797.50
+Delectable Deserts | x=789.00 | y=806.00
+Butterscotch Milk Shake | x=136.00 | y=832.50
+70 | x=395.00 | y=831.00
+90 | x=500.00 | y=831.50
+Moong-dai. Halwa (Per Plate) | x=706.50 | y=839.00
+60 | x=1004.00 | y=839.50
+Chocolate Milk Shake | x=123.00 | y=866.00
+70 | x=395.00 | y=867.00
+90 | x=500.00 | y=867.00
+Chenna'Sandwich Rol! | x=684.50 | y=862.00
+30 | x=1003.50 | y=862.00
+Chenna Malaj Ro!! | x=668.00 | y=884.00
+35 | x=1003.50 | y=882.00
+Chocolate Oreo Milk Shake | x=147.00 | y=901.00
+70 | x=395.00 | y=900.00
+90 | x=500.00 | y=901.00
+Jalebi | x=618.00 | y=904.50
+350/kg. | x=982.00 | y=905.50
+Banana Milk Shake | x=114.00 | y=935.00
+70 | x=395.00 | y=935.00
+90 | x=500.00 | y=933.00
+Iinarti | x=618.50 | y=927.00
+40 | x=1004.00 | y=926.50
+Hot Gulab Jamun.Plate | x=684.50 | y=946.00
+50. | x=1004.00 | y=948.00
+Mango Milk Shake | x=110.50 | y=968.00
+70 | x=395.00 | y=968.50
+90. | x=500.00 | y=968.50
+Sponge Rasgulla (2 Piece) | x=700.00 | y=971.00
+50. | x=1004.00 | y=970.00
+Cold Coffee Frappe | x=112.00 | y=1001.00
+70 | x=395.00 | y=1001.00
+90 | x=500.00 | y=1001.00
+Hot Gajrela (100 gm) | x=679.00 | y=991.50
+80 | x=1004.00 | y=992.00
+Rasmalai Glass (Angoori) | x=697.00 | y=1014.00
+40. | x=1003.50 | y=1013.50
+Frappe Mocha | x=92.50 | y=1035.00
+70 | x=395.00 | y=1035.00
+90 | x=500.00 | y=1034.00
+Vanilla Softy Ice Cream Cone | x=711.50 | y=1035.00
+40. | x=1003.50 | y=1035.00
+Strawberry Soft Ice Cream Cone: | x=724.00 | y=1057.00
+40 | x=1003.50 | y=1056.00
+Frappe Caramel | x=98.50 | y=1069.50
+70 | x=395.00 | y=1068.00
+90. | x=501.00 | y=1069.00
+Mix Softy Cup | x=651.00 | y=1077.50
+50 | x=1004.00 | y=1077.00
+Vanilla Softy Cup | x=664.50 | y=1099.00
+50 | x=1004.00 | y=1099.00
+Strawberry Softy Cup | x=680.00 | y=1119.00
+50. | x=1003.00 | y=1119.00
+Since : 1993 | x=111.50 | y=1178.00
+MAHESH | x=404.50 | y=1226.50
+0 | x=108.00 | y=1240.00
+100% | x=110.50 | y=1298.00
+VEG.FOOD | x=108.00 | y=1326.00
+Sweets & Bakers | x=407.50 | y=1324.50
+JAJA CHOWK,OPP.STATE BANK OF INDIA | x=404.00 | y=1365.00
+TANDA, PUNJAB-144024, INDIA | x=408.50 | y=1393.00
+Follow & Like us on | x=297.50 | y=1444.50
+Mahesh.Sweets.Tanda | x=720.50 | y=1444.50

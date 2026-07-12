@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 360" role="img" aria-labelledby="title desc">
+  <title id="title">MAHESH logo</title>
+  <desc id="desc">Yellow bakery-style logo with a red MAHESH name plate and small red flags below.</desc>
+  <defs>
+    <pattern id="checks" width="72" height="72" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <path d="M0 18H72M0 54H72" stroke="#e7a626" stroke-width="5" opacity=".55"/>
+      <path d="M0 36H72" stroke="#f7d35d" stroke-width="10" opacity=".5"/>
+    </pattern>
+    <filter id="softShadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="8" stdDeviation="8" flood-color="#8a1d12" flood-opacity=".18"/>
+    </filter>
+  </defs>
+
+  <rect x="22" y="16" width="856" height="262" rx="38" fill="#ffd85d"/>
+  <rect x="22" y="16" width="856" height="262" rx="38" fill="url(#checks)" opacity=".75"/>
+
+  <g filter="url(#softShadow)">
+    <rect x="58" y="76" width="784" height="140" rx="28" fill="#ed1c24"/>
+    <rect x="76" y="93" width="748" height="106" rx="20" fill="none" stroke="#ffd75c" stroke-width="5" stroke-dasharray="11 9" opacity=".9"/>
+    <rect x="88" y="105" width="724" height="82" rx="16" fill="none" stroke="#cf1119" stroke-width="8" opacity=".45"/>
+  </g>
+
+  <text x="450" y="181" text-anchor="middle"
+        font-family="Arial Rounded MT Bold, Arial, Helvetica, sans-serif"
+        font-size="116" font-weight="900" letter-spacing="7" fill="#ffffff">MAHESH</text>
+
+  <g transform="translate(58 244)">
+    <rect x="0" y="0" width="784" height="36" fill="#ffd85d"/>
+    <g fill="#fff" stroke="#f6bf36" stroke-width="5">
+      <path d="M0 0h44v92L22 72 0 92z"/>
+      <path d="M72 0h44v92L94 72 72 92z"/>
+      <path d="M144 0h44v92l-22-20-22 20z"/>
+      <path d="M216 0h44v92l-22-20-22 20z"/>
+      <path d="M288 0h44v92l-22-20-22 20z"/>
+      <path d="M360 0h44v92l-22-20-22 20z"/>
+      <path d="M432 0h44v92l-22-20-22 20z"/>
+      <path d="M504 0h44v92l-22-20-22 20z"/>
+      <path d="M576 0h44v92l-22-20-22 20z"/>
+      <path d="M648 0h44v92l-22-20-22 20z"/>
+      <path d="M720 0h44v92l-22-20-22 20z"/>
+    </g>
+    <g fill="#ed1c24">
+      <path d="M11 16h22v34L22 40 11 50z"/>
+      <path d="M83 16h22v34L94 40 83 50z"/>
+      <path d="M155 16h22v34l-11-10-11 10z"/>
+      <path d="M227 16h22v34l-11-10-11 10z"/>
+      <path d="M299 16h22v34l-11-10-11 10z"/>
+      <path d="M371 16h22v34l-11-10-11 10z"/>
+      <path d="M443 16h22v34l-11-10-11 10z"/>
+      <path d="M515 16h22v34l-11-10-11 10z"/>
+      <path d="M587 16h22v34l-11-10-11 10z"/>
+      <path d="M659 16h22v34l-11-10-11 10z"/>
+      <path d="M731 16h22v34l-11-10-11 10z"/>
+    </g>
+  </g>
+</svg>

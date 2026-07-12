@@ -1,0 +1,177 @@
+[
+    {
+        "name": "Potato Puff",
+        "category": "Burger & Sandwiches",
+        "price": 25
+    },
+    {
+        "name": "Paneom Puff Pastry",
+        "category": "Burger & Sandwiches",
+        "price": 60
+    },
+    {
+        "name": "StracoChips",
+        "category": "Chaat",
+        "price": 50
+    },
+    {
+        "name": "Aasrtn Cort Pattie",
+        "category": "Chaat",
+        "price": 60
+    },
+    {
+        "name": "PanconnRoll",
+        "category": "Chaat",
+        "price": 80
+    },
+    {
+        "name": "ChiceedBain Patss Sandwich",
+        "category": "Pies / Tarts",
+        "price": 80
+    },
+    {
+        "name": "Chieese Patrier Rdl",
+        "category": "Pies / Tarts",
+        "price": 60
+    },
+    {
+        "name": "Cheess Coneer Roll",
+        "category": "Burger & Sandwiches",
+        "price": 90
+    },
+    {
+        "name": "BladkForestpie",
+        "category": "Burger & Sandwiches",
+        "price": 120
+    },
+    {
+        "name": "CheesyFredch Fries(Plate))",
+        "category": "Pastries",
+        "price": 60
+    },
+    {
+        "name": "Belgian Chocolate Ple",
+        "category": "Pastries",
+        "price": 90
+    },
+    {
+        "name": "Cheesy French Fiates",
+        "category": "Pastries",
+        "price": 130
+    },
+    {
+        "name": "RegularPastry",
+        "category": "Pastries",
+        "price": 20
+    },
+    {
+        "name": "Piuttearide Pastry",
+        "category": "Chaat",
+        "price": 60
+    },
+    {
+        "name": "Butberr Scorch Pastry)",
+        "category": "Chaat",
+        "price": 60
+    },
+    {
+        "name": "Vanilla Muffins",
+        "category": "Chaat",
+        "price": 40
+    },
+    {
+        "name": "FrentFeiailf Pastry",
+        "category": "Chaat",
+        "price": 60
+    },
+    {
+        "name": "Chocolate Muffins",
+        "category": "Chaat",
+        "price": 50
+    },
+    {
+        "name": "Chocolate Muffins",
+        "category": "Chaat",
+        "price": 50
+    },
+    {
+        "name": "Orro Muffins",
+        "category": "Chaat",
+        "price": 60
+    },
+    {
+        "name": "Tgll Acoket Chaat",
+        "category": "Chaat",
+        "price": 120
+    },
+    {
+        "name": "Senu Purt",
+        "category": "Chaat",
+        "price": 60
+    },
+    {
+        "name": "BucolfPastry",
+        "category": "Chaat",
+        "price": 80
+    },
+    {
+        "name": "PaptPurt",
+        "category": "Chaat",
+        "price": 60
+    },
+    {
+        "name": "Cheese Cake Pastry",
+        "category": "Chaat",
+        "price": 100
+    },
+    {
+        "name": "Dahi Golgappe (Per 6 Pcs)",
+        "category": "Chaat",
+        "price": 60
+    },
+    {
+        "name": "Red Velvet Pastry",
+        "category": "Puddings",
+        "price": 110
+    },
+    {
+        "name": "Jhahl/ Duji Galgappe (Per 6 Pes)",
+        "category": "Puddings",
+        "price": 30
+    },
+    {
+        "name": "Veg Cheess Pizza",
+        "category": "Swiss Roll",
+        "price": 250
+    },
+    {
+        "name": "Hakka Noodles",
+        "category": "Swiss Roll",
+        "price": 60
+    },
+    {
+        "name": "Cheess Chill",
+        "category": "Perfect Pizzas",
+        "price": 150
+    },
+    {
+        "name": "Manchurrian (Pate)",
+        "category": "Perfect Pizzas",
+        "price": 180
+    },
+    {
+        "name": "Onion and Capsdian Pizza",
+        "category": "Perfect Pizzas",
+        "price": 220
+    },
+    {
+        "name": "Fried Momss (Plate)",
+        "category": "Perfect Pizzas",
+        "price": 100
+    },
+    {
+        "name": "Veggie Supreme Pizza",
+        "category": "Perfect Pizzas",
+        "price": 250
+    }
+]

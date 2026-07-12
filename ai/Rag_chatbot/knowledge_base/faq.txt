@@ -1,0 +1,16 @@
+Frequently Asked Questions:
+
+Q: What is RestaurantAI?
+A: RestaurantAI is a restaurant management platform with AI features.
+
+Q: What AI features are included?
+A: Sales prediction, OCR menu digitization, chatbot, and voice recommendation.
+
+Q: Can the admin manage menu items?
+A: Yes, the admin can add, edit, delete, search, filter, and update menu items.
+
+Q: Can the system predict sales?
+A: Yes, the sales prediction module predicts future sales using historical data.
+
+Q: Can this project be used by a real restaurant?
+A: Yes, after proper testing, deployment, security setup, and database verification.

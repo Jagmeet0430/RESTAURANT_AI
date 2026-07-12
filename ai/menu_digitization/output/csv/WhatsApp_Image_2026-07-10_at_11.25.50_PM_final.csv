@@ -1,0 +1,31 @@
+name,category,price,column,x,y,original_name
+Plain Dosa,Puffs Patties & Rolls,80,0,96.0,87.0,Plain Dosa
+Masala Dosa,Puffs Patties & Rolls,100,0,105.5,115.5,Masala Dosa
+Paneer Dosa.,Puffs Patties & Rolls,120,0,105.5,144.0,Paneer Dosa.
+Onion Dosa,Puffs Patties & Rolls,120,0,99.5,173.5,Onion Dosa
+Uttapam,Puffs Patties & Rolls,150,0,85.0,204.5,Uttapam
+Sambhar Vada,Puffs Patties & Rolls,70,0,116.5,232.0,Sambhar Vada
+Tea,Puffs Patties & Rolls,10,0,56.5,331.0,Tea
+Tea Milk,Pastries,20,1,80.5,357.0,Tea Milk
+Hot Coffee,Pastries,50,1,94.5,385.0,Hot Coffee
+Green Tea.,Pastries,40,1,90.5,413.0,Green Tea.
+Carrot (Gajar) Juice.,Pastries,50,1,124.0,521.0,Carrot (Gajar) Juice.
+Pineapple Juice.,Pastries,50,1,106.5,544.5,Pineapple Juice.
+Orange Juice,Pastries,50,1,95.5,567.5,Orange Juice
+Mixed Fruit Juice.,Pastries,50,1,112.5,591.0,Mixed Fruit Juice.
+Mosambi Juice,Pastries,50,1,103.0,614.0,Mosambi Juice
+Sweet Lime,Pastries,80,1,89.0,637.0,Sweet Lime
+Masala Lassi,Pastries,40,1,94.5,662.0,Masala Lassi
+Cold Drink,Pastries,30,1,86.0,685.0,Cold Drink
+Mocktails,Pastries,70,1,161.5,758.0,Mocktails
+Mint Mojito,Pastries,70,1,92.0,787.5,Mint Mojito
+Blue Ice Tea,Swiss Roll,70,2,93.0,836.0,Blue Ice Tea
+Spicy Mango Punch,Swiss Roll,70,2,120.5,858.0,Spicy Mango Punch
+Guava Punch,Swiss Roll,70,2,96.0,882.5,Guava Punch
+Split Guava Punch,Swiss Roll,70,2,118.0,904.0,Split Guava Punch
+Half,Pies / Tarts,40,4,810.0,236.5,Half
+iFull,Pies / Tarts,60,4,807.5,258.5,iFull
+Rasmalai Plate,Perfect Pizzas,50,7,725.0,906.5,Rasmalai Plate
+Rasmalai Glass [(Angoori)!,Perfect Pizzas,40,7,759.5,932.0,Rasmalai Glass [(Angoori)!
+Vanilla Softy Ice Cream Cone,Perfect Pizzas,40,7,771.0,953.0,Vanilla Softy Ice Cream Cone
+350Kg,Perfect Pizzas,50,7,625.0,975.5,350Kg

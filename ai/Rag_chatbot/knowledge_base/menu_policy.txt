@@ -1,0 +1,9 @@
+Menu Policy:
+
+1. Menu items must have a name, category, price, and availability status.
+2. A menu item can be marked as veg or non-veg.
+3. A menu item can be marked as spicy or non-spicy.
+4. Admin can add, edit, delete, search, filter, and paginate menu items.
+5. If an item is unavailable, customers should not be able to order it.
+6. Featured items can be shown on the dashboard or homepage.
+7. Image upload is optional but recommended for real restaurant use.

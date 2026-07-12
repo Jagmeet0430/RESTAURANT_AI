@@ -1,0 +1,7 @@
+speechrecognition
+pyttsx3
+pyaudio
+flask
+requests
+scikit-learn
+python-dotenv

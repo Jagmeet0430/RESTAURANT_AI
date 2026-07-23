@@ -1,3 +1,4 @@
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Box, Button, Chip, Paper, Stack, Typography } from "@mui/material";
 import { useNavigate } from "react-router-dom";
 import AnalyticsIcon from "@mui/icons-material/Analytics";
@@ -14,37 +15,9 @@ import StorefrontIcon from "@mui/icons-material/Storefront";
 import TrendingUpIcon from "@mui/icons-material/TrendingUp";
 import { PageHeader, SectionCard, StatCard, StatGrid } from "../../components/common/PageKit";
 import ChatbotWidget from "../../components/ChatbotWidget";
-
-const quickMetrics = [
-  {
-    label: "Menu items",
-    value: "66",
-    helper: "Ready in catalog",
-    icon: <RestaurantMenuIcon />,
-    accent: "#1976d2",
-  },
-  {
-    label: "Categories",
-    value: "11",
-    helper: "Customer-friendly sections",
-    icon: <CategoryIcon />,
-    accent: "#059669",
-  },
-  {
-    label: "Live orders",
-    value: "Board",
-    helper: "Track kitchen workflow",
-    icon: <ReceiptLongIcon />,
-    accent: "#7c3aed",
-  },
-  {
-    label: "Stock control",
-    value: "Active",
-    helper: "Suppliers and low stock",
-    icon: <Inventory2Icon />,
-    accent: "#dc6b19",
-  },
-];
+import { categoriesService, menuService } from "../../services/menu";
+import { ordersService } from "../../services/order";
+import { subscribeToMenuUpdates } from "../../utils/menuEvents";
 
 const journeys = [
   {
@@ -170,6 +143,91 @@ function JourneyCard({ journey }) {
 
 function Dashboard() {
   const navigate = useNavigate();
+  const [metrics, setMetrics] = useState({
+    menuItems: null,
+    categories: null,
+    liveOrders: null,
+    pendingOrders: null,
+  });
+
+  const loadDashboardMetrics = useCallback(async () => {
+    const [menuResponse, categoriesResponse, ordersResponse] = await Promise.allSettled([
+      menuService.getAllItems(),
+      categoriesService.getAllCategories(),
+      ordersService.getAllOrders(),
+    ]);
+
+    const menuItems =
+      menuResponse.status === "fulfilled" && menuResponse.value?.success
+        ? menuResponse.value.data || []
+        : [];
+    const categories =
+      categoriesResponse.status === "fulfilled" && categoriesResponse.value?.success
+        ? categoriesResponse.value.data || []
+        : [];
+    const orders =
+      ordersResponse.status === "fulfilled" && ordersResponse.value?.success
+        ? ordersResponse.value.data || []
+        : [];
+
+    const liveOrders = orders.filter((order) => !["Completed", "Cancelled"].includes(order.status));
+    const pendingOrders = orders.filter((order) => order.status === "Pending");
+
+    setMetrics({
+      menuItems: menuItems.length,
+      categories: categories.length,
+      liveOrders: liveOrders.length,
+      pendingOrders: pendingOrders.length,
+    });
+  }, []);
+
+  useEffect(() => {
+    loadDashboardMetrics();
+    const intervalId = window.setInterval(loadDashboardMetrics, 60000);
+    const unsubscribeMenuUpdates = subscribeToMenuUpdates(loadDashboardMetrics);
+
+    return () => {
+      window.clearInterval(intervalId);
+      unsubscribeMenuUpdates();
+    };
+  }, [loadDashboardMetrics]);
+
+  const quickMetrics = useMemo(
+    () => [
+      {
+        label: "Menu items",
+        value: metrics.menuItems ?? "-",
+        helper: "Ready in catalog",
+        icon: <RestaurantMenuIcon />,
+        accent: "#1976d2",
+      },
+      {
+        label: "Categories",
+        value: metrics.categories ?? "-",
+        helper: "Customer-friendly sections",
+        icon: <CategoryIcon />,
+        accent: "#059669",
+      },
+      {
+        label: "Live orders",
+        value: metrics.liveOrders ?? "-",
+        helper:
+          metrics.pendingOrders != null
+            ? `${metrics.pendingOrders} waiting acceptance`
+            : "Track kitchen workflow",
+        icon: <ReceiptLongIcon />,
+        accent: "#7c3aed",
+      },
+      {
+        label: "Stock control",
+        value: "Active",
+        helper: "Suppliers and low stock",
+        icon: <Inventory2Icon />,
+        accent: "#dc6b19",
+      },
+    ],
+    [metrics]
+  );
 
   return (
     <Box sx={{ p: 3 }}>

@@ -12,6 +12,7 @@ import DocumentScannerIcon from "@mui/icons-material/DocumentScanner";
 import Inventory2Icon from "@mui/icons-material/Inventory2";
 import AnalyticsIcon from "@mui/icons-material/Analytics";
 import SoupKitchenIcon from "@mui/icons-material/SoupKitchen";
+import PointOfSaleIcon from "@mui/icons-material/PointOfSale";
 
 const navGroups = [
   {
@@ -37,6 +38,7 @@ const navGroups = [
     label: "Operations",
     items: [
       { label: "OCR Upload", helper: "Digitize menus", to: "/ocr-upload", icon: DocumentScannerIcon },
+      { label: "Barcode Scanner", helper: "Stock & sales", to: "/barcode-pos", icon: PointOfSaleIcon },
       { label: "Inventory", helper: "Stock & suppliers", to: "/inventory", icon: Inventory2Icon },
       { label: "Kitchen", helper: "Prep screen", to: "/kitchen", icon: SoupKitchenIcon },
       { label: "Settings", helper: "Restaurant setup", to: "/settings", icon: SettingsIcon },
@@ -49,13 +51,17 @@ function Sidebar() {
     <aside
       style={{
         width: "270px",
+        flex: "0 0 270px",
+        position: "sticky",
+        top: 0,
         background: "#0F172A",
         color: "#F8FAFC",
-        minHeight: "100vh",
+        height: "100vh",
         padding: "22px 16px",
         display: "flex",
         flexDirection: "column",
         overflowY: "auto",
+        overscrollBehavior: "contain",
       }}
     >
       <div style={{ marginBottom: "1.4rem", padding: "0 8px" }}>

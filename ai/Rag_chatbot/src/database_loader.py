@@ -11,8 +11,10 @@ from langchain_core.documents import Document
 # parents[1] points to rag_chatbot/
 BASE_DIR = Path(__file__).resolve().parents[1]
 ENV_PATH = BASE_DIR / ".env"
+BACKEND_ENV_PATH = BASE_DIR.parents[1] / "backend" / ".env"
 
-load_dotenv(dotenv_path=ENV_PATH, override=True)
+load_dotenv(dotenv_path=BACKEND_ENV_PATH, override=True)
+load_dotenv(dotenv_path=ENV_PATH, override=False)
 
 
 def get_database_connection():
@@ -39,7 +41,7 @@ def get_database_connection():
             + f". Check: {ENV_PATH}"
         )
 
-    print(f"Loading database configuration from: {ENV_PATH}")
+    print(f"Loading database configuration from: {BACKEND_ENV_PATH}")
     print(
         "Connecting to PostgreSQL:",
         f"{os.getenv('DB_USER')}@"
@@ -68,6 +70,18 @@ def load_menu_documents() -> List[Document]:
     try:
         cursor = connection.cursor()
 
+        cursor.execute(
+            """
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_name = 'menu';
+            """
+        )
+        columns = {row[0] for row in cursor.fetchall()}
+
+        def optional_column(name: str, fallback: str):
+            return f"m.{name}" if name in columns else f"{fallback} AS {name}"
+
         query = """
             SELECT
                 m.id,
@@ -78,11 +92,11 @@ def load_menu_documents() -> List[Document]:
                 m.is_available,
                 m.is_featured,
                 m.is_spicy,
-                m.is_eggless,
-                m.ingredients,
-                m.allergens,
-                m.is_today_special,
-                m.special_date,
+                {is_eggless},
+                {ingredients},
+                {allergens},
+                {is_today_special},
+                {special_date},
                 m.preparation_time,
                 m.calories,
                 m.image_url,
@@ -91,7 +105,13 @@ def load_menu_documents() -> List[Document]:
             LEFT JOIN categories c
                 ON c.id = m.category_id
             ORDER BY c.name, m.name;
-        """
+        """.format(
+            is_eggless=optional_column("is_eggless", "false"),
+            ingredients=optional_column("ingredients", "NULL"),
+            allergens=optional_column("allergens", "NULL"),
+            is_today_special=optional_column("is_today_special", "false"),
+            special_date=optional_column("special_date", "NULL"),
+        )
 
         cursor.execute(query)
         rows = cursor.fetchall()

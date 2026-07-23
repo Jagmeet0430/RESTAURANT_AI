@@ -5,9 +5,24 @@ import MainContent from "../components/layout/MainContent";
 
 function AdminLayout() {
   return (
-    <div style={{ display: "flex", minHeight: "100vh", background: "var(--admin-shell-bg)" }}>
+    <div
+      style={{
+        display: "flex",
+        height: "100vh",
+        overflow: "hidden",
+        background: "var(--admin-shell-bg)",
+      }}
+    >
       <Sidebar />
-      <div style={{ display: "flex", flexDirection: "column", flex: 1, minWidth: 0 }}>
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          flex: 1,
+          minWidth: 0,
+          minHeight: 0,
+        }}
+      >
         <Header />
         <MainContent>
           <Outlet />

@@ -18,6 +18,8 @@ import Unauthorized from "../pages/Unauthorized";
 import Prediction from "../pages/AI/Prediction";
 import Inventory from "../pages/Inventory/Inventory";
 import OCRUpload from "../pages/OCRUpload";
+import BarcodePOS from "../pages/BarcodePOS/BarcodePOS";
+import ProductRegistration from "../pages/ProductRegistration";
 
 // Layouts
 import Layout from "../layouts/AdminLayout";
@@ -64,6 +66,8 @@ function AppRoutes() {
             <Route path="/settings" element={<Settings />} />
             <Route path="/analytics" element={<Analytics />} />
             <Route path="/inventory" element={<Inventory />} />
+            <Route path="/barcode-pos" element={<BarcodePOS />} />
+            <Route path="/products/register" element={<ProductRegistration />} />
             <Route path="/ai" element={<Prediction />} />
             <Route path="/ocr-upload" element={<OCRUpload />} />
           </Route>

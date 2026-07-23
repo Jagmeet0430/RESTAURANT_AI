@@ -1,6 +1,7 @@
 // Categories Controller
 import { pool } from "../config/database.js";
 import { successResponse, errorResponse, asyncHandler } from "../utils/index.js";
+import { scheduleRagKnowledgeSync } from "../services/ragService.js";
 
 const getValidCreatedByUserId = async (userId) => {
   if (!userId) return null;
@@ -76,6 +77,7 @@ export const createCategory = asyncHandler(async (req, res) => {
     [name, description, image_url, display_order || 0, userId]
   );
 
+  scheduleRagKnowledgeSync("category_created");
   return successResponse(res, result.rows[0], "Category created successfully", 201);
 });
 
@@ -95,6 +97,7 @@ export const updateCategory = asyncHandler(async (req, res) => {
     [name, description, image_url, display_order, is_active, id]
   );
 
+  scheduleRagKnowledgeSync("category_updated");
   return successResponse(res, result.rows[0], "Category updated successfully");
 });
 
@@ -116,5 +119,6 @@ export const deleteCategory = asyncHandler(async (req, res) => {
 
   await pool.query("DELETE FROM categories WHERE id = $1", [id]);
 
+  scheduleRagKnowledgeSync("category_deleted");
   return successResponse(res, null, "Category deleted successfully");
 });

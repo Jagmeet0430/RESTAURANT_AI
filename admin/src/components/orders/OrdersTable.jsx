@@ -16,9 +16,10 @@ import {
   Typography,
 } from "@mui/material";
 import VisibilityIcon from "@mui/icons-material/Visibility";
+import PaidOutlinedIcon from "@mui/icons-material/PaidOutlined";
 import OrderStatusChip from "./OrderStatusChip";
 
-const statuses = ["Pending", "Accepted", "Preparing", "Ready", "Completed", "Cancelled"];
+const statuses = ["Confirmed", "Accepted", "Preparing", "Ready", "Out for Delivery", "Completed", "Cancelled"];
 
 function formatCurrency(value) {
   const amount = Number(value || 0);
@@ -39,9 +40,10 @@ function formatCreatedAt(value) {
 }
 
 function getPaymentColor(status) {
-  if (status === "Paid") return "success";
-  if (status === "Pending") return "warning";
-  if (status === "Refunded") return "info";
+  const normalized = String(status || "").toLowerCase();
+  if (normalized === "paid") return "success";
+  if (normalized === "pending") return "warning";
+  if (normalized === "refunded") return "info";
   return "error";
 }
 
@@ -50,7 +52,13 @@ function customerLabel(order) {
   return order.customer_name || "Walk-in customer";
 }
 
-function OrdersTable({ orders, onViewDetails, onStatusChange, loading }) {
+function isOfflinePending(order) {
+  const method = String(order.payment_method || "").toLowerCase();
+  const status = String(order.payment_status || "").toLowerCase();
+  return status === "pending" && (method.includes("cash") || method.includes("counter"));
+}
+
+function OrdersTable({ orders, onViewDetails, onStatusChange, onMarkPaid, loading }) {
   return (
     <TableContainer component={Paper} sx={{ boxShadow: "0 2px 8px rgba(0,0,0,0.08)" }}>
       <Table>
@@ -60,7 +68,9 @@ function OrdersTable({ orders, onViewDetails, onStatusChange, loading }) {
             <TableCell sx={{ fontWeight: "bold" }}>Customer</TableCell>
             <TableCell sx={{ fontWeight: "bold" }}>Items</TableCell>
             <TableCell sx={{ fontWeight: "bold" }}>Amount</TableCell>
-            <TableCell sx={{ fontWeight: "bold" }}>Payment</TableCell>
+            <TableCell sx={{ fontWeight: "bold" }}>Payment Method</TableCell>
+            <TableCell sx={{ fontWeight: "bold" }}>Payment Status</TableCell>
+            <TableCell sx={{ fontWeight: "bold" }}>Transaction ID</TableCell>
             <TableCell sx={{ fontWeight: "bold" }}>Status</TableCell>
             <TableCell sx={{ fontWeight: "bold" }}>Time</TableCell>
             <TableCell sx={{ fontWeight: "bold" }} align="center">
@@ -71,13 +81,13 @@ function OrdersTable({ orders, onViewDetails, onStatusChange, loading }) {
         <TableBody>
           {loading ? (
             <TableRow>
-              <TableCell colSpan={8} align="center" sx={{ py: 6 }}>
+              <TableCell colSpan={10} align="center" sx={{ py: 6 }}>
                 <CircularProgress />
               </TableCell>
             </TableRow>
           ) : orders.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={8} align="center" sx={{ py: 6 }}>
+              <TableCell colSpan={10} align="center" sx={{ py: 6 }}>
                 <Typography color="text.secondary">No orders found.</Typography>
               </TableCell>
             </TableRow>
@@ -116,6 +126,11 @@ function OrdersTable({ orders, onViewDetails, onStatusChange, loading }) {
                 </TableCell>
                 <TableCell sx={{ fontWeight: 900 }}>{formatCurrency(order.total_amount)}</TableCell>
                 <TableCell>
+                  <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                    {order.payment_method || "Cash"}
+                  </Typography>
+                </TableCell>
+                <TableCell>
                   <Chip
                     label={order.payment_status || "Pending"}
                     color={getPaymentColor(order.payment_status)}
@@ -124,10 +139,15 @@ function OrdersTable({ orders, onViewDetails, onStatusChange, loading }) {
                   />
                 </TableCell>
                 <TableCell>
+                  <Typography variant="caption" color="text.secondary" sx={{ wordBreak: "break-all" }}>
+                    {order.transaction_id || "-"}
+                  </Typography>
+                </TableCell>
+                <TableCell>
                   <Stack direction="row" spacing={1} alignItems="center">
                     <OrderStatusChip status={order.status} />
                     <Select
-                      value={order.status || "Pending"}
+                      value={order.status || "Confirmed"}
                       size="small"
                       onChange={(event) => onStatusChange(order.id, event.target.value)}
                       sx={{ minWidth: 122, ".MuiSelect-select": { py: 0.7, fontSize: 13 } }}
@@ -142,6 +162,16 @@ function OrdersTable({ orders, onViewDetails, onStatusChange, loading }) {
                 </TableCell>
                 <TableCell>{formatCreatedAt(order.created_at)}</TableCell>
                 <TableCell align="center">
+                  {isOfflinePending(order) && (
+                    <IconButton
+                      size="small"
+                      color="success"
+                      onClick={() => onMarkPaid?.(order.id)}
+                      title="Mark cash payment paid"
+                    >
+                      <PaidOutlinedIcon />
+                    </IconButton>
+                  )}
                   <IconButton size="small" color="primary" onClick={() => onViewDetails(order)} title="View details">
                     <VisibilityIcon />
                   </IconButton>

@@ -22,6 +22,7 @@ import MenuCatalog from "../../components/menu/MenuCatalog";
 import MenuTable from "../../components/menu/MenuTable";
 import AddFoodDialog from "../../components/menu/AddFoodDialog";
 import { menuService, categoriesService } from "../../services/menu";
+import { publishMenuUpdated, subscribeToMenuUpdates } from "../../utils/menuEvents";
 
 function Menu() {
   const [menuItems, setMenuItems] = useState([]);
@@ -44,6 +45,10 @@ function Menu() {
   // Fetch menu items and categories on mount
   useEffect(() => {
     fetchMenuAndCategories();
+  }, [selectedCategory, searchTerm, selectedAvailability]);
+
+  useEffect(() => {
+    return subscribeToMenuUpdates(fetchMenuAndCategories);
   }, [selectedCategory, searchTerm, selectedAvailability]);
 
   const fetchMenuAndCategories = async () => {
@@ -94,6 +99,7 @@ function Menu() {
       }
 
       if (response?.success) {
+        publishMenuUpdated();
         await fetchMenuAndCategories();
         setDialogOpen(false);
         setEditingFood(null);
@@ -109,6 +115,7 @@ function Menu() {
     try {
       const response = await menuService.deleteItem(id);
       if (response.success) {
+        publishMenuUpdated();
         setMenuItems(menuItems.filter((item) => item.id !== id));
         setSuccess("Menu item deleted successfully");
         setSnackbarOpen(true);

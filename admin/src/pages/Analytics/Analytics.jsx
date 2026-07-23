@@ -1,9 +1,11 @@
-﻿import React from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  Alert,
   Box,
   Card,
   CardContent,
   Chip,
+  CircularProgress,
   Grid,
   Paper,
   Stack,
@@ -13,35 +15,94 @@ import TrendingUpIcon from "@mui/icons-material/TrendingUp";
 import ReceiptLongIcon from "@mui/icons-material/ReceiptLong";
 import PeopleAltIcon from "@mui/icons-material/PeopleAlt";
 import AccessTimeIcon from "@mui/icons-material/AccessTime";
-import RestaurantMenuIcon from "@mui/icons-material/RestaurantMenu";
 import DailySalesChart from "../../components/charts/DailySalesChart";
 import WeeklySalesChart from "../../components/charts/WeeklySalesChart";
 import MonthlySalesChart from "../../components/charts/MonthlySalesChart";
 import PredictionVsActual from "../../components/charts/PredictionVsActual";
 import RevenueTrend from "../../components/charts/RevenueTrend";
 import { PageHeader } from "../../components/common/PageKit";
+import { getSalesReport } from "../../services/reports";
 
-const summaryCards = [
-  { title: "Revenue", value: "Rs. 1,24,500", change: "+12.4%", icon: <TrendingUpIcon />, color: "primary" },
-  { title: "Orders", value: "1,248", change: "+8.1%", icon: <ReceiptLongIcon />, color: "secondary" },
-  { title: "Customers", value: "342", change: "+5.3%", icon: <PeopleAltIcon />, color: "success" },
-];
+function formatCurrency(value) {
+  const amount = Number(value || 0);
+  return `Rs. ${amount.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
+}
 
-const peakHours = [
-  { time: "12:00 PM", orders: 48 },
-  { time: "1:00 PM", orders: 64 },
-  { time: "8:00 PM", orders: 92 },
-  { time: "9:00 PM", orders: 76 },
-];
+function formatNumber(value) {
+  return Number(value || 0).toLocaleString("en-IN");
+}
 
-const topFoods = [
-  { name: "Paneer Butter Masala", orders: 128 },
-  { name: "Chicken Biryani", orders: 96 },
-  { name: "Veg Pizza", orders: 84 },
-  { name: "French Fries", orders: 67 },
-];
+function formatChange(value) {
+  const amount = Number(value || 0);
+  return `${amount >= 0 ? "+" : ""}${amount.toFixed(1)}%`;
+}
+
+function changeColor(value, fallback = "primary") {
+  return Number(value || 0) < 0 ? "error" : fallback;
+}
+
+function formatHour(hour) {
+  const date = new Date();
+  date.setHours(Number(hour || 0), 0, 0, 0);
+
+  return date.toLocaleTimeString([], {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
 
 function Analytics() {
+  const [summary, setSummary] = useState(null);
+  const [loadingSummary, setLoadingSummary] = useState(true);
+  const [summaryError, setSummaryError] = useState("");
+
+  const loadSummary = useCallback(async () => {
+    try {
+      setSummaryError("");
+      const response = await getSalesReport();
+      setSummary(response?.success ? response.data?.summary || null : null);
+    } catch (error) {
+      setSummaryError(error?.response?.data?.message || "Failed to load analytics summary.");
+    } finally {
+      setLoadingSummary(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadSummary();
+    const intervalId = window.setInterval(loadSummary, 60000);
+    return () => window.clearInterval(intervalId);
+  }, [loadSummary]);
+
+  const summaryCards = useMemo(
+    () => [
+      {
+        title: "Revenue",
+        value: summary ? formatCurrency(summary.revenue) : "-",
+        change: formatChange(summary?.changes?.revenue),
+        icon: <TrendingUpIcon />,
+        color: changeColor(summary?.changes?.revenue, "primary"),
+      },
+      {
+        title: "Orders",
+        value: summary ? formatNumber(summary.orders) : "-",
+        change: formatChange(summary?.changes?.orders),
+        icon: <ReceiptLongIcon />,
+        color: changeColor(summary?.changes?.orders, "secondary"),
+      },
+      {
+        title: "Customers",
+        value: summary ? formatNumber(summary.customers) : "-",
+        change: formatChange(summary?.changes?.customers),
+        icon: <PeopleAltIcon />,
+        color: changeColor(summary?.changes?.customers, "success"),
+      },
+    ],
+    [summary]
+  );
+
+  const peakHours = summary?.peak_hours || [];
+
   return (
     <Box sx={{ p: 3 }}>
       <PageHeader
@@ -49,6 +110,12 @@ function Analytics() {
         title="Analytics"
         subtitle="Understand sales, order volume, peak hours, revenue trends, and prediction accuracy from one place."
       />
+
+      {summaryError && (
+        <Alert severity="error" sx={{ mb: 2 }}>
+          {summaryError}
+        </Alert>
+      )}
 
       <Grid container spacing={2} sx={{ mb: 3 }}>
         {summaryCards.map((card) => (
@@ -59,10 +126,15 @@ function Analytics() {
                   <Typography variant="h6">{card.title}</Typography>
                   <Box sx={{ color: `${card.color}.main` }}>{card.icon}</Box>
                 </Stack>
-                <Typography variant="h4" sx={{ fontWeight: 700 }}>
-                  {card.value}
+                <Typography variant="h4" sx={{ fontWeight: 700, minHeight: 44 }}>
+                  {loadingSummary ? <CircularProgress size={28} /> : card.value}
                 </Typography>
-                <Chip label={card.change} color={card.color} size="small" sx={{ mt: 1 }} />
+                <Chip
+                  label={loadingSummary ? "Loading" : card.change}
+                  color={card.color}
+                  size="small"
+                  sx={{ mt: 1 }}
+                />
               </CardContent>
             </Card>
           </Grid>
@@ -83,12 +155,16 @@ function Analytics() {
               <Typography variant="h6">Peak Hours</Typography>
             </Stack>
             <Stack spacing={1.5}>
-              {peakHours.map((hour) => (
-                <Box key={hour.time} sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <Typography>{hour.time}</Typography>
-                  <Typography fontWeight={600}>{hour.orders} orders</Typography>
-                </Box>
-              ))}
+              {peakHours.length > 0 ? (
+                peakHours.map((hour) => (
+                  <Box key={hour.hour} sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <Typography>{formatHour(hour.hour)}</Typography>
+                    <Typography fontWeight={600}>{hour.orders} orders</Typography>
+                  </Box>
+                ))
+              ) : (
+                <Typography color="text.secondary">No order activity yet.</Typography>
+              )}
             </Stack>
           </Paper>
         </Grid>

@@ -4,12 +4,14 @@ function OrderStatusChip({ status, onClick }) {
   const getStatusColor = (value) => {
     switch (value) {
       case "Pending":
+      case "Confirmed":
         return "warning";
       case "Accepted":
         return "info";
       case "Preparing":
         return "primary";
       case "Ready":
+      case "Out for Delivery":
       case "Completed":
       case "Delivered":
         return "success";

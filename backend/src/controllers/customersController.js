@@ -1,6 +1,8 @@
 // Customers Controller
 import { pool } from "../config/database.js";
 import { successResponse, errorResponse, asyncHandler } from "../utils/index.js";
+import { createPhoneOtp, verifyPhoneOtp } from "../services/otpService.js";
+import { normalizePhoneNumber } from "../utils/phoneNumber.js";
 
 // Get all customers
 export const getAllCustomers = asyncHandler(async (req, res) => {
@@ -135,8 +137,15 @@ export const createCustomer = asyncHandler(async (req, res) => {
     return errorResponse(res, "Name and phone are required", 400);
   }
 
+  let normalizedPhone;
+  try {
+    normalizedPhone = normalizePhoneNumber(phone);
+  } catch (error) {
+    return errorResponse(res, error.message, error.statusCode || 400);
+  }
+
   // Check if customer already exists by phone
-  const existing = await pool.query("SELECT id FROM customers WHERE phone = $1", [phone]);
+  const existing = await pool.query("SELECT id FROM customers WHERE phone = $1", [normalizedPhone]);
   if (existing.rows.length > 0) {
     return errorResponse(res, "Customer with this phone number already exists", 409);
   }
@@ -153,10 +162,43 @@ export const createCustomer = asyncHandler(async (req, res) => {
     `INSERT INTO customers (name, email, phone, address, city, state, postal_code, country, is_active)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true)
      RETURNING id, name, email, phone, address, city, state, postal_code, country, loyalty_points, total_orders, total_spent, is_active, created_at`,
-    [name, email || null, phone, address, city, state, postal_code, country]
+    [name, email || null, normalizedPhone, address, city, state, postal_code, country]
   );
 
   return successResponse(res, result.rows[0], "Customer created successfully", 201);
+});
+
+export const sendCustomerOtp = asyncHandler(async (req, res) => {
+  try {
+    const otp = await createPhoneOtp(req.body.phone, { req });
+
+    return successResponse(
+      res,
+      {
+        phone: otp.phone,
+        expires_at: otp.expires_at,
+        resend_after_seconds: otp.resend_after_seconds,
+      },
+      "OTP sent to WhatsApp"
+    );
+  } catch (error) {
+    if (error.retryAfter) res.set("Retry-After", String(error.retryAfter));
+    return errorResponse(res, error.message, error.statusCode || 500);
+  }
+});
+
+export const verifyCustomerOtp = asyncHandler(async (req, res) => {
+  try {
+    const verification = await verifyPhoneOtp({
+      phone: req.body.phone,
+      otp: req.body.otp,
+      req,
+    });
+
+    return successResponse(res, verification, "Phone number verified successfully");
+  } catch (error) {
+    return errorResponse(res, error.message, error.statusCode || 500);
+  }
 });
 
 // Update customer
@@ -227,13 +269,19 @@ export const deleteCustomer = asyncHandler(async (req, res) => {
 // Get customer by phone number
 export const getCustomerByPhone = asyncHandler(async (req, res) => {
   const { phone } = req.params;
+  let normalizedPhone;
+  try {
+    normalizedPhone = normalizePhoneNumber(phone);
+  } catch (error) {
+    return errorResponse(res, error.message, error.statusCode || 400);
+  }
 
   const result = await pool.query(
     `SELECT id, name, email, phone, address, city, state, postal_code, country,
             loyalty_points, total_orders, total_spent, is_active, created_at
      FROM customers
      WHERE phone = $1`,
-    [phone]
+    [normalizedPhone]
   );
 
   if (result.rows.length === 0) {

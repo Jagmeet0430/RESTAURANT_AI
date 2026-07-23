@@ -19,6 +19,7 @@ import DoneIcon from "@mui/icons-material/Done";
 import RestaurantMenuIcon from "@mui/icons-material/RestaurantMenu";
 import { PageHeader, StatCard, StatGrid } from "../components/common/PageKit";
 import { menuService, categoriesService } from "../services/menu";
+import { publishMenuUpdated } from "../utils/menuEvents";
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:5001/api";
 
@@ -210,7 +211,24 @@ const OCRUpload = () => {
         categories_count: uniqueCategories.length,
       });
       setRawResponse(response.data);
-      setMessage("Menu image uploaded and digitized successfully.");
+
+      if (extractedItems.length === 0) {
+        setMessage("Menu image uploaded, but no menu items were detected.");
+        return;
+      }
+
+      const savedCount = await syncItemsToMenu(extractedItems);
+      const failedCount = extractedItems.length - savedCount;
+
+      if (savedCount > 0) {
+        publishMenuUpdated();
+      }
+
+      setMessage(
+        failedCount > 0
+          ? `Menu image uploaded. ${savedCount} item${savedCount === 1 ? "" : "s"} synced to the menu; ${failedCount} need review.`
+          : `Menu image uploaded and ${savedCount} item${savedCount === 1 ? "" : "s"} synced to the menu automatically.`
+      );
     } catch (err) {
       console.error("OCR upload error:", err);
       setError(
@@ -247,6 +265,7 @@ const OCRUpload = () => {
         ...current,
         [index]: true,
       }));
+      publishMenuUpdated();
       return true;
     } catch (err) {
       setAddErrors((current) => ({
@@ -265,10 +284,9 @@ const OCRUpload = () => {
     }
   };
 
-  const handleAddAllToMenu = async () => {
+  const syncItemsToMenu = async (sourceItems = items) => {
     setAddingAll(true);
     setAddingIndex(null);
-    setMessage("");
     setError("");
 
     let savedCount = 0;
@@ -276,7 +294,7 @@ const OCRUpload = () => {
     try {
       const categoryMap = await getCategoryMap();
 
-      for (const [index, item] of items.entries()) {
+      for (const [index, item] of sourceItems.entries()) {
         if (addedItems[index]) continue;
 
         setAddingIndex(index);
@@ -284,12 +302,20 @@ const OCRUpload = () => {
         if (saved) savedCount += 1;
       }
 
-      if (savedCount > 0) {
-        setMessage(`${savedCount} OCR item${savedCount === 1 ? "" : "s"} added to the menu.`);
-      }
+      return savedCount;
     } finally {
       setAddingAll(false);
       setAddingIndex(null);
+    }
+  };
+
+  const handleAddAllToMenu = async () => {
+    setMessage("");
+    const savedCount = await syncItemsToMenu();
+
+    if (savedCount > 0) {
+      publishMenuUpdated();
+      setMessage(`${savedCount} OCR item${savedCount === 1 ? "" : "s"} synced to the menu.`);
     }
   };
 
@@ -422,7 +448,7 @@ const OCRUpload = () => {
                     disabled={addingAll || addedCount === items.length}
                     sx={{ width: { xs: "100%", sm: "fit-content" } }}
                   >
-                    {addingAll ? "Adding Items..." : "Add All to Menu"}
+                    {addingAll ? "Syncing Items..." : "Sync All to Menu"}
                   </Button>
                 )}
               </Stack>
@@ -476,9 +502,11 @@ const OCRUpload = () => {
                           >
                             {addedItems[index]
                               ? "Added to Menu"
+                              : addingAll
+                                ? "Syncing..."
                               : addingIndex === index
                                 ? "Adding..."
-                                : "Add to Menu"}
+                                : "Sync to Menu"}
                           </Button>
                         </CardContent>
                       </Card>

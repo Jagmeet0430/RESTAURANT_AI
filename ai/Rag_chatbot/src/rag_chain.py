@@ -10,7 +10,7 @@ class RAGChain:
     def generate_answer(self, question, retrieved_docs):
         if not retrieved_docs:
             return {
-                "answer": "I do not have enough menu or restaurant context to answer that yet.",
+                "answer": "I do not want to guess without restaurant context. Please ask about menu items, prices, orders, timing, or location.",
                 "sources": []
             }
 
@@ -35,14 +35,15 @@ class RAGChain:
 
     def _generate_with_gemini(self, question, context):
         if not GEMINI_API_KEY:
-            return self._format_retrieved_menu_answer(question, context)
+            return self._format_retrieved_answer(question, context)
 
         prompt = f"""
 You are RestaurantAI Assistant for MAHESH Sweets & Bakers.
 
 Answer only from the provided context. If the context does not contain enough
-information, say what is missing. Be concise, helpful, and include item names
-and prices when relevant.
+information, politely say what is missing and guide the customer to ask about
+menu items, prices, orders, timing, or location. Be warm, concise, and include
+item names and prices when relevant.
 
 Context:
 {context}
@@ -56,6 +57,7 @@ Rules:
 - If the customer asks for pizza, cake, spicy, eggless, veg, today's special, or
   another menu property, filter using the provided context fields.
 - Do not invent menu items, prices, offers, ingredients, or policies.
+- Do not mention RAG, vectors, Chroma, PostgreSQL, Gemini, or internal systems.
 """.strip()
 
         payload = json.dumps({
@@ -83,7 +85,7 @@ Rules:
             with urllib.request.urlopen(request, timeout=20) as response:
                 data = json.loads(response.read().decode("utf-8"))
         except urllib.error.URLError:
-            return self._format_retrieved_menu_answer(question, context)
+            return self._format_retrieved_answer(question, context)
 
         candidates = data.get("candidates", [])
         parts = candidates[0].get("content", {}).get("parts", []) if candidates else []
@@ -91,14 +93,132 @@ Rules:
 
         return answer or "Gemini did not return an answer for the retrieved context."
 
+    def _format_retrieved_answer(self, question, context):
+        if self._is_menu_question(question):
+            return self._format_retrieved_menu_answer(question, context)
+
+        return self._format_knowledge_answer(question, context)
+
+    def _is_menu_question(self, question):
+        text = question.lower()
+
+        return any(
+            word in text
+            for word in [
+                "menu",
+                "food",
+                "item",
+                "price",
+                "cost",
+                "available",
+                "eat",
+                "hungry",
+                "recommend",
+                "suggest",
+                "snack",
+                "snacks",
+                "drink",
+                "drinks",
+                "cake",
+                "cakes",
+                "eggless",
+                "special",
+                "specials",
+                "pizza",
+                "burger",
+                "roll",
+                "rolls",
+                "momos",
+                "chaat",
+                "chinese",
+                "noodle",
+                "noodles",
+                "dosa",
+                "pastry",
+                "pastries",
+                "puff",
+                "puffs",
+            ]
+        ) or self._extract_budget(text) is not None
+
+    def _tokenize(self, value):
+        stopwords = {
+            "a",
+            "an",
+            "and",
+            "are",
+            "can",
+            "do",
+            "does",
+            "for",
+            "how",
+            "i",
+            "is",
+            "it",
+            "me",
+            "of",
+            "the",
+            "to",
+            "what",
+            "with",
+            "you",
+        }
+
+        return [
+            word
+            for word in re.findall(r"[a-z0-9]+", value.lower())
+            if word not in stopwords and len(word) > 1
+        ]
+
+    def _score_text(self, question, value):
+        query_words = self._tokenize(question)
+        value_words = self._tokenize(value)
+
+        if not query_words or not value_words:
+            return 0
+
+        return sum(
+            3 if word in value_words else 1 if any(word in value_word or value_word in word for value_word in value_words) else 0
+            for word in query_words
+        )
+
+    def _format_knowledge_answer(self, question, context):
+        qa_pairs = re.findall(
+            r"Q:\s*(?P<question>.+?)\nA:\s*(?P<answer>.+?)(?=\n\nQ:|\Z)",
+            context,
+            flags=re.DOTALL,
+        )
+
+        if qa_pairs:
+            best_pair = max(
+                qa_pairs,
+                key=lambda pair: self._score_text(question, f"{pair[0]} {pair[1]}"),
+            )
+            best_score = self._score_text(question, f"{best_pair[0]} {best_pair[1]}")
+
+            if best_score > 0:
+                return best_pair[1].strip()
+
+        paragraphs = [
+            paragraph.strip()
+            for paragraph in re.split(r"\n\s*\n", context)
+            if paragraph.strip() and not paragraph.strip().lower().startswith("menu item:")
+        ]
+
+        if paragraphs:
+            best_paragraph = max(paragraphs, key=lambda paragraph: self._score_text(question, paragraph))
+            if self._score_text(question, best_paragraph) > 0:
+                return best_paragraph
+
+        return "I do not want to guess without enough restaurant details. Please ask about menu items, prices, orders, timing, or location."
+
     def _format_retrieved_menu_answer(self, question, context):
         items = self._parse_menu_items(context)
         filtered_items = self._filter_items(question, items)
 
         if not filtered_items:
             return (
-                "I checked the knowledge base, but I could not find matching menu "
-                "items for that question."
+                "I could not find matching menu items for that question. Try an item name, category, or budget."
             )
 
         lines = []
@@ -119,7 +239,7 @@ Rules:
             price_text = f"Rs. {price:g}" if price is not None else "price not listed"
             lines.append(f"- {name} - {price_text} ({', '.join(details)})")
 
-        return "I found these from the knowledge base:\n" + "\n".join(lines)
+        return "Here are good matches from the menu:\n" + "\n".join(lines)
 
     def _parse_menu_items(self, context):
         items = []
@@ -174,6 +294,15 @@ Rules:
             "momos",
             "chaat",
             "chinese",
+            "roll",
+            "rolls",
+            "puff",
+            "puffs",
+            "pastry",
+            "pastries",
+            "noodle",
+            "noodles",
+            "dosa",
         ]
         requested_terms = [term for term in food_terms if term in text]
 

@@ -25,6 +25,11 @@ router.get(
       const result = await client.query(todayQuery);
       const row = result.rows[0] || {};
 
+      const avgResult = await client.query(
+        "SELECT COALESCE(AVG(total_amount), 0) as avg_sales FROM orders WHERE created_at >= CURRENT_DATE - INTERVAL '30 days'"
+      );
+      const avg30 = Number(avgResult.rows[0]?.avg_sales) || 0;
+
       const now = new Date();
       const month = now.getMonth() + 1;
       const day = now.getDate();
@@ -60,10 +65,29 @@ router.get(
         special_event: "No",
       };
 
-      const AI_SERVICE_URL = process.env.AI_SERVICE_URL || "http://127.0.0.1:8000";
-      const aiResponse = await axios.post(`${AI_SERVICE_URL}/predict`, payload, { timeout: 10000 });
+      const fallbackSales =
+        avg_order_value > 0 && (online_orders + dine_in_orders) > 0
+          ? avg_order_value * (online_orders + dine_in_orders)
+          : avg30;
 
-      return successResponse(res, { payload, predicted: aiResponse.data }, "Today's prediction retrieved");
+      const fallbackPrediction = {
+        predicted_sales: Number(fallbackSales.toFixed(2)),
+        source: "fallback",
+      };
+
+      const AI_SERVICE_URL = process.env.AI_SERVICE_URL || "http://127.0.0.1:8000";
+      const aiResponse = await axios
+        .post(`${AI_SERVICE_URL}/predict`, payload, { timeout: 10000 })
+        .then((response) => ({
+          ...response.data,
+          source: "ai-service",
+        }))
+        .catch((error) => {
+          console.warn("AI prediction service unavailable, using fallback forecast:", error.message);
+          return fallbackPrediction;
+        });
+
+      return successResponse(res, { payload, predicted: aiResponse }, "Today's prediction retrieved");
     } catch (err) {
       return errorResponse(res, err.message || "Prediction error", 500);
     } finally {

@@ -11,6 +11,7 @@ import {
   Typography,
 } from "@mui/material";
 import CurrencyRupeeIcon from "@mui/icons-material/CurrencyRupee";
+import HistoryIcon from "@mui/icons-material/History";
 import LocalFireDepartmentIcon from "@mui/icons-material/LocalFireDepartment";
 import PaidOutlinedIcon from "@mui/icons-material/PaidOutlined";
 import RefreshIcon from "@mui/icons-material/Refresh";
@@ -20,73 +21,6 @@ import OrderFilters from "../../components/orders/OrderFilters";
 import OrderDetails from "../../components/orders/OrderDetails";
 import OrderBoard from "../../components/orders/OrderBoard";
 import { ordersService } from "../../services/order";
-
-const PHASE_6_FALLBACK_ORDERS = [
-  {
-    id: 101,
-    order_number: "ORD-101",
-    table_number: 5,
-    customer_name: "Table 5",
-    customer_phone: "",
-    delivery_address: "",
-    items: [
-      { name: "Paneer Tikka Pizza", quantity: 2, unit_price: 220, total_price: 440 },
-      { name: "Veggie Noodles", quantity: 1, unit_price: 120, total_price: 120 },
-    ],
-    subtotal: 560,
-    tax: 28,
-    delivery_charge: 0,
-    total_amount: 588,
-    payment_status: "Pending",
-    status: "Pending",
-    created_at: new Date(Date.now() - 8 * 60000).toISOString(),
-    special_instructions: "Less spicy.",
-  },
-  {
-    id: 102,
-    order_number: "ORD-102",
-    table_number: 2,
-    customer_name: "Aman Singh",
-    items: [{ name: "Spicy Veg Burger", quantity: 2, unit_price: 80, total_price: 160 }],
-    subtotal: 160,
-    tax: 8,
-    delivery_charge: 0,
-    total_amount: 168,
-    payment_status: "Paid",
-    status: "Preparing",
-    created_at: new Date(Date.now() - 22 * 60000).toISOString(),
-  },
-  {
-    id: 103,
-    order_number: "ORD-103",
-    customer_name: "Priya Sharma",
-    customer_phone: "+91-9876543212",
-    items: [
-      { name: "Dahi Golgappe (Per 6 Pcs)", quantity: 1, unit_price: 60, total_price: 60 },
-      { name: "Sev Puri", quantity: 1, unit_price: 60, total_price: 60 },
-    ],
-    subtotal: 120,
-    tax: 6,
-    delivery_charge: 50,
-    total_amount: 176,
-    payment_status: "Paid",
-    status: "Ready",
-    created_at: new Date(Date.now() - 35 * 60000).toISOString(),
-  },
-  {
-    id: 104,
-    order_number: "ORD-104",
-    customer_name: "Rahul Kumar",
-    items: [{ name: "Chocolate Muffins", quantity: 4, unit_price: 50, total_price: 200 }],
-    subtotal: 200,
-    tax: 10,
-    delivery_charge: 0,
-    total_amount: 210,
-    payment_status: "Paid",
-    status: "Completed",
-    created_at: new Date(Date.now() - 90 * 60000).toISOString(),
-  },
-];
 
 function formatCurrency(value) {
   const amount = Number(value || 0);
@@ -158,6 +92,7 @@ function Orders() {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(false);
   const [usingFallback, setUsingFallback] = useState(false);
+  const [ordersError, setOrdersError] = useState("");
   const [filters, setFilters] = useState({
     status: "",
     payment_status: "",
@@ -165,6 +100,7 @@ function Orders() {
     search: "",
   });
   const [viewMode, setViewMode] = useState("board");
+  const [orderScope, setOrderScope] = useState("live");
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [snackbar, setSnackbar] = useState({ open: false, message: "", severity: "success" });
@@ -176,30 +112,45 @@ function Orders() {
         status: filters.status,
         payment_status: filters.payment_status,
         date: filters.date,
+        include_expired: orderScope === "history",
       });
       if (response.success) {
         setOrders(response.data || []);
         setUsingFallback(false);
+        setOrdersError("");
       } else {
-        setOrders(PHASE_6_FALLBACK_ORDERS);
+        const message = response.message || "Live orders API did not return a successful response.";
+        setOrders([]);
         setUsingFallback(true);
-        setSnackbar({ open: true, message: response.message || "Showing sample orders", severity: "warning" });
+        setOrdersError(message);
+        setSnackbar({ open: true, message, severity: "warning" });
       }
     } catch (error) {
-      setOrders(PHASE_6_FALLBACK_ORDERS);
+      const message =
+        error?.response?.data?.message ||
+        (!error?.response
+          ? "Backend API is not reachable at http://localhost:5001. Start the backend server, then click Refresh."
+          : "Live orders could not be loaded from the backend.");
+      setOrders([]);
       setUsingFallback(true);
+      setOrdersError(message);
       setSnackbar({
         open: true,
-        message: error?.response?.data?.message || "Backend unavailable. Showing sample orders.",
+        message,
         severity: "warning",
       });
     } finally {
       setLoading(false);
     }
-  }, [filters.status, filters.payment_status, filters.date]);
+  }, [filters.status, filters.payment_status, filters.date, orderScope]);
 
   useEffect(() => {
     loadOrders();
+  }, [loadOrders]);
+
+  useEffect(() => {
+    const intervalId = window.setInterval(loadOrders, 60000);
+    return () => window.clearInterval(intervalId);
   }, [loadOrders]);
 
   const filteredOrders = useMemo(() => {
@@ -239,7 +190,7 @@ function Orders() {
     };
   }, [filteredOrders]);
 
-  const handleStatusChange = async (orderId, newStatus) => {
+  const handleStatusChange = async (orderId, newStatus, extra = {}) => {
     if (usingFallback) {
       setOrders((prev) => prev.map((order) => (order.id === orderId ? { ...order, status: newStatus } : order)));
       setSelectedOrder((prev) => (prev?.id === orderId ? { ...prev, status: newStatus } : prev));
@@ -248,7 +199,7 @@ function Orders() {
     }
 
     try {
-      const response = await ordersService.updateOrderStatus(orderId, newStatus);
+      const response = await ordersService.updateOrderStatus(orderId, newStatus, null, extra);
       if (response.success) {
         setOrders((prev) => prev.map((order) => (order.id === orderId ? { ...order, ...response.data } : order)));
         setSelectedOrder((prev) => (prev?.id === orderId ? { ...prev, ...response.data } : prev));
@@ -286,6 +237,56 @@ function Orders() {
     }
   };
 
+  const handleMarkPaid = async (orderId) => {
+    if (usingFallback) {
+      setOrders((prev) =>
+        prev.map((order) =>
+          order.id === orderId
+            ? { ...order, payment_status: "Paid", transaction_id: order.transaction_id || `offline-${orderId}` }
+            : order
+        )
+      );
+      setSnackbar({ open: true, message: `Order #${orderId} marked paid`, severity: "success" });
+      return;
+    }
+
+    try {
+      const response = await ordersService.markPaymentPaid(orderId);
+
+      if (response.success) {
+        setOrders((prev) => prev.map((order) => (order.id === orderId ? { ...order, ...response.data } : order)));
+        setSelectedOrder((prev) => (prev?.id === orderId ? { ...prev, ...response.data } : prev));
+        setSnackbar({ open: true, message: "Cash payment marked as paid.", severity: "success" });
+      } else {
+        setSnackbar({ open: true, message: response.message || "Unable to mark payment paid", severity: "error" });
+      }
+    } catch (error) {
+      setSnackbar({
+        open: true,
+        message: error?.response?.data?.message || error.message || "Unable to mark payment paid",
+        severity: "error",
+      });
+    }
+  };
+
+  const handleRetryWhatsApp = async (orderId) => {
+    try {
+      const response = await ordersService.retryWhatsAppNotification(orderId);
+      setSnackbar({
+        open: true,
+        message: response.message || "WhatsApp notification retried.",
+        severity: response.success ? "success" : "error",
+      });
+      loadOrders();
+    } catch (error) {
+      setSnackbar({
+        open: true,
+        message: error?.response?.data?.message || error.message || "Unable to retry WhatsApp notification",
+        severity: "error",
+      });
+    }
+  };
+
   const closeSnackbar = () => {
     setSnackbar((prev) => ({ ...prev, open: false }));
   };
@@ -304,10 +305,26 @@ function Orders() {
             Order Command Center
           </Typography>
           <Typography color="text.secondary">
-            Track every order from new request to kitchen preparation, ready handoff, and completion.
+            {orderScope === "history"
+              ? "Review every stored order, including completed and cancelled orders hidden from live operations."
+              : "Track every order from new request to kitchen preparation, ready handoff, and completion."}
           </Typography>
         </Box>
         <Stack direction="row" spacing={1}>
+          <ToggleButtonGroup
+            size="small"
+            exclusive
+            value={orderScope}
+            onChange={(event, nextScope) => {
+              if (nextScope) setOrderScope(nextScope);
+            }}
+          >
+            <ToggleButton value="live">Live</ToggleButton>
+            <ToggleButton value="history">
+              <HistoryIcon sx={{ fontSize: 17, mr: 0.6 }} />
+              History
+            </ToggleButton>
+          </ToggleButtonGroup>
           <ToggleButtonGroup
             size="small"
             exclusive
@@ -326,8 +343,22 @@ function Orders() {
       </Stack>
 
       {usingFallback && (
-        <Alert severity="warning" sx={{ mb: 2 }}>
-          Backend orders are unavailable, so sample orders are being shown for preview.
+        <Alert
+          severity="warning"
+          sx={{ mb: 2 }}
+          action={
+            <Button color="inherit" size="small" onClick={loadOrders}>
+              Refresh
+            </Button>
+          }
+        >
+          Live orders could not load. {ordersError}
+        </Alert>
+      )}
+
+      {orderScope === "history" && !usingFallback && (
+        <Alert severity="info" sx={{ mb: 2 }}>
+          History mode includes orders removed from the live board after 20 minutes.
         </Alert>
       )}
 
@@ -376,6 +407,7 @@ function Orders() {
           orders={filteredOrders}
           onViewDetails={handleViewDetails}
           onStatusChange={handleStatusChange}
+          onMarkPaid={handleMarkPaid}
         />
       ) : (
         <OrdersTable
@@ -383,6 +415,7 @@ function Orders() {
           loading={loading}
           onViewDetails={handleViewDetails}
           onStatusChange={handleStatusChange}
+          onMarkPaid={handleMarkPaid}
         />
       )}
 
@@ -391,6 +424,8 @@ function Orders() {
         order={selectedOrder}
         onClose={() => setDetailsOpen(false)}
         onStatusUpdate={handleStatusChange}
+        onMarkPaid={handleMarkPaid}
+        onRetryWhatsApp={handleRetryWhatsApp}
       />
 
       <Snackbar

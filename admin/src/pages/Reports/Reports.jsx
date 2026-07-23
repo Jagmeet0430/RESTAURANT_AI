@@ -40,6 +40,9 @@ const reportPreview = {
 function Reports() {
   const [selectedReport, setSelectedReport] = useState("dailySales");
   const [generated, setGenerated] = useState(false);
+  const [exportingAll, setExportingAll] = useState(false);
+  const [exportingAllSales, setExportingAllSales] = useState(false);
+  const [exportError, setExportError] = useState("");
 
   const activeReport = useMemo(() => {
     return reportCards.find((item) => item.key === selectedReport) || reportCards[0];
@@ -49,6 +52,30 @@ function Reports() {
     setGenerated(true);
   };
 
+  const handleExportAllReports = async () => {
+    try {
+      setExportError("");
+      setExportingAll(true);
+      await reportsService.exportAllReports();
+    } catch (error) {
+      setExportError(error?.response?.data?.message || "Failed to generate all reports PDF.");
+    } finally {
+      setExportingAll(false);
+    }
+  };
+
+  const handleExportAllSales = async () => {
+    try {
+      setExportError("");
+      setExportingAllSales(true);
+      await reportsService.exportAllSales();
+    } catch (error) {
+      setExportError(error?.response?.data?.message || "Failed to generate all sales PDF.");
+    } finally {
+      setExportingAllSales(false);
+    }
+  };
+
   return (
     <Box sx={{ p: 3 }}>
       <PageHeader
@@ -56,25 +83,36 @@ function Reports() {
         title="Reports"
         subtitle="Generate simple snapshots for sales, inventory, customers, revenue, and profit."
         actions={
-          <>
-          <Button variant="contained" onClick={handleGenerate}>
-            Generate
-          </Button>
-          <Button variant="outlined" onClick={() => reportsService.exportSales('pdf')}>
-            Export Sales (PDF)
-          </Button>
-          <Button variant="outlined" onClick={() => reportsService.exportSales('excel')}>
-            Export Sales (Excel)
-          </Button>
-          <Button variant="outlined" onClick={() => reportsService.exportInventory('excel')}>
-            Export Inventory (Excel)
-          </Button>
-          <Button variant="outlined" onClick={() => reportsService.exportCustomers('excel')}>
-            Export Customers (Excel)
-          </Button>
-          </>
+          <Stack spacing={1} alignItems="stretch">
+            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+              <Button variant="contained" onClick={handleGenerate}>
+                Generate
+              </Button>
+              <Button variant="outlined" onClick={() => reportsService.exportSales('pdf')}>
+                Export Sales (PDF)
+              </Button>
+              <Button variant="outlined" onClick={() => reportsService.exportSales('excel')}>
+                Export Sales (Excel)
+              </Button>
+              <Button variant="outlined" onClick={() => reportsService.exportInventory('excel')}>
+                Export Inventory (Excel)
+              </Button>
+              <Button variant="outlined" onClick={() => reportsService.exportCustomers('excel')}>
+                Export Customers (Excel)
+              </Button>
+            </Stack>
+            <Button variant="contained" color="success" onClick={handleExportAllReports} disabled={exportingAll}>
+              {exportingAll ? "Generating All Reports..." : "Generate All Reports (PDF)"}
+            </Button>
+          </Stack>
         }
       />
+
+      {exportError && (
+        <Alert severity="error" sx={{ mb: 2 }}>
+          {exportError}
+        </Alert>
+      )}
 
       <Grid container spacing={2} sx={{ mb: 3 }}>
         {reportCards.map((report) => (
@@ -97,6 +135,20 @@ function Reports() {
                 <Typography variant="body2" color="text.secondary">
                   {reportPreview[report.key]}
                 </Typography>
+                {report.key === "revenue" && (
+                  <Button
+                    variant="contained"
+                    size="small"
+                    sx={{ mt: 2 }}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      handleExportAllSales();
+                    }}
+                    disabled={exportingAllSales}
+                  >
+                    {exportingAllSales ? "Generating..." : "Generate All Sales"}
+                  </Button>
+                )}
               </CardContent>
             </Card>
           </Grid>
@@ -113,6 +165,17 @@ function Reports() {
           </Box>
           <Chip label={generated ? "Generated" : "Ready to generate"} color={generated ? "success" : "default"} />
         </Stack>
+
+        {activeReport.key === "revenue" && (
+          <Button
+            variant="contained"
+            sx={{ mb: 2 }}
+            onClick={handleExportAllSales}
+            disabled={exportingAllSales}
+          >
+            {exportingAllSales ? "Generating All Sales PDF..." : "Generate All Sales (PDF)"}
+          </Button>
+        )}
 
         {generated ? (
           <Alert severity="success" sx={{ mb: 2 }}>

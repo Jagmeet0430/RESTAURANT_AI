@@ -44,6 +44,60 @@ def create_vector_store(
     return vector_store
 
 
+def _sanitize_metadata(metadata):
+    sanitized = {}
+
+    for key, value in metadata.items():
+        if value is None:
+            continue
+
+        if isinstance(value, (str, int, float, bool)):
+            sanitized[key] = value
+        else:
+            sanitized[key] = str(value)
+
+    return sanitized
+
+
+def rebuild_vector_store(
+    documents,
+    embedding_model,
+    persist_directory=None,
+):
+    persist_directory = resolve_persist_directory(persist_directory)
+    collection_name = get_collection_name()
+
+    client = chromadb.PersistentClient(path=persist_directory)
+    collection = client.get_or_create_collection(name=collection_name)
+
+    existing = collection.get(include=[])
+    existing_ids = existing.get("ids", [])
+
+    for index in range(0, len(existing_ids), 500):
+        collection.delete(ids=existing_ids[index:index + 500])
+
+    if not documents:
+        return collection
+
+    texts = [document.page_content for document in documents]
+    metadatas = [_sanitize_metadata(document.metadata) for document in documents]
+    embeddings = embedding_model.embed_documents(texts)
+    ids = [
+        f"{metadata.get('document_type', 'document')}_{metadata.get('menu_id', index)}_{index}"
+        for index, metadata in enumerate(metadatas)
+    ]
+
+    for index in range(0, len(texts), 500):
+        collection.upsert(
+            ids=ids[index:index + 500],
+            documents=texts[index:index + 500],
+            metadatas=metadatas[index:index + 500],
+            embeddings=embeddings[index:index + 500],
+        )
+
+    return collection
+
+
 def load_vector_store(embedding_model):
     persist_directory = resolve_persist_directory()
     collection_name = get_collection_name()

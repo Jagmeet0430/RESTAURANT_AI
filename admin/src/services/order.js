@@ -11,6 +11,7 @@ export const ordersService = {
     if (filters.date) params.append("date", filters.date);
     if (filters.limit) params.append("limit", filters.limit);
     if (filters.offset) params.append("offset", filters.offset);
+    if (filters.include_expired) params.append("include_expired", "true");
 
     const query = params.toString();
     const response = await apiClient.get(query ? `/orders?${query}` : "/orders");
@@ -36,11 +37,27 @@ export const ordersService = {
   },
 
   // Update order status
-  updateOrderStatus: async (id, status, payment_status) => {
-    const response = await apiClient.put(`/orders/${id}`, {
+  updateOrderStatus: async (id, status, payment_status, extra = {}) => {
+    const response = await apiClient.patch(`/admin/orders/${id}/status`, {
       status,
       payment_status,
+      ...extra,
     });
+    return response.data;
+  },
+
+  getStatusHistory: async (id) => {
+    const response = await apiClient.get(`/admin/orders/${id}/status-history`);
+    return response.data;
+  },
+
+  retryWhatsAppNotification: async (id) => {
+    const response = await apiClient.post(`/admin/orders/${id}/notifications/retry`);
+    return response.data;
+  },
+
+  markPaymentPaid: async (orderId) => {
+    const response = await apiClient.patch(`/payments/${orderId}/mark-paid`);
     return response.data;
   },
 };
@@ -61,7 +78,7 @@ export const kitchenService = {
 
   // Update order status
   updateOrderStatus: async (id, status) => {
-    const response = await apiClient.put(`/kitchen/orders/${id}/status`, {
+    const response = await apiClient.patch(`/admin/orders/${id}/status`, {
       status,
     });
     return response.data;

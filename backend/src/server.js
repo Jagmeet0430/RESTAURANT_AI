@@ -15,10 +15,12 @@ console.log("Loaded .env from:", path.resolve(__dirname, "../.env"));
 
 import app from "./app.js";
 import { testConnection } from "./config/database.js";
+import { startOrderLifecycleWorker } from "./services/orderLifecycleService.js";
 
 const PORT = process.env.PORT || 5000;
 const sockets = new Set();
 let isShuttingDown = false;
+let orderLifecycleWorker = null;
 
 // Start server
 const server = app.listen(PORT, async () => {
@@ -41,6 +43,10 @@ const server = app.listen(PORT, async () => {
   console.log("\n📡 Testing Database Connection...");
 
   const connected = await testConnection();
+
+  if (connected) {
+    orderLifecycleWorker = startOrderLifecycleWorker();
+  }
 
   if (connected) {
     console.log("✅ All systems operational!\n");
@@ -66,6 +72,9 @@ const closeServer = (signal, onClosed = () => process.exit(0)) => {
   }
 
   isShuttingDown = true;
+  if (orderLifecycleWorker) {
+    clearInterval(orderLifecycleWorker);
+  }
   console.log(`${signal} signal received: closing HTTP server`);
 
   const forceCloseTimeout = setTimeout(() => {

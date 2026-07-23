@@ -26,4 +26,19 @@ export const exportCustomers = async (format = 'excel') => {
   downloadBlob(resp.data, `customers.${format === 'excel' ? 'xlsx' : 'pdf'}`);
 };
 
-export default { exportSales, exportInventory, exportCustomers };
+export const exportAllReports = async () => {
+  const resp = await apiClient.get('/reports/all/export', { responseType: 'blob' });
+  downloadBlob(resp.data, 'restaurantai_all_reports.pdf');
+};
+
+export const exportAllSales = async () => {
+  const resp = await apiClient.get('/reports/sales/all/export', { responseType: 'blob' });
+  downloadBlob(resp.data, 'restaurantai_all_sales.pdf');
+};
+
+export const getSalesReport = async () => {
+  const response = await apiClient.get('/reports/sales');
+  return response.data;
+};
+
+export default { exportSales, exportInventory, exportCustomers, exportAllReports, exportAllSales, getSalesReport };

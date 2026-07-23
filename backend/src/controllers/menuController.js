@@ -1,6 +1,8 @@
 // Menu Controller
 import { pool } from "../config/database.js";
 import { successResponse, errorResponse, asyncHandler } from "../utils/index.js";
+import { scheduleRagKnowledgeSync } from "../services/ragService.js";
+import { ensureBarcodeStockSchema } from "../services/inventoryStockService.js";
 
 const getValidCreatedByUserId = async (userId) => {
   if (!userId) return null;
@@ -11,11 +13,14 @@ const getValidCreatedByUserId = async (userId) => {
 
 // Get all menu items
 export const getAllMenuItems = asyncHandler(async (req, res) => {
+  await ensureBarcodeStockSchema();
+
   const { category, search, available } = req.query;
 
   let query = `
     SELECT m.id, m.name, m.description, m.price, m.veg_type, m.is_available, 
            m.is_featured, m.preparation_time, m.calories, m.is_spicy, m.image_url,
+           m.barcode,
            m.image_url AS image,
            c.id as category_id, c.name as category_name, c.name AS category
     FROM menu m
@@ -48,11 +53,14 @@ export const getAllMenuItems = asyncHandler(async (req, res) => {
 
 // Get menu item by ID
 export const getMenuItemById = asyncHandler(async (req, res) => {
+  await ensureBarcodeStockSchema();
+
   const { id } = req.params;
 
   const result = await pool.query(
     `SELECT m.id, m.name, m.description, m.price, m.veg_type, m.is_available, 
             m.is_featured, m.preparation_time, m.calories, m.is_spicy, m.image_url,
+            m.barcode,
             c.id as category_id, c.name as category_name
      FROM menu m
      JOIN categories c ON m.category_id = c.id
@@ -69,7 +77,9 @@ export const getMenuItemById = asyncHandler(async (req, res) => {
 
 // Create new menu item
 export const createMenuItem = asyncHandler(async (req, res) => {
-  const { name, category_id, description, price, veg_type, image_url, is_available, is_featured, preparation_time, calories, is_spicy } = req.body;
+  await ensureBarcodeStockSchema();
+
+  const { name, category_id, description, price, veg_type, image_url, is_available, is_featured, preparation_time, calories, is_spicy, barcode } = req.body;
   const userId = await getValidCreatedByUserId(req.user?.id);
 
   // Validate required fields
@@ -83,20 +93,63 @@ export const createMenuItem = asyncHandler(async (req, res) => {
     return errorResponse(res, "Category not found", 404);
   }
 
-  const result = await pool.query(
-    `INSERT INTO menu (name, category_id, description, price, veg_type, image_url, is_available, is_featured, preparation_time, calories, is_spicy, created_by)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-     RETURNING id, name, category_id, description, price, veg_type, image_url, is_available, is_featured, preparation_time, calories, is_spicy`,
-    [name, category_id, description, price, veg_type, image_url, is_available !== false, is_featured === true, preparation_time || 20, calories, is_spicy === true, userId]
+  const existing = await pool.query(
+    "SELECT id FROM menu WHERE category_id = $1 AND LOWER(TRIM(name)) = LOWER(TRIM($2)) LIMIT 1",
+    [category_id, name]
   );
 
+  if (existing.rows.length > 0) {
+    const result = await pool.query(
+      `UPDATE menu
+       SET description = COALESCE($1, description),
+           price = $2,
+           veg_type = $3,
+           image_url = COALESCE($4, image_url),
+           is_available = COALESCE($5, is_available),
+           is_featured = COALESCE($6, is_featured),
+           preparation_time = COALESCE($7, preparation_time),
+           calories = COALESCE($8, calories),
+           is_spicy = COALESCE($9, is_spicy),
+           barcode = COALESCE(NULLIF($10, ''), barcode),
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = $11
+       RETURNING id, name, category_id, description, price, veg_type, image_url, is_available, is_featured, preparation_time, calories, is_spicy, barcode`,
+      [
+        description,
+        price,
+        veg_type,
+        image_url,
+        is_available !== false,
+        is_featured === true,
+        preparation_time || 20,
+        calories,
+        is_spicy === true,
+        barcode?.trim() || null,
+        existing.rows[0].id,
+      ]
+    );
+
+    scheduleRagKnowledgeSync("menu_item_upserted");
+    return successResponse(res, result.rows[0], "Menu item updated successfully");
+  }
+
+  const result = await pool.query(
+    `INSERT INTO menu (name, category_id, description, price, veg_type, image_url, is_available, is_featured, preparation_time, calories, is_spicy, created_by, barcode)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NULLIF($13, ''))
+     RETURNING id, name, category_id, description, price, veg_type, image_url, is_available, is_featured, preparation_time, calories, is_spicy, barcode`,
+    [name, category_id, description, price, veg_type, image_url, is_available !== false, is_featured === true, preparation_time || 20, calories, is_spicy === true, userId, barcode?.trim() || null]
+  );
+
+  scheduleRagKnowledgeSync("menu_item_created");
   return successResponse(res, result.rows[0], "Menu item created successfully", 201);
 });
 
 // Update menu item
 export const updateMenuItem = asyncHandler(async (req, res) => {
+  await ensureBarcodeStockSchema();
+
   const { id } = req.params;
-  const { name, category_id, description, price, veg_type, image_url, is_available, is_featured, preparation_time, calories, is_spicy } = req.body;
+  const { name, category_id, description, price, veg_type, image_url, is_available, is_featured, preparation_time, calories, is_spicy, barcode } = req.body;
 
   // Check if menu item exists
   const existing = await pool.query("SELECT id FROM menu WHERE id = $1", [id]);
@@ -125,12 +178,14 @@ export const updateMenuItem = asyncHandler(async (req, res) => {
          preparation_time = COALESCE($9, preparation_time),
          calories = COALESCE($10, calories),
          is_spicy = COALESCE($11, is_spicy),
+         barcode = COALESCE(NULLIF($12, ''), barcode),
          updated_at = CURRENT_TIMESTAMP
-     WHERE id = $12
-     RETURNING id, name, category_id, description, price, veg_type, image_url, is_available, is_featured, preparation_time, calories, is_spicy`,
-    [name, category_id, description, price, veg_type, image_url, is_available, is_featured, preparation_time, calories, is_spicy, id]
+     WHERE id = $13
+     RETURNING id, name, category_id, description, price, veg_type, image_url, is_available, is_featured, preparation_time, calories, is_spicy, barcode`,
+    [name, category_id, description, price, veg_type, image_url, is_available, is_featured, preparation_time, calories, is_spicy, barcode?.trim() || null, id]
   );
 
+  scheduleRagKnowledgeSync("menu_item_updated");
   return successResponse(res, result.rows[0], "Menu item updated successfully");
 });
 
@@ -158,14 +213,18 @@ export const deleteMenuItem = asyncHandler(async (req, res) => {
 
   await pool.query("DELETE FROM menu WHERE id = $1", [id]);
 
+  scheduleRagKnowledgeSync("menu_item_deleted");
   return successResponse(res, null, "Menu item deleted successfully");
 });
 
 // Get featured menu items
 export const getFeaturedItems = asyncHandler(async (req, res) => {
+  await ensureBarcodeStockSchema();
+
   const result = await pool.query(
     `SELECT m.id, m.name, m.description, m.price, m.veg_type, m.is_available, 
             m.is_featured, m.preparation_time, m.calories, m.is_spicy, m.image_url,
+            m.barcode,
             c.id as category_id, c.name as category_name
      FROM menu m
      JOIN categories c ON m.category_id = c.id

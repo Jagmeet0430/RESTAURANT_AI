@@ -57,17 +57,25 @@ router.get(
         special_event: "No",
       };
 
+      const fallbackSales =
+        payload.avg_order_value > 0 && (payload.online_orders + payload.dine_in_orders) > 0
+          ? payload.avg_order_value * (payload.online_orders + payload.dine_in_orders)
+          : avg30;
+
       const AI_SERVICE_URL = process.env.AI_SERVICE_URL || "http://127.0.0.1:8000";
-      const aiResp = await axios.post(`${AI_SERVICE_URL}/predict`, payload, { timeout: 10000 }).catch(() => null);
-      const predicted = aiResp?.data?.predicted_sales ?? null;
+      const aiResp = await axios.post(`${AI_SERVICE_URL}/predict`, payload, { timeout: 10000 }).catch((error) => {
+        console.warn("AI prediction service unavailable, using fallback recommendations:", error.message);
+        return null;
+      });
+      const predicted = Number(aiResp?.data?.predicted_sales ?? fallbackSales.toFixed(2));
 
       // Determine demand level
-      let demand = "Normal";
-      if (predicted != null && avg30 > 0) {
+      let demand = "Expected";
+      if (avg30 > 0) {
         if (predicted >= avg30 * 1.2) demand = "High";
         else if (predicted <= avg30 * 0.8) demand = "Low";
         else demand = "Expected";
-      } else if (predicted != null && avg30 === 0) {
+      } else {
         demand = predicted > 1000 ? "High" : "Expected";
       }
 

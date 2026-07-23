@@ -683,6 +683,42 @@ input {
   box-shadow: 0 0 0 4px rgba(237, 28, 36, 0.1);
 }
 
+.otp-panel {
+  display: grid;
+  gap: 7px;
+  padding: 10px;
+  border: 1px solid #fde2bf;
+  border-radius: 14px;
+  background: #fff8ed;
+}
+
+.otp-actions {
+  display: grid;
+  grid-template-columns: minmax(82px, auto) 1fr minmax(74px, auto);
+  gap: 8px;
+  align-items: center;
+}
+
+.otp-actions button {
+  min-height: 38px;
+  padding-inline: 10px;
+  border-radius: 10px;
+  font-size: 12px;
+}
+
+.otp-actions input {
+  min-height: 38px;
+  text-align: center;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+}
+
+.otp-panel small {
+  color: #7c2d12;
+  font-weight: 750;
+  line-height: 1.35;
+}
+
 .cart-items {
   display: grid;
   gap: 10px;
@@ -805,13 +841,138 @@ input {
 }
 
 .order-success-card {
-  border-color: #bbf7d0;
-  background: #f0fdf4;
+  position: relative;
+  isolation: isolate;
+  gap: 10px;
+  overflow: hidden;
+  border: 1px solid #a7f3d0;
+  border-radius: 18px;
+  padding: 26px 16px 22px;
+  background:
+    linear-gradient(135deg, rgba(236, 253, 245, 0.96), rgba(240, 253, 250, 0.9)),
+    radial-gradient(circle at 18% 0%, rgba(34, 197, 94, 0.18), transparent 34%);
+  box-shadow: 0 16px 36px rgba(21, 128, 61, 0.12);
+  color: #315044;
+  animation: successPanelIn 0.46s cubic-bezier(0.2, 0.75, 0.25, 1) both;
+}
+
+.order-success-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: linear-gradient(115deg, transparent 0%, rgba(255, 255, 255, 0.72) 48%, transparent 72%);
+  transform: translateX(-120%);
+  animation: successSheen 1.35s ease 0.18s both;
+}
+
+.order-success-card::after {
+  content: "";
+  position: absolute;
+  inset: 12px;
+  z-index: -1;
+  border: 1px solid rgba(22, 163, 74, 0.12);
+  border-radius: 14px;
+  pointer-events: none;
 }
 
 .order-success-card .empty-cart-icon {
   background: #dcfce7;
   color: #15803d;
+}
+
+.success-orbit {
+  position: relative;
+  display: grid;
+  width: 58px;
+  height: 58px;
+  place-items: center;
+  border-radius: 50%;
+  background: #dcfce7;
+  color: #15803d;
+  box-shadow: 0 10px 24px rgba(22, 163, 74, 0.18);
+}
+
+.success-orbit::before,
+.success-orbit::after {
+  content: "";
+  position: absolute;
+  inset: -7px;
+  border-radius: 50%;
+  border: 1px solid rgba(34, 197, 94, 0.24);
+  animation: successRipple 1.5s ease-out infinite;
+}
+
+.success-orbit::after {
+  animation-delay: 0.35s;
+}
+
+.success-check {
+  width: 38px;
+  height: 38px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.success-check-circle {
+  stroke-width: 3;
+  opacity: 0.18;
+}
+
+.success-check-mark {
+  stroke-width: 4;
+  stroke-dasharray: 34;
+  stroke-dashoffset: 34;
+  animation: successCheckDraw 0.48s ease 0.18s forwards;
+}
+
+.success-eyebrow {
+  color: #15803d;
+  font-size: 11px;
+  font-weight: 950;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.order-success-card strong {
+  max-width: 260px;
+  color: #111827;
+  font-size: 17px;
+  line-height: 1.25;
+}
+
+.success-order-id {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid rgba(21, 128, 61, 0.16);
+  border-radius: 999px;
+  padding: 7px 11px;
+  background: rgba(255, 255, 255, 0.78);
+  color: #4b6358;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.success-order-id b {
+  color: #14532d;
+  font-weight: 950;
+  word-break: break-word;
+}
+
+.success-message {
+  max-width: 290px;
+  color: #4b6358;
+  font-size: 13px;
+}
+
+.success-next-step {
+  color: #15803d;
+  font-size: 12px;
+  font-weight: 850;
 }
 
 .cart-totals {
@@ -847,6 +1008,50 @@ input {
 .cart-actions {
   display: grid;
   gap: 10px;
+}
+
+.payment-methods {
+  display: grid;
+  gap: 8px;
+  margin: 0 0 14px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fffaf2;
+}
+
+.payment-methods[hidden] {
+  display: none;
+}
+
+.payment-methods legend {
+  padding: 0 6px;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 950;
+}
+
+.payment-methods label {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.payment-methods input {
+  accent-color: var(--brand);
+}
+
+.payment-methods label.is-disabled {
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
+.payment-methods label.is-disabled span::after {
+  content: " (not configured)";
+  font-weight: 700;
 }
 
 .cart-hint {
@@ -965,6 +1170,42 @@ input {
   45% {
     transform: scale(1.08);
     color: var(--brand);
+  }
+}
+
+@keyframes successPanelIn {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes successSheen {
+  to {
+    transform: translateX(120%);
+  }
+}
+
+@keyframes successRipple {
+  0% {
+    opacity: 0.7;
+    transform: scale(0.82);
+  }
+
+  100% {
+    opacity: 0;
+    transform: scale(1.24);
+  }
+}
+
+@keyframes successCheckDraw {
+  to {
+    stroke-dashoffset: 0;
   }
 }
 
@@ -1565,4 +1806,87 @@ input {
     width: 36px;
     height: 36px;
   }
+}
+
+.tracking-page {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 32px;
+  background: #f8fafc;
+}
+
+.tracking-card {
+  width: min(760px, 100%);
+  background: #fff;
+  border: 1px solid #dbe4ee;
+  border-radius: 18px;
+  padding: 28px;
+  box-shadow: 0 18px 60px rgba(15, 23, 42, 0.12);
+}
+
+.tracking-card h1 {
+  margin: 8px 0;
+  font-size: 32px;
+}
+
+.tracking-timeline {
+  display: grid;
+  gap: 12px;
+  margin: 24px 0;
+}
+
+.tracking-step {
+  display: grid;
+  grid-template-columns: 28px 1fr;
+  align-items: center;
+  gap: 10px;
+  color: #64748b;
+}
+
+.tracking-step span {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid #cbd5e1;
+}
+
+.tracking-step.is-done span,
+.tracking-step.is-current span {
+  border-color: #16a34a;
+  background: #16a34a;
+}
+
+.tracking-step.is-current strong {
+  color: #14532d;
+}
+
+.tracking-cancelled {
+  padding: 16px;
+  border: 1px solid #fecaca;
+  border-radius: 14px;
+  background: #fef2f2;
+  color: #991b1b;
+}
+
+.tracking-items {
+  border-top: 1px solid #e2e8f0;
+  padding-top: 16px;
+}
+
+.tracking-items h2 {
+  margin: 0 0 10px;
+}
+
+.tracking-items div {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 8px 0;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.tracking-updated {
+  color: #64748b;
+  margin-bottom: 0;
 }

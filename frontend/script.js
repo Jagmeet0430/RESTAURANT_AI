@@ -151,11 +151,25 @@ const state = {
   cart: [],
   cartFeedback: null,
   orderSuccess: null,
+  checkoutStep: "cart",
+  paymentMethod: "upi",
+  onlinePaymentsEnabled: true,
+  paymentMethodsLoaded: false,
   menuStatus: "loading",
   menuError: "",
   voiceReply: true,
   recognition: null,
   isListening: false,
+  lastRecommendedItems: [],
+  chatSending: false,
+  phoneVerification: {
+    phone: "",
+    token: "",
+  },
+  otpResendUntil: 0,
+  otpCountdownTimer: null,
+  orderIdempotencyKey: "",
+  restaurantSettings: null,
 };
 
 const elements = {
@@ -170,12 +184,18 @@ const elements = {
   placeOrder: document.querySelector("#placeOrder"),
   customerName: document.querySelector("#customerName"),
   customerPhone: document.querySelector("#customerPhone"),
+  otpPanel: document.querySelector("#otpPanel"),
+  sendOtp: document.querySelector("#sendOtp"),
+  otpInput: document.querySelector("#otpInput"),
+  verifyOtp: document.querySelector("#verifyOtp"),
+  otpStatus: document.querySelector("#otpStatus"),
   orderType: document.querySelector("#orderType"),
   menuCount: document.querySelector("#menuCount"),
   activeCategoryLabel: document.querySelector("#activeCategoryLabel"),
   cartSubtotal: document.querySelector("#cartSubtotal"),
   cartTax: document.querySelector("#cartTax"),
   cartPacking: document.querySelector("#cartPacking"),
+  paymentMethods: document.querySelector("#paymentMethods"),
   chatWidget: document.querySelector(".chat-widget"),
   chatToggle: document.querySelector("#chatToggle"),
   chatPanel: document.querySelector("#chatPanel"),
@@ -190,12 +210,18 @@ const elements = {
 };
 
 const DEFAULT_API_BASE_URL = "http://localhost:5001/api";
+const LOOPBACK_API_BASE_URL = "http://127.0.0.1:5001/api";
 const LEGACY_API_BASE_URL = "http://localhost:5001/api";
 const storedApiBaseUrl = localStorage.getItem("restaurantApiBaseUrl");
-const configuredApiBaseUrl = window.RESTAURANT_API_BASE_URL || DEFAULT_API_BASE_URL;
+const configuredApiBaseUrl = window.RESTAURANT_API_BASE_URL || "";
+const sameOriginApiBaseUrl = window.location.protocol.startsWith("http")
+  ? `${window.location.origin}/api`
+  : "";
 const API_BASE_URLS = [
   configuredApiBaseUrl,
+  sameOriginApiBaseUrl,
   DEFAULT_API_BASE_URL,
+  LOOPBACK_API_BASE_URL,
   storedApiBaseUrl,
   LEGACY_API_BASE_URL,
 ]
@@ -204,8 +230,18 @@ const API_BASE_URLS = [
   .filter((url, index, urls) => urls.indexOf(url) === index);
 let API_BASE_URL = API_BASE_URLS[0];
 const CART_STORAGE_KEY = "restaurantai_cart";
+const CUSTOMER_PHONE_STORAGE_KEY = "restaurantai_customer_phone";
+const CUSTOMER_NOTIFICATION_SEEN_KEY = "restaurantai_seen_notifications";
+const CUSTOMER_OTP_TOKEN_STORAGE_KEY = "restaurantai_phone_verification";
+const PUBLIC_SETTINGS_STORAGE_KEY = "restaurantai_public_settings";
 const GST_RATE = 0.05;
 const PACKING_CHARGE = 10;
+const MAX_MESSAGE_LENGTH = 500;
+const MAX_ITEM_QUANTITY = 20;
+const MAX_CART_ITEMS = 50;
+const LARGE_ORDER_LOGIN_AMOUNT = 1000;
+const RAZORPAY_CHECKOUT_SCRIPT = "https://checkout.razorpay.com/v1/checkout.js";
+const ONLINE_PAYMENT_METHODS = new Set(["upi", "card", "netbanking", "wallet"]);
 
 function apiUrl(path, baseUrl = API_BASE_URL) {
   return `${baseUrl}${path}`;
@@ -228,12 +264,427 @@ async function fetchApi(path, options = {}) {
   throw lastError || new Error("Backend API unavailable");
 }
 
+function friendlyNetworkError(error) {
+  if (/failed to fetch|networkerror|load failed/i.test(error?.message || "")) {
+    return "Backend server is not running at port 5001. Start the backend, then try Send OTP again.";
+  }
+  return error?.message || "Please try again.";
+}
+
+const defaultRestaurantSettings = {
+  restaurantName: "MAHESH",
+  gst: "",
+  address: "Jaja Chowk, Opp. State Bank of India, Tanda, Punjab-144024, India",
+  phone: "",
+  email: "",
+  openingTime: "10:00",
+  closingTime: "22:00",
+  logo: "",
+};
+
+function formatTimeLabel(value) {
+  if (!value) return "";
+
+  const [hours, minutes] = String(value).split(":").map(Number);
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return value;
+
+  const date = new Date();
+  date.setHours(hours, minutes, 0, 0);
+  return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+}
+
+function restaurantHoursText(settings = state.restaurantSettings || defaultRestaurantSettings) {
+  const opening = formatTimeLabel(settings.openingTime);
+  const closing = formatTimeLabel(settings.closingTime);
+  return opening && closing ? `${opening} to ${closing}` : "current restaurant hours";
+}
+
+function cachePublicSettings(settings) {
+  localStorage.setItem(PUBLIC_SETTINGS_STORAGE_KEY, JSON.stringify(settings));
+}
+
+function loadCachedPublicSettings() {
+  try {
+    const cached = JSON.parse(localStorage.getItem(PUBLIC_SETTINGS_STORAGE_KEY) || "{}");
+    return { ...defaultRestaurantSettings, ...cached };
+  } catch {
+    return { ...defaultRestaurantSettings };
+  }
+}
+
+function applyPublicSettings(settings) {
+  const nextSettings = { ...defaultRestaurantSettings, ...settings };
+  state.restaurantSettings = nextSettings;
+  cachePublicSettings(nextSettings);
+
+  const name = nextSettings.restaurantName || defaultRestaurantSettings.restaurantName;
+  const address = nextSettings.address || defaultRestaurantSettings.address;
+  const phone = nextSettings.phone || "";
+  const email = nextSettings.email || "";
+  const hours = restaurantHoursText(nextSettings);
+
+  document.title = `${name} | Fresh Menu and Ordering`;
+
+  const metaDescription = document.querySelector("meta[name='description']");
+  if (metaDescription) {
+    metaDescription.setAttribute(
+      "content",
+      `${name} customer website for menu browsing, quick ordering, contact details, and live restaurant information.`
+    );
+  }
+
+  document.querySelectorAll(".brand-text strong, .site-footer span:first-child").forEach((element) => {
+    element.textContent = name;
+  });
+
+  const brandHelper = document.querySelector(".brand-text small");
+  if (brandHelper) brandHelper.textContent = "Fresh menu and ordering";
+
+  const brandLink = document.querySelector(".brand");
+  if (brandLink) brandLink.setAttribute("aria-label", `${name} home`);
+
+  if (nextSettings.logo) {
+    document.querySelectorAll(".brand-logo, .contact-logo").forEach((image) => {
+      image.src = nextSettings.logo;
+      image.alt = `${name} logo`;
+    });
+  }
+
+  const heroTitle = document.querySelector(".hero-copy h1");
+  if (heroTitle) heroTitle.textContent = `Order from ${name} with a clear live menu.`;
+
+  const heroCopy = document.querySelector(".hero-copy p");
+  if (heroCopy) {
+    heroCopy.textContent = `Browse items, build your cart, and contact ${name} with the latest restaurant details.`;
+  }
+
+  const contactTitle = document.querySelector("#contact h2");
+  if (contactTitle) contactTitle.textContent = name;
+
+  const contactCopy = document.querySelector("#contact p");
+  if (contactCopy) {
+    contactCopy.textContent = `Visit or contact ${name}. Current hours are ${hours}.`;
+  }
+
+  const contactName = document.querySelector(".contact-card > strong");
+  if (contactName) contactName.textContent = name;
+
+  const addressElement = document.querySelector(".restaurant-address");
+  if (addressElement) {
+    const contactLines = [
+      address,
+      phone ? `Phone: ${phone}` : "",
+      email ? `Email: ${email}` : "",
+      `Hours: ${hours}`,
+    ].filter(Boolean);
+    addressElement.innerHTML = contactLines.map((line) => escapeHtml(line)).join("<br />");
+  }
+}
+
+async function loadPublicSettings() {
+  applyPublicSettings(loadCachedPublicSettings());
+
+  try {
+    const response = await fetchApi("/settings/public", {
+      headers: {
+        Accept: "application/json",
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error("Settings API unavailable");
+    }
+
+    const payload = await response.json();
+    applyPublicSettings(payload.data || {});
+  } catch (error) {
+    console.warn("Public restaurant settings unavailable:", error);
+  }
+}
+
 function formatPrice(value) {
   return `Rs. ${Number(value || 0).toFixed(0)}`;
 }
 
 function saveCart() {
   localStorage.setItem(CART_STORAGE_KEY, JSON.stringify(state.cart));
+}
+
+function saveCustomerPhone(phone) {
+  const normalizedPhone = phone.trim();
+  if (normalizedPhone) {
+    localStorage.setItem(CUSTOMER_PHONE_STORAGE_KEY, normalizedPhone);
+  }
+}
+
+function normalizePhone(phone = "") {
+  return String(phone)
+    .trim()
+    .replace(/[^\d+]/g, "");
+}
+
+function savePhoneVerification(phone, token) {
+  const verification = {
+    phone: normalizePhone(phone),
+    token,
+    savedAt: Date.now(),
+  };
+  state.phoneVerification = verification;
+  localStorage.setItem(CUSTOMER_OTP_TOKEN_STORAGE_KEY, JSON.stringify(verification));
+}
+
+function loadPhoneVerification() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(CUSTOMER_OTP_TOKEN_STORAGE_KEY) || "{}");
+    if (saved.phone && saved.token) {
+      state.phoneVerification = saved;
+    }
+  } catch {
+    localStorage.removeItem(CUSTOMER_OTP_TOKEN_STORAGE_KEY);
+  }
+}
+
+function clearPhoneVerification() {
+  state.phoneVerification = { phone: "", token: "" };
+  localStorage.removeItem(CUSTOMER_OTP_TOKEN_STORAGE_KEY);
+  if (elements.customerPhone) {
+    elements.customerPhone.disabled = false;
+  }
+}
+
+function isCurrentPhoneVerified() {
+  const phone = normalizePhone(elements.customerPhone.value);
+  return Boolean(phone && state.phoneVerification.phone === phone && state.phoneVerification.token);
+}
+
+function updateOtpStatus(message) {
+  if (elements.otpStatus) {
+    elements.otpStatus.textContent = message || "Verify your phone before placing an order.";
+  }
+}
+
+function refreshOtpUi() {
+  const phone = normalizePhone(elements.customerPhone.value);
+  const verified = isCurrentPhoneVerified();
+  const secondsRemaining = Math.max(0, Math.ceil((state.otpResendUntil - Date.now()) / 1000));
+
+  if (!phone) {
+    updateOtpStatus("Enter your phone number to receive OTP.");
+  } else if (verified) {
+    updateOtpStatus("Phone verified. You can place orders from this number.");
+  } else {
+    updateOtpStatus("Verify your phone before placing an order.");
+  }
+
+  if (elements.sendOtp) {
+    elements.sendOtp.textContent = secondsRemaining > 0 ? `Resend in ${secondsRemaining}s` : verified ? "Verified" : "Send OTP";
+    elements.sendOtp.disabled = verified || !phone || secondsRemaining > 0;
+  }
+
+  if (elements.customerPhone) {
+    elements.customerPhone.disabled = verified;
+  }
+
+  if (elements.otpInput) {
+    elements.otpInput.disabled = verified || !phone;
+  }
+
+  if (elements.verifyOtp) {
+    elements.verifyOtp.disabled = verified || !phone;
+  }
+}
+
+function startOtpCountdown(seconds = 30) {
+  state.otpResendUntil = Date.now() + seconds * 1000;
+  window.clearInterval(state.otpCountdownTimer);
+  state.otpCountdownTimer = window.setInterval(() => {
+    if (Date.now() >= state.otpResendUntil) {
+      window.clearInterval(state.otpCountdownTimer);
+    }
+    refreshOtpUi();
+  }, 1000);
+  refreshOtpUi();
+}
+
+async function sendPhoneOtp({ announceDevOtp = true } = {}) {
+  const phone = normalizePhone(elements.customerPhone.value);
+
+  if (!phone) {
+    showToast("Phone required", "Enter your phone number first.", "warning");
+    return null;
+  }
+
+  elements.sendOtp.disabled = true;
+  elements.sendOtp.textContent = "Sending...";
+
+  try {
+    const result = await requestJson("/auth/whatsapp/send-otp", {
+      method: "POST",
+      body: JSON.stringify({ phone }),
+    });
+
+    updateOtpStatus("OTP sent to WhatsApp. Enter the 6-digit code to verify your phone.");
+    elements.otpInput.disabled = false;
+    elements.verifyOtp.disabled = false;
+    elements.otpInput.focus();
+    startOtpCountdown(Number(result.resend_after_seconds || 30));
+    showToast("OTP sent", "Check WhatsApp for the verification code.", "success");
+
+    return result;
+  } catch (error) {
+    const message = friendlyNetworkError(error);
+    showToast("Unable to send OTP", message, "warning");
+    updateOtpStatus(message);
+    return null;
+  } finally {
+    elements.sendOtp.disabled = false;
+    refreshOtpUi();
+  }
+}
+
+async function verifyPhoneOtp() {
+  const phone = normalizePhone(elements.customerPhone.value);
+  const otp = elements.otpInput.value.trim();
+
+  if (!phone || !otp) {
+    showToast("OTP required", "Enter phone and the 6-digit OTP.", "warning");
+    return false;
+  }
+
+  elements.verifyOtp.disabled = true;
+  elements.verifyOtp.textContent = "Checking...";
+
+  try {
+    const result = await requestJson("/auth/whatsapp/verify-otp", {
+      method: "POST",
+      body: JSON.stringify({ phone, otp }),
+    });
+
+    savePhoneVerification(phone, result.verification_token);
+    elements.otpInput.value = "";
+    refreshOtpUi();
+    renderCart();
+    showToast("Phone verified", "You can now place your order.", "success");
+    return true;
+  } catch (error) {
+    const message = friendlyNetworkError(error);
+    showToast("OTP verification failed", message, "warning");
+    updateOtpStatus(message);
+    return false;
+  } finally {
+    elements.verifyOtp.disabled = false;
+    elements.verifyOtp.textContent = "Verify";
+    refreshOtpUi();
+  }
+}
+
+function selectedPaymentMethod() {
+  const checked = elements.paymentMethods?.querySelector("input[name='paymentMethod']:checked");
+  return checked?.value || state.paymentMethod || "cash_on_delivery";
+}
+
+function isOnlinePayment(method = selectedPaymentMethod()) {
+  return ONLINE_PAYMENT_METHODS.has(method);
+}
+
+function paymentMethodLabel(method = selectedPaymentMethod()) {
+  const labels = {
+    upi: "UPI",
+    card: "Debit/Credit Card",
+    netbanking: "Net Banking",
+    wallet: "Wallet",
+    cash_on_delivery: "Cash on Delivery",
+    pay_at_counter: "Pay at Restaurant Counter",
+  };
+
+  return labels[method] || "Payment";
+}
+
+function updatePlaceOrderButtonText() {
+  if (!state.cart.length || state.checkoutStep !== "payment") {
+    elements.placeOrder.textContent = "Proceed to payment";
+    return;
+  }
+
+  const method = selectedPaymentMethod();
+  elements.placeOrder.textContent = isOnlinePayment(method) ? `Pay by ${paymentMethodLabel(method)}` : "Place order";
+}
+
+function setPaymentSelectorVisible(isVisible) {
+  if (!elements.paymentMethods) return;
+  elements.paymentMethods.hidden = !isVisible;
+}
+
+function selectPaymentMethod(method) {
+  const input = elements.paymentMethods?.querySelector(`input[name='paymentMethod'][value='${method}']`);
+  if (input && !input.disabled) {
+    input.checked = true;
+    state.paymentMethod = method;
+  }
+}
+
+function applyPaymentAvailability() {
+  elements.paymentMethods?.querySelectorAll("label").forEach((label) => {
+    const input = label.querySelector("input[name='paymentMethod']");
+    if (!input) return;
+
+    const disabled = isOnlinePayment(input.value) && !state.onlinePaymentsEnabled;
+    input.disabled = disabled;
+    label.classList.toggle("is-disabled", disabled);
+  });
+
+  if (isOnlinePayment(selectedPaymentMethod()) && !state.onlinePaymentsEnabled) {
+    selectPaymentMethod("cash_on_delivery");
+  }
+}
+
+async function loadPaymentMethods() {
+  try {
+    const data = await requestJson("/payments/methods");
+    state.onlinePaymentsEnabled = data.online_enabled !== false;
+  } catch {
+    state.onlinePaymentsEnabled = true;
+  } finally {
+    state.paymentMethodsLoaded = true;
+    applyPaymentAvailability();
+    updatePlaceOrderButtonText();
+  }
+}
+
+function loadRazorpayScript() {
+  return new Promise((resolve) => {
+    if (window.Razorpay) {
+      resolve(true);
+      return;
+    }
+
+    const existingScript = document.querySelector(`script[src="${RAZORPAY_CHECKOUT_SCRIPT}"]`);
+    if (existingScript) {
+      existingScript.addEventListener("load", () => resolve(true), { once: true });
+      existingScript.addEventListener("error", () => resolve(false), { once: true });
+      return;
+    }
+
+    const script = document.createElement("script");
+    script.src = RAZORPAY_CHECKOUT_SCRIPT;
+    script.async = true;
+    script.onload = () => resolve(true);
+    script.onerror = () => resolve(false);
+    document.body.appendChild(script);
+  });
+}
+
+function seenNotificationIds() {
+  try {
+    const ids = JSON.parse(localStorage.getItem(CUSTOMER_NOTIFICATION_SEEN_KEY) || "[]");
+    return new Set(Array.isArray(ids) ? ids.map(String) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function saveSeenNotificationIds(ids) {
+  localStorage.setItem(CUSTOMER_NOTIFICATION_SEEN_KEY, JSON.stringify(Array.from(ids).slice(-100)));
 }
 
 function restoreCart() {
@@ -350,9 +801,12 @@ async function loadLiveMenu() {
     renderMenu();
     renderCart();
   } catch (error) {
-    menuItems = [];
-    state.menuStatus = "error";
-    state.menuError = error.message || "Unable to load menu.";
+    menuItems = fallbackMenuItems.map(normalizeApiMenuItem);
+    state.menuStatus = "ready";
+    state.menuError = error.message || "Live menu unavailable. Using saved customer menu.";
+    if (elements.chatStatus) {
+      setChatStatus("Saved menu ready");
+    }
     updateMenuStats();
     renderFilters();
     renderMenu();
@@ -705,12 +1159,17 @@ function addToCart(itemId, button) {
 }
 
 function addItemToCart(item, quantity = 1) {
-  const safeQuantity = Math.max(1, Number(quantity) || 1);
+  const safeQuantity = Math.max(1, Math.min(MAX_ITEM_QUANTITY, Number(quantity) || 1));
   state.orderSuccess = null;
+  state.checkoutStep = "cart";
   const existing = state.cart.find((cartItem) => cartItem.id === item.id);
   if (existing) {
-    existing.qty += safeQuantity;
+    existing.qty = Math.min(MAX_ITEM_QUANTITY, existing.qty + safeQuantity);
   } else {
+    if (state.cart.length >= MAX_CART_ITEMS) {
+      showToast("Cart limit reached", `You can add up to ${MAX_CART_ITEMS} different items.`, "warning");
+      return;
+    }
     state.cart.push({ ...item, qty: safeQuantity });
   }
 
@@ -730,8 +1189,9 @@ function changeQty(itemId, delta) {
   }
 
   state.cart = state.cart
-    .map((item) => (item.id === itemId ? { ...item, qty: item.qty + delta } : item))
+    .map((item) => (item.id === itemId ? { ...item, qty: Math.min(MAX_ITEM_QUANTITY, item.qty + delta) } : item))
     .filter((item) => item.qty > 0);
+  state.checkoutStep = "cart";
   state.cartFeedback = { itemId, type: "updated" };
   saveCart();
   renderCart();
@@ -787,6 +1247,16 @@ function orderMessage() {
   ].join("\n");
 }
 
+function orderSuccessDetails(message) {
+  const text = String(message || "");
+  const match = text.match(/\b(ORD-[A-Za-z0-9-]+|\d{3,})\b/);
+
+  return {
+    orderNumber: match?.[1] || "",
+    message: text,
+  };
+}
+
 function renderCart() {
   const { count, subtotal, tax, packing, total } = cartTotals();
   elements.cartCount.innerHTML = `<span aria-hidden="true">🛒</span><strong>${count}</strong>`;
@@ -811,6 +1281,9 @@ function renderCart() {
   }
 
   if (!state.cart.length) {
+    state.checkoutStep = "cart";
+    setPaymentSelectorVisible(false);
+    const success = orderSuccessDetails(state.orderSuccess);
     elements.cartItems.innerHTML = state.orderSuccess
       ? `<div class="order-success-card">
           <span class="empty-cart-icon" aria-hidden="true">✓</span>
@@ -822,10 +1295,30 @@ function renderCart() {
           <strong>Your cart is empty</strong>
           <span>Add delicious food 🍕</span>
         </div>`;
+    if (state.orderSuccess) {
+      elements.cartItems.innerHTML = `<div class="order-success-card">
+        <span class="success-orbit" aria-hidden="true">
+          <svg class="success-check" viewBox="0 0 52 52" focusable="false">
+            <circle class="success-check-circle" cx="26" cy="26" r="22"></circle>
+            <path class="success-check-mark" d="M16 27.5 23 34 37 18"></path>
+          </svg>
+        </span>
+        <span class="success-eyebrow">Order confirmed</span>
+        <strong>Thank you. We received your order.</strong>
+        ${
+          success.orderNumber
+            ? `<span class="success-order-id">Order ID <b>${escapeHtml(success.orderNumber)}</b></span>`
+            : ""
+        }
+        <span class="success-message">${escapeHtml(success.message)}</span>
+        <span class="success-next-step">The restaurant team will review it shortly.</span>
+      </div>`;
+    }
     elements.placeOrder.disabled = false;
     elements.cartHint.textContent = state.orderSuccess
       ? "Your order is saved in PostgreSQL and ready for the restaurant team."
       : "Add at least one item before sending an order request.";
+    updatePlaceOrderButtonText();
     return;
   }
 
@@ -852,7 +1345,14 @@ function renderCart() {
     .join("");
   state.cartFeedback = null;
 
-  elements.cartHint.textContent = "Check your name and phone before sending the order request.";
+  setPaymentSelectorVisible(state.checkoutStep === "payment");
+  elements.placeOrder.disabled = !isCurrentPhoneVerified();
+  elements.cartHint.textContent = !isCurrentPhoneVerified()
+    ? "Verify your WhatsApp number before placing the order."
+    : state.checkoutStep === "payment"
+      ? "Choose a payment method, then confirm your order."
+      : "Check your name and phone, then proceed to choose a payment method.";
+  updatePlaceOrderButtonText();
 }
 
 function clearCart() {
@@ -868,6 +1368,7 @@ function clearCart() {
   window.setTimeout(() => {
     state.cart = [];
     state.orderSuccess = null;
+    state.checkoutStep = "cart";
     saveCart();
     renderCart();
     renderMenu();
@@ -916,6 +1417,163 @@ async function findOrCreateCustomer({ name, phone }) {
   }
 }
 
+function buildPaymentPayload(customer) {
+  return {
+    customer_id: customer.id,
+    payment_method: selectedPaymentMethod(),
+    otp_verification_token: state.phoneVerification.token,
+    order_type: String(elements.orderType.value || "Pickup").toLowerCase().replace(/\s+/g, "_"),
+    idempotency_key: ensureOrderIdempotencyKey(),
+    special_instructions: `Order type: ${elements.orderType.value}`,
+    items: state.cart.map((item) => ({
+      menu_id: item.id,
+      quantity: item.qty,
+    })),
+  };
+}
+
+function ensureOrderIdempotencyKey() {
+  if (!state.orderIdempotencyKey) {
+    const random = crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    state.orderIdempotencyKey = `web-${random}`;
+  }
+  return state.orderIdempotencyKey;
+}
+
+function completeOrderSuccess({ order, paymentData, message }) {
+  const orderLabel = order?.order_number || paymentData?.order_number || paymentData?.order_id || order?.id || "";
+  const trackingUrl = order?.tracking_url || paymentData?.tracking_url || "";
+  state.cart = [];
+  state.orderSuccess = orderLabel
+    ? `Order ${orderLabel} was sent to the restaurant.${trackingUrl ? ` Track it here: ${trackingUrl}` : ""}`
+    : message || "Your order was sent to the restaurant.";
+  state.orderIdempotencyKey = "";
+  saveCart();
+  renderCart();
+  renderMenu();
+}
+
+async function handleOnlinePayment(customer) {
+  const loaded = await loadRazorpayScript();
+
+  if (!loaded) {
+    throw new Error("Payment service could not be loaded. Please try again.");
+  }
+
+  const result = await requestJson("/payments/create-order", {
+    method: "POST",
+    headers: {
+      "Idempotency-Key": ensureOrderIdempotencyKey(),
+    },
+    body: JSON.stringify(buildPaymentPayload(customer)),
+  });
+
+  return new Promise((resolve, reject) => {
+    const options = {
+      key: result.key_id,
+      amount: result.amount,
+      currency: result.currency,
+      name: "MAHESH",
+      description: `Order ${result.order_number || result.restaurant_order_id}`,
+      order_id: result.razorpay_order_id,
+      method: selectedPaymentMethod(),
+      prefill: {
+        name: customer.name || elements.customerName.value.trim(),
+        email: customer.email || "",
+        contact: customer.phone || elements.customerPhone.value.trim(),
+      },
+      notes: {
+        restaurant_order_id: String(result.restaurant_order_id),
+      },
+      theme: {
+        color: "#dc6b19",
+      },
+      modal: {
+        ondismiss() {
+          reject(new Error("Payment was cancelled before completion."));
+        },
+      },
+      handler: async (response) => {
+        try {
+          const verification = await requestJson("/payments/verify", {
+            method: "POST",
+            body: JSON.stringify({
+              restaurant_order_id: result.restaurant_order_id,
+              razorpay_order_id: response.razorpay_order_id,
+              razorpay_payment_id: response.razorpay_payment_id,
+              razorpay_signature: response.razorpay_signature,
+            }),
+          });
+
+          resolve({ paymentData: verification, orderData: result });
+        } catch (error) {
+          reject(error);
+        }
+      },
+    };
+
+    const paymentObject = new window.Razorpay(options);
+
+    paymentObject.on("payment.failed", (response) => {
+      reject(new Error(response.error?.description || "Payment failed. Please try again."));
+    });
+
+    paymentObject.open();
+  });
+}
+
+async function handleOfflinePayment(customer) {
+  return requestJson("/payments/cash-order", {
+    method: "POST",
+    headers: {
+      "Idempotency-Key": ensureOrderIdempotencyKey(),
+    },
+    body: JSON.stringify(buildPaymentPayload(customer)),
+  });
+}
+
+async function loadCustomerNotifications({ announce = false } = {}) {
+  const phone = elements.customerPhone.value.trim() || localStorage.getItem(CUSTOMER_PHONE_STORAGE_KEY) || "";
+  if (!phone) return;
+
+  try {
+    const notifications = await requestJson(`/notifications/phone/${encodeURIComponent(phone)}`);
+    if (!Array.isArray(notifications) || notifications.length === 0) return;
+
+    const seenIds = seenNotificationIds();
+    const newNotifications = notifications
+      .filter((notification) => !seenIds.has(String(notification.id)))
+      .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+
+    notifications.forEach((notification) => {
+      seenIds.add(String(notification.id));
+    });
+    saveSeenNotificationIds(seenIds);
+
+    if (announce) {
+      newNotifications.slice(-3).forEach((notification) => {
+        const type = notification.type === "order_cancelled" ? "warning" : "success";
+        showToast(notification.title, notification.message, type);
+      });
+    }
+  } catch {
+    // Notification polling should never interrupt menu browsing or ordering.
+  }
+}
+
+function startCustomerNotificationPolling() {
+  const savedPhone = localStorage.getItem(CUSTOMER_PHONE_STORAGE_KEY);
+  if (savedPhone && !elements.customerPhone.value.trim()) {
+    elements.customerPhone.value = savedPhone;
+    refreshOtpUi();
+  }
+
+  loadCustomerNotifications({ announce: false });
+  window.setInterval(() => {
+    loadCustomerNotifications({ announce: true });
+  }, 30000);
+}
+
 async function placeOrder() {
   if (!state.cart.length) {
     document.querySelector("#menu").scrollIntoView({ behavior: "smooth" });
@@ -925,9 +1583,41 @@ async function placeOrder() {
 
   const name = elements.customerName.value.trim();
   const phone = elements.customerPhone.value.trim();
+  const { total } = cartTotals();
 
   if (!name || !phone) {
     showToast("Name and phone required", "Add customer details before sending the order.", "warning");
+    return;
+  }
+
+  if (!isCurrentPhoneVerified()) {
+    const largeOrder = total >= LARGE_ORDER_LOGIN_AMOUNT;
+    const sent = await sendPhoneOtp({ announceDevOtp: true });
+    if (sent) {
+      showToast(
+        largeOrder ? "Phone login required" : "Verify phone",
+        largeOrder
+          ? "Large orders of Rs. 1000+ need OTP verification before checkout."
+          : "Enter the OTP to continue checkout.",
+        "warning"
+      );
+    }
+    return;
+  }
+
+  if (state.checkoutStep !== "payment") {
+    state.checkoutStep = "payment";
+    setPaymentSelectorVisible(true);
+    await loadPaymentMethods();
+    renderCart();
+    showToast("Choose payment method", "Select how you want to pay, then confirm the order.", "info");
+    return;
+  }
+
+  if (isOnlinePayment() && !state.onlinePaymentsEnabled) {
+    showToast("Online payment not configured", "Choose Cash on Delivery or Pay at Restaurant Counter for now.", "warning");
+    selectPaymentMethod("cash_on_delivery");
+    updatePlaceOrderButtonText();
     return;
   }
 
@@ -935,34 +1625,37 @@ async function placeOrder() {
   elements.placeOrder.textContent = "Sending...";
 
   try {
+    saveCustomerPhone(phone);
     const customer = await findOrCreateCustomer({ name, phone });
-    const order = await requestJson("/orders", {
-      method: "POST",
-      body: JSON.stringify({
-        customer_id: customer.id,
-        payment_method: "Cash",
-        special_instructions: `Order type: ${elements.orderType.value}`,
-        items: state.cart.map((item) => ({
-          menu_id: item.id,
-          quantity: item.qty,
-        })),
-      }),
-    });
+    if (isOnlinePayment()) {
+      const result = await handleOnlinePayment(customer);
+      completeOrderSuccess({
+        paymentData: result.paymentData,
+        order: { order_number: result.orderData.order_number, id: result.orderData.restaurant_order_id },
+      });
+      showToast("Payment confirmed", state.orderSuccess, "success");
+    } else {
+      const order = await handleOfflinePayment(customer);
+      completeOrderSuccess({
+        order: order.order,
+        message: "Your order was sent to the restaurant.",
+      });
+      showToast(order.notification?.title || "Order saved", order.notification?.message || state.orderSuccess, "success");
+    }
 
-    const orderLabel = order.order_number || order.id || "";
-    state.cart = [];
-    state.orderSuccess = orderLabel
-      ? `Order ${orderLabel} was sent to the restaurant.`
-      : "Your order was sent to the restaurant.";
-    saveCart();
-    renderCart();
-    renderMenu();
-    showToast("Order saved", state.orderSuccess, "success");
+    await loadCustomerNotifications({ announce: false });
   } catch (error) {
-    showToast("Unable to place order", error.message || "Please try again.", "warning");
+    const message = error.message || "Please try again.";
+    if (/razorpay environment variables are missing/i.test(message)) {
+      state.onlinePaymentsEnabled = false;
+      applyPaymentAvailability();
+      showToast("Online payment not configured", "Choose Cash on Delivery or Pay at Restaurant Counter for now.", "warning");
+    } else {
+      showToast("Unable to place order", message, "warning");
+    }
   } finally {
     elements.placeOrder.disabled = false;
-    elements.placeOrder.textContent = "Send order request";
+    updatePlaceOrderButtonText();
   }
 }
 
@@ -1093,6 +1786,271 @@ function formatItemList(items) {
   return items.map((item) => `${item.name} (${formatPrice(item.price)})`).join(", ");
 }
 
+function uniqueMenuItems(items) {
+  const seen = new Set();
+  return items.filter((item) => {
+    const key = normalizeCompactText(item.name);
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function itemMatchesAny(item, words) {
+  const text = normalizeMenuText(`${item.name} ${item.category}`);
+  return words.some((word) => text.includes(word));
+}
+
+function localItemsByName(names, limit = 6) {
+  const picks = names
+    .map((name) => {
+      const target = normalizeCompactText(name);
+      return menuItems.find((item) => normalizeCompactText(item.name).includes(target));
+    })
+    .filter(Boolean);
+
+  return uniqueMenuItems(picks).slice(0, limit);
+}
+
+function localFavoriteItems(limit = 6) {
+  const picks = localItemsByName([
+    "spring roll",
+    "spicy veg burger",
+    "paneer tikka pizza",
+    "mexican pizza",
+    "samosa chaat",
+    "biscoff pastry",
+    "cheese cake pastry",
+    "mint mojito",
+    "rasmalai",
+  ], limit);
+
+  return picks.length ? picks : uniqueMenuItems(recommendationItems("recommend spicy snacks")).slice(0, limit);
+}
+
+function localSpicyItems(limit = 6) {
+  const picks = localItemsByName([
+    "spring roll",
+    "spicy veg burger",
+    "paneer tikka pizza",
+    "mexican pizza",
+    "samosa chaat",
+    "pav bhaji",
+  ], limit);
+
+  return picks.length ? picks : uniqueMenuItems(recommendationItems("spicy snacks")).slice(0, limit);
+}
+
+function normalizeIntentText(question = "") {
+  return String(question)
+    .toLowerCase()
+    .replace(/[^a-z0-9\s']/g, " ")
+    .replace(/\bwaht\b/g, "what")
+    .replace(/\bwht\b/g, "what")
+    .replace(/\bwat\b/g, "what")
+    .replace(/\bshoud\b/g, "should")
+    .replace(/\bshuld\b/g, "should")
+    .replace(/\btodays\b/g, "today")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isMealRecommendationQuestion(question) {
+  const normalizedText = normalizeIntentText(question);
+
+  return (
+    /\b(what|which|suggest|recommend|confused|hungry)\b/.test(normalizedText) &&
+    /\b(should|can|to|want|eat|order|try|have)\b/.test(normalizedText) &&
+    /\b(eat|order|try|have|food|item|snack|meal|today)\b/.test(normalizedText)
+  );
+}
+
+function localMealRecommendation(question) {
+  const normalizedText = normalizeIntentText(question);
+  let picks = [];
+
+  if (normalizedText.includes("spicy")) {
+    picks = localSpicyItems(5);
+  } else if (normalizedText.includes("sweet") || normalizedText.includes("dessert")) {
+    picks = localItemsByName(["biscoff pastry", "cheese cake pastry", "rasmalai", "gulab jamun", "falooda kulfi"], 5);
+  } else if (normalizedText.includes("light")) {
+    picks = localItemsByName(["spring roll", "samosa chaat", "mint mojito", "mixed fruit juice"], 5);
+  } else {
+    picks = localFavoriteItems(5);
+  }
+
+  if (!picks.length) return "";
+
+  return `If you are not sure what to eat today, I would suggest: ${formatItemList(picks)}. For a quick snack, pick Spring Roll or Spicy Veg Burger. For something filling, pick Paneer Tikka Pizza.`;
+}
+
+function localBirthdayComboItems() {
+  return localItemsByName(["cheese cake pastry", "spring roll", "paneer tikka pizza", "mint mojito", "rasmalai"], 5);
+}
+
+function localTodaySpecialItems() {
+  return localFavoriteItems(6);
+}
+
+function localEgglessCandidateItems() {
+  return uniqueMenuItems(
+    menuItems.filter((item) => itemMatchesAny(item, ["cake", "pastry", "muffin", "pudding", "pie"]))
+  ).slice(0, 6);
+}
+
+function handleLocalMenuQuestion(question) {
+  if (isCartCommand(question)) return "";
+  if (state.menuStatus !== "ready" || !menuItems.length) return "";
+
+  const text = question.toLowerCase();
+  if (isMealRecommendationQuestion(question)) {
+    const recommendation = localMealRecommendation(question);
+    if (recommendation) return recommendation;
+  }
+
+  const directItem = findMenuItemFromText(question);
+  if (directItem) {
+    return `${directItem.name} is available for ${formatPrice(directItem.price)}. Would you like me to add it to your cart?`;
+  }
+
+  if (text.includes("taste") && text.includes("pizza")) {
+    const pizzas = localItemsByName(["mexican pizza", "paneer tikka pizza", "onion and capsicum pizza", "veg cheese pizza", "veggie supreme pizza"], 5);
+    if (pizzas.length) {
+      return `Pizza taste depends on your choice: Mexican Pizza is tangy and slightly spicy, Paneer Tikka Pizza is smoky and creamy, Onion and Capsicum Pizza is classic veg, and Veg Cheese Pizza is mild and cheesy. Current pizza options: ${formatItemList(pizzas)}.`;
+    }
+  }
+
+  if (text.includes("best") || text.includes("taste") || text.includes("popular")) {
+    const favorites = localFavoriteItems(6);
+    if (favorites.length) {
+      return `For best taste, I recommend: ${formatItemList(favorites)}. Spring Roll and Spicy Veg Burger are good savory picks; Biscoff Pastry is better if you want sweet.`;
+    }
+  }
+
+  if (text.includes("spicy") && (text.includes("recommend") || text.includes("suggest") || text.includes("snack") || text.includes("eat"))) {
+    const spicyItems = localSpicyItems(6);
+    if (spicyItems.length) {
+      return `For spicy taste, I recommend: ${formatItemList(spicyItems)}. Spring Roll and Spicy Veg Burger are quick choices; Paneer Tikka Pizza or Mexican Pizza are more filling.`;
+    }
+  }
+
+  if (text.includes("pizza") && /(?:under|below|less than|upto|up to|rs\.?|₹)\s*(\d+)/i.test(question)) {
+    const pizzas = localItemsByName(["mexican pizza", "paneer tikka pizza", "onion and capsicum pizza", "veg cheese pizza"], 4);
+    const cheapestPizza = pizzas.slice().sort((a, b) => a.price - b.price)[0];
+    if (cheapestPizza) {
+      return `I could not find pizza under that budget. The closest pizza starts with ${cheapestPizza.name} at ${formatPrice(cheapestPizza.price)}. Closest choices: ${formatItemList(pizzas)}.`;
+    }
+  }
+
+  const budgetItems = itemsUnderBudget(question);
+  if (budgetItems.length) {
+    return `Here are menu items in your budget: ${formatItemList(uniqueMenuItems(budgetItems).slice(0, 6))}.`;
+  }
+
+  if (text.includes("birthday") || text.includes("combo")) {
+    const comboItems = localBirthdayComboItems();
+    if (comboItems.length) {
+      return `A good birthday combo from the menu is: ${formatItemList(comboItems)}.`;
+    }
+  }
+
+  if (text.includes("today") && text.includes("special")) {
+    const specialItems = localTodaySpecialItems();
+    if (specialItems.length) {
+      return `Today's suggested specials are: ${formatItemList(specialItems)}.`;
+    }
+  }
+
+  if (text.includes("eggless")) {
+    const candidates = localEgglessCandidateItems();
+    if (candidates.length) {
+      return `I need the live database to confirm eggless flags, but these cake and bakery items are on the menu: ${formatItemList(candidates)}.`;
+    }
+  }
+
+  if (/\b(recommend|suggest|spicy|snack|food|eat|hungry|pizza|burger|roll|chaat|chinese|drink|sweet|dessert)\b/.test(text)) {
+    const recommendations = uniqueMenuItems(recommendationItems(question)).slice(0, 6);
+    if (recommendations.length) {
+      return `I recommend: ${formatItemList(recommendations)}. Would you like me to add any item to your cart?`;
+    }
+  }
+
+  const context = retrieveContext(question, 3).filter((doc) => doc.type === "item" || doc.type === "category");
+  if (context.length) {
+    const contextItems = uniqueMenuItems(
+      context.flatMap((doc) => (doc.item ? [doc.item] : doc.items || []))
+    ).slice(0, 6);
+
+    if (contextItems.length) {
+      return `I found these menu matches: ${formatItemList(contextItems)}.`;
+    }
+  }
+
+  return "";
+}
+
+function handleLocalCustomerQuestion(question) {
+  const text = question.toLowerCase();
+  const normalizedText = text.replace(/[^a-z0-9\s']/g, " ").replace(/\s+/g, " ").trim();
+  const compactText = normalizeCompactText(normalizedText);
+
+  if (/^(hy|hyy|hi|hii|hiii|hlo|helo|hello|hey|heyy|namaste|sat sri akal|ssakal)$/.test(normalizedText) || /^(hy|hyy|hii|hiii|hlo|helo|hello|hey|heyy)$/.test(compactText)) {
+    return "Hello! How can I help you today?";
+  }
+
+  if (/\b(how are you|how r you|how are u|hows your day|how's your day|how is your day|how was your day|kaise ho)\b/.test(normalizedText)) {
+    return "I am doing well, thanks for asking. How can I help you with the menu today?";
+  }
+
+  if (/\b(good morning|good afternoon|good evening|good night)\b/.test(normalizedText)) {
+    return "Hello! Hope you are having a good day. How can I help you with food or ordering?";
+  }
+
+  if (/\b(thank|thanks|thank you|thx)\b/.test(normalizedText)) {
+    return "You are welcome. I am here if you want menu suggestions, prices, or help placing an order.";
+  }
+
+  if (/\b(who are you|what can you do|help me|what should i ask)\b/.test(normalizedText)) {
+    return "I can help you choose food, compare prices, find spicy or sweet items, suggest combos, answer timing/location questions, and add items to your cart when you say add or order.";
+  }
+
+  if (/\b(open|close|closing|timing|time|hours|shop time)\b/.test(text)) {
+    const settings = state.restaurantSettings || defaultRestaurantSettings;
+    return `${settings.restaurantName} is shown as open from ${restaurantHoursText(settings)}. For urgent visits, please confirm with the restaurant before travelling.`;
+  }
+
+  if (/\b(address|location|where|located|map|reach)\b/.test(text)) {
+    const settings = state.restaurantSettings || defaultRestaurantSettings;
+    return `${settings.restaurantName} is listed at ${settings.address}. You can also use the contact section on this website for contact details and directions.`;
+  }
+
+  if (/\b(custom|customize|customise|birthday cake|cake order|preorder|pre order|advance order|bulk|party)\b/.test(text)) {
+    return "For custom cakes, party orders, or bulk orders, please contact the restaurant in advance. I can still help you browse cakes, snacks, drinks, and combo ideas.";
+  }
+
+  if (/\b(order|place order|how to buy|checkout|cart)\b/.test(text)) {
+    return "To order, add items to the cart, enter your name and phone number, choose pickup, dine-in, or delivery, then send the order request.";
+  }
+
+  if (/\b(delivery|deliver|pickup|dine in|dine-in|takeaway|take away)\b/.test(text)) {
+    return "You can choose pickup, dine-in, or delivery on the order form. Delivery availability may depend on your location, so the restaurant can confirm after you send the request.";
+  }
+
+  if (/\b(payment|pay|cash|online|upi|card)\b/.test(text)) {
+    return "Checkout supports UPI, card, net banking, wallet, Cash on Delivery, and Pay at Restaurant Counter. Online payments are confirmed only after secure server verification.";
+  }
+
+  if (/\b(cancel|cancellation|refund|return|exchange|replace|replacement|change order|modify)\b/.test(text)) {
+    return "For cancellation, return, exchange, or refund requests, please contact the restaurant as soon as possible with your order details.";
+  }
+
+  if (/\b(allergy|allergic|allergen|nuts|peanut|gluten|dairy|egg|eggs|vegan|jain)\b/.test(text)) {
+    return "Please mention any allergy or dietary requirement before ordering. Ingredients and cross-contact should be confirmed directly with the restaurant for safety.";
+  }
+
+  return "";
+}
+
 const quantityWords = {
   a: 1,
   an: 1,
@@ -1119,14 +2077,134 @@ function normalizeMenuText(value) {
     .join(" ");
 }
 
+function normalizeCompactText(value = "") {
+  return String(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+}
+
+function stripMenuQuestionWords(value = "") {
+  return String(value)
+    .toLowerCase()
+    .replace(/\b(do you have|would like|can i get)\b/g, " ")
+    .replace(/\b(i|we|me|my|please|kindly)\b/g, " ")
+    .replace(/\b(do|does|want|wanna|like|eat|have|try|taste|craving|hungry|suggest|recommend|available|is|are|can|you|tell|about|price|cost|rate|of|for)\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function quantityFromText(value) {
   const normalized = String(value).toLowerCase();
   if (/^\d+$/.test(normalized)) return Number(normalized);
   return quantityWords[normalized] || 1;
 }
 
-function isCartIntent(question) {
-  return /\b(add|order|want|need|get|give me|put|cart|i'll have|ill have|can i get|send me)\b/i.test(question);
+function isCartCommand(question) {
+  const normalized = String(question).toLowerCase();
+
+  return (
+    /\badd\b/.test(normalized) ||
+    /\border\b/.test(normalized) ||
+    /\bbuy\b/.test(normalized) ||
+    /\bput\b/.test(normalized) ||
+    /\bcart\b/.test(normalized) ||
+    /\bremove\b/.test(normalized) ||
+    /\bdelete\b/.test(normalized) ||
+    /\bclear\b/.test(normalized) ||
+    /\bshow my cart\b/.test(normalized) ||
+    /\bcart total\b/.test(normalized) ||
+    /\btotal\b/.test(normalized) ||
+    /\bincrease\b/.test(normalized) ||
+    /\bdecrease\b/.test(normalized) ||
+    /\breplace\b/.test(normalized) ||
+    /\bi'?ll have\b/.test(normalized) ||
+    /\bsend me\b/.test(normalized)
+  );
+}
+
+function rememberRecommendedItems(answer = "") {
+  const answerText = normalizeCompactText(answer);
+  const mentioned = menuItems.filter((item) => answerText.includes(normalizeCompactText(item.name)));
+  state.lastRecommendedItems = uniqueMenuItems(mentioned).slice(0, 6);
+}
+
+function formatCartForChat() {
+  if (!state.cart.length) return "Your cart is empty.";
+  return cartSummaryText("Your cart has:");
+}
+
+function findCartItemFromText(text) {
+  const item = findMenuItemFromText(text, state.cart);
+  if (item) return item;
+
+  const normalizedText = normalizeMenuText(text);
+  return state.cart.find((cartItem) => normalizedText.includes(normalizeMenuText(cartItem.name))) || null;
+}
+
+function setCartItemQuantity(itemId, quantity) {
+  const safeQuantity = Math.min(MAX_ITEM_QUANTITY, Math.max(0, Number(quantity) || 0));
+
+  if (safeQuantity <= 0) {
+    state.cart = state.cart.filter((item) => item.id !== itemId);
+  } else {
+    state.cart = state.cart.map((item) => (item.id === itemId ? { ...item, qty: safeQuantity } : item));
+  }
+  saveCart();
+  renderCart();
+  renderMenu();
+}
+
+function handleCartManagementCommand(question) {
+  const text = question.toLowerCase();
+
+  if (/\b(show my cart|show cart|cart total|what is my cart total|total)\b/.test(text)) {
+    return formatCartForChat();
+  }
+
+  if (/\b(clear cart|clear my cart|empty cart|remove all)\b/.test(text)) {
+    state.cart = [];
+    saveCart();
+    renderCart();
+    renderMenu();
+    return "Done. I cleared your cart.";
+  }
+
+  if (/\badd\b/.test(text) && /\b(recommended|recommendation|combo)\b/.test(text) && state.lastRecommendedItems.length) {
+    state.lastRecommendedItems.forEach((item) => addItemToCart(item, 1));
+    return `Done. I added the recommended items:\n${state.lastRecommendedItems.map((item) => `1 x ${item.name}`).join("\n")}\n\n${cartSummaryText("Your cart now has:")}`;
+  }
+
+  if (/\breplace\b/.test(text) && text.includes(" with ")) {
+    const [oldPart, newPart] = text.split(/\bwith\b/);
+    const oldItem = findCartItemFromText(oldPart);
+    const newItem = findMenuItemForPhrase(newPart);
+
+    if (!oldItem) return "I could not find the item to replace in your cart.";
+    if (!newItem) return "I could not find the replacement item in the menu.";
+
+    const oldQty = oldItem.qty || 1;
+    setCartItemQuantity(oldItem.id, 0);
+    addItemToCart(newItem, oldQty);
+    return `Done. I replaced ${oldItem.name} with ${newItem.name}.\n\n${cartSummaryText("Your cart now has:")}`;
+  }
+
+  if (/\b(remove|delete)\b/.test(text)) {
+    const item = findCartItemFromText(text);
+    if (!item) return "I could not find that item in your cart.";
+    setCartItemQuantity(item.id, 0);
+    return `Done. I removed ${item.name} from your cart.\n\n${formatCartForChat()}`;
+  }
+
+  const quantityMatch = text.match(/\b(?:increase|set|change)\b.+?\b(?:to|quantity to)\s+(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\b/);
+  if (quantityMatch) {
+    const item = findCartItemFromText(text);
+    if (!item) return "I could not find that item in your cart.";
+    const quantity = quantityFromText(quantityMatch[1]);
+    setCartItemQuantity(item.id, quantity);
+    return `Done. I set ${item.name} quantity to ${quantity}.\n\n${cartSummaryText("Your cart now has:")}`;
+  }
+
+  return "";
 }
 
 function splitOrderSegments(question) {
@@ -1140,6 +2218,7 @@ function splitOrderSegments(question) {
     .map((segment) =>
       segment
         .replace(/\b(please|kindly|can i|could i|would like|i would like|i want|i need|i'll have|ill have|add|order|get|give me|put|to my cart|to cart|in cart|for me)\b/g, " ")
+        .replace(/\b(buy|add to cart|put in cart|put it in cart)\b/g, " ")
         .replace(/\s+/g, " ")
         .trim()
     )
@@ -1147,7 +2226,7 @@ function splitOrderSegments(question) {
 }
 
 function extractCartRequests(question) {
-  if (!isCartIntent(question)) return [];
+  if (!isCartCommand(question)) return [];
 
   const quantityPattern = /^(?<qty>\d+|one|two|three|four|five|six|seven|eight|nine|ten|a|an)\s+(?<name>.+)$/i;
 
@@ -1163,6 +2242,33 @@ function extractCartRequests(question) {
       return { quantity, name };
     })
     .filter((request) => request.name.length > 1);
+}
+
+function findMenuItemFromText(userText, items = menuItems) {
+  const cleanUserText = normalizeCompactText(stripMenuQuestionWords(userText));
+  const cleanFullText = normalizeCompactText(userText);
+
+  if (!cleanUserText && !cleanFullText) return null;
+
+  const matches = items
+    .map((item) => {
+      const itemName = normalizeCompactText(item.name);
+      const singularItemName = itemName.replace(/s$/, "");
+      const searchableText = cleanUserText || cleanFullText;
+      let score = 0;
+
+      if (!itemName) return { item, score };
+      if (searchableText === itemName || searchableText === singularItemName) score += 120;
+      if (cleanFullText.includes(itemName) || cleanFullText.includes(singularItemName)) score += 100;
+      if (itemName.includes(searchableText) || singularItemName.includes(searchableText)) score += 70;
+      if (score > 0) score += Math.max(0, 30 - item.name.length);
+
+      return { item, score };
+    })
+    .filter((match) => match.score > 0)
+    .sort((a, b) => b.score - a.score);
+
+  return matches[0]?.item || null;
 }
 
 function scoreMenuMatch(item, phrase) {
@@ -1189,13 +2295,26 @@ function scoreMenuMatch(item, phrase) {
 }
 
 function findMenuItemForPhrase(phrase) {
+  const exactCompactMatch = findMenuItemFromText(phrase);
+  if (exactCompactMatch) return exactCompactMatch;
+
   return menuItems
     .map((item) => ({ item, score: scoreMenuMatch(item, phrase) }))
-    .filter((match) => match.score > 0)
+    .filter((match) => match.score >= 30)
     .sort((a, b) => {
       if (b.score !== a.score) return b.score - a.score;
       return a.item.name.length - b.item.name.length;
     })[0]?.item || null;
+}
+
+function handleMenuAvailabilityQuestion(question) {
+  if (isCartCommand(question)) return "";
+  if (state.menuStatus !== "ready" || !menuItems.length) return "";
+
+  const item = findMenuItemFromText(question);
+  if (!item) return "";
+
+  return `${item.name} is available for ${formatPrice(item.price)}. Would you like me to add it to your cart?`;
 }
 
 function cartSummaryText(prefix = "Done! Your cart now has:") {
@@ -1205,6 +2324,9 @@ function cartSummaryText(prefix = "Done! Your cart now has:") {
 }
 
 function handleCartAction(question) {
+  const managementAnswer = handleCartManagementCommand(question);
+  if (managementAnswer) return managementAnswer;
+
   const requests = extractCartRequests(question);
   if (!requests.length) return "";
 
@@ -1243,6 +2365,24 @@ function handleCartAction(question) {
 
 function setChatStatus(message) {
   elements.chatStatus.textContent = message;
+}
+
+function setChatSending(isSending) {
+  state.chatSending = isSending;
+
+  const sendButton = elements.chatForm?.querySelector("button[type='submit']");
+  if (sendButton) {
+    sendButton.disabled = isSending;
+    sendButton.textContent = isSending ? "Sending..." : "Send";
+  }
+
+  if (elements.chatInput) {
+    elements.chatInput.disabled = isSending;
+  }
+
+  elements.chatPrompts?.querySelectorAll("[data-question]").forEach((button) => {
+    button.disabled = isSending;
+  });
 }
 
 function speakAnswer(message) {
@@ -1306,35 +2446,63 @@ function backendAnswer(data) {
 
 function chatStatusForResponse(data) {
   if (data.type === "voice_recommendation") return "Voice recommendation service";
+  if (data.type === "database_menu") return "Live database menu";
   if (data.type === "database_fallback") return "Live menu fallback";
+  if (data.type === "customer_concierge") return "Customer assistant";
   return "Backend RAG answered";
 }
 
 async function askChatbot(question) {
-  addChatMessage("user", question);
+  const cleanQuestion = String(question || "").trim();
+  if (!cleanQuestion) return;
 
-  const cartActionAnswer = handleCartAction(question);
-  if (cartActionAnswer) {
-    addChatMessage("bot", cartActionAnswer);
-    setChatStatus("Cart updated by AI");
-    speakAnswer(cartActionAnswer);
+  if (state.chatSending) {
+    showToast("Please wait", "The assistant is still answering your last question.", "info");
     return;
   }
 
-  const pendingMessage = addChatMessage("bot", "Searching MAHESH menu knowledge...");
-  setChatStatus("Checking backend RAG...");
+  if (cleanQuestion.length > MAX_MESSAGE_LENGTH) {
+    addChatMessage("user", cleanQuestion.slice(0, MAX_MESSAGE_LENGTH));
+    const answer = `Your question is too long. Please keep it under ${MAX_MESSAGE_LENGTH} characters.`;
+    addChatMessage("bot", answer);
+    setChatStatus("Question too long");
+    speakAnswer(answer);
+    return;
+  }
+
+  setChatSending(true);
+  addChatMessage("user", cleanQuestion);
+  let pendingMessage = null;
 
   try {
+    const cartActionAnswer = handleCartAction(cleanQuestion);
+    if (cartActionAnswer) {
+      addChatMessage("bot", cartActionAnswer);
+      setChatStatus("Cart updated by AI");
+      speakAnswer(cartActionAnswer);
+      return;
+    }
+
+    pendingMessage = addChatMessage("bot", "Searching MAHESH menu knowledge...");
+    setChatStatus("Checking backend RAG...");
+
     const response = await fetchApi("/chat", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ question }),
+      body: JSON.stringify({ question: cleanQuestion }),
     });
 
     if (!response.ok) {
-      throw new Error("AI assistant API failed");
+      const errorData = await response.json().catch(() => ({}));
+      if (errorData.message) {
+        pendingMessage.textContent = errorData.message;
+        setChatStatus("Assistant request limited");
+        speakAnswer(errorData.message);
+        return;
+      }
+      throw new Error(errorData.message || "AI assistant API failed");
     }
 
     const data = await response.json();
@@ -1343,13 +2511,28 @@ async function askChatbot(question) {
       throw new Error("AI service returned an empty answer");
     }
     pendingMessage.textContent = answer;
+    rememberRecommendedItems(answer);
     setChatStatus(chatStatusForResponse(data));
     speakAnswer(answer);
   } catch (error) {
-    const answer = "The backend AI service is unavailable right now. Please start the RAG/Gemini service and try again.";
-    pendingMessage.textContent = answer;
-    setChatStatus("Backend AI unavailable");
+    console.warn("Customer AI backend unavailable:", error);
+    const fallbackAnswer =
+      handleLocalMenuQuestion(cleanQuestion) ||
+      handleMenuAvailabilityQuestion(cleanQuestion) ||
+      handleLocalCustomerQuestion(cleanQuestion);
+    const answer =
+      fallbackAnswer ||
+      "I can help with menu suggestions, prices, cart ordering, shop timing, and location. You can ask: recommend spicy snacks, show drinks under Rs. 100, what is today's special, or add one Spring Roll.";
+    if (pendingMessage) {
+      pendingMessage.textContent = answer;
+    } else {
+      addChatMessage("bot", answer);
+    }
+    rememberRecommendedItems(answer);
+    setChatStatus(fallbackAnswer ? "Saved menu answer" : "Customer assistant ready");
     speakAnswer(answer);
+  } finally {
+    setChatSending(false);
   }
 }
 
@@ -1444,10 +2627,36 @@ function bindEvents() {
   elements.searchInput.addEventListener("input", renderMenu);
   elements.clearCart.addEventListener("click", clearCart);
   elements.customerName.addEventListener("input", renderCart);
-  elements.customerPhone.addEventListener("input", renderCart);
+  elements.customerPhone.addEventListener("input", () => {
+    if (normalizePhone(elements.customerPhone.value) !== state.phoneVerification.phone) {
+      clearPhoneVerification();
+    }
+    renderCart();
+    refreshOtpUi();
+    saveCustomerPhone(elements.customerPhone.value);
+  });
   elements.orderType.addEventListener("change", renderCart);
+  elements.paymentMethods?.addEventListener("change", () => {
+    state.paymentMethod = selectedPaymentMethod();
+    updatePlaceOrderButtonText();
+  });
 
   elements.placeOrder.addEventListener("click", placeOrder);
+  elements.sendOtp?.addEventListener("click", () => {
+    sendPhoneOtp();
+  });
+  elements.verifyOtp?.addEventListener("click", () => {
+    verifyPhoneOtp();
+  });
+  elements.otpInput?.addEventListener("input", () => {
+    elements.otpInput.value = elements.otpInput.value.replace(/\D/g, "").slice(0, 6);
+  });
+  elements.otpInput?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      verifyPhoneOtp();
+    }
+  });
 
   elements.chatToggle.addEventListener("click", () => {
     document.querySelector("#ai").scrollIntoView({ behavior: "smooth" });
@@ -1603,12 +2812,118 @@ function setupActiveNavigation() {
   }
 }
 
+function trackingTokenFromPath() {
+  const match = window.location.pathname.match(/\/track-order\/([A-Za-z0-9_-]+)/);
+  return match?.[1] || "";
+}
+
+function renderTrackingShell() {
+  document.querySelector(".site-header")?.remove();
+  document.querySelector(".site-footer")?.remove();
+  document.querySelector("main").innerHTML = `
+    <section class="tracking-page">
+      <div class="tracking-card">
+        <span class="eyebrow">Live order tracking</span>
+        <h1 id="trackingTitle">Loading your order...</h1>
+        <p id="trackingMeta">Please wait while we fetch the latest restaurant status.</p>
+        <div id="trackingTimeline" class="tracking-timeline"></div>
+        <div id="trackingItems" class="tracking-items"></div>
+        <p id="trackingUpdated" class="tracking-updated"></p>
+      </div>
+    </section>
+  `;
+}
+
+function statusText(status) {
+  return String(status || "")
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function renderTrackedOrder(data) {
+  const title = document.querySelector("#trackingTitle");
+  const meta = document.querySelector("#trackingMeta");
+  const timeline = document.querySelector("#trackingTimeline");
+  const items = document.querySelector("#trackingItems");
+  const updated = document.querySelector("#trackingUpdated");
+  if (!title || !meta || !timeline || !items || !updated) return;
+
+  title.textContent = `Order #${data.orderNumber}`;
+  meta.textContent = `${data.customerFirstName} • ${data.maskedPhone} • ${statusText(data.orderType)} • Payment ${data.paymentStatus || "Pending"}`;
+
+  const currentIndex = data.timeline.indexOf(data.currentStatus);
+  timeline.innerHTML = data.timeline
+    .map((status, index) => {
+      const isDone = currentIndex >= index || data.currentStatus === "completed";
+      const isCurrent = data.currentStatus === status;
+      return `<div class="tracking-step ${isDone ? "is-done" : ""} ${isCurrent ? "is-current" : ""}">
+        <span></span><strong>${escapeHtml(statusText(status))}</strong>
+      </div>`;
+    })
+    .join("");
+
+  if (data.currentStatus === "cancelled") {
+    timeline.innerHTML = `<div class="tracking-cancelled"><strong>Cancelled</strong><span>${escapeHtml(data.cancellationReason || "Please contact the restaurant.")}</span></div>`;
+  }
+
+  items.innerHTML = `
+    <h2>Items</h2>
+    ${(data.items || [])
+      .map((item) => `<div><span>${escapeHtml(item.name)} x${Number(item.quantity || 0)}</span><strong>${formatPrice(item.total_price)}</strong></div>`)
+      .join("")}
+    ${data.estimatedReadyAt ? `<p>Estimated ready: ${new Date(data.estimatedReadyAt).toLocaleString()}</p>` : ""}
+  `;
+  updated.textContent = `Last updated ${data.lastUpdatedAt ? new Date(data.lastUpdatedAt).toLocaleString() : "just now"}`;
+}
+
+async function loadTrackedOrder(token) {
+  const data = await requestJson(`/orders/track/${encodeURIComponent(token)}`);
+  renderTrackedOrder(data);
+}
+
+function startTrackingPage() {
+  const token = trackingTokenFromPath();
+  if (!token) return false;
+
+  renderTrackingShell();
+  loadTrackedOrder(token).catch((error) => {
+    document.querySelector("#trackingTitle").textContent = "Tracking link unavailable";
+    document.querySelector("#trackingMeta").textContent = error.message || "Please check the link and try again.";
+  });
+
+  try {
+    const source = new EventSource(apiUrl(`/orders/track/${encodeURIComponent(token)}/events`));
+    source.addEventListener("order", (event) => {
+      renderTrackedOrder(JSON.parse(event.data));
+    });
+    source.onerror = () => {
+      source.close();
+      window.setInterval(() => loadTrackedOrder(token).catch(() => {}), 15000);
+    };
+  } catch {
+    window.setInterval(() => loadTrackedOrder(token).catch(() => {}), 15000);
+  }
+
+  return true;
+}
+
+if (startTrackingPage()) {
+  loadPublicSettings();
+} else {
+loadPublicSettings();
 updateMenuStats();
 restoreCart();
+loadPhoneVerification();
 renderFilters();
 renderMenu();
 renderCart();
 bindEvents();
+refreshOtpUi();
 setupActiveNavigation();
 setupVoiceSystem();
+startCustomerNotificationPolling();
+loadPaymentMethods();
 loadLiveMenu();
+window.setInterval(loadLiveMenu, 60000);
+window.setInterval(loadPublicSettings, 30000);
+}

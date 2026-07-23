@@ -23,10 +23,10 @@ import express from "express";
 import cors from "cors";
 
 import { pool } from "./config/database.js";
-import { errorHandler } from "./middleware/index.js";
 
 // Routes
 import authRoutes from "./routes/authRoutes.js";
+import whatsappAuthRoutes from "./routes/whatsappAuthRoutes.js";
 import menuRoutes from "./routes/menuRoutes.js";
 import categoriesRoutes from "./routes/categoriesRoutes.js";
 import ordersRoutes from "./routes/orderRoutes.js";
@@ -38,9 +38,19 @@ import predictionRoutes from "./routes/predictionRoutes.js";
 import reportsRoutes from "./routes/reportsRoutes.js";
 import recommendationsRoutes from "./routes/recommendationsRoutes.js";
 import inventoryRoutes from "./routes/inventoryRoutes.js";
+import productsRoutes from "./routes/productsRoutes.js";
+import supplierRoutes from "./routes/supplierRoutes.js";
 import chatbotRoutes from "./routes/chatbotRoutes.js";
 import aiAssistantRoutes from "./routes/aiAssistantRoutes.js";
 import ocrRoutes from "./routes/ocrRoutes.js";
+import notificationsRoutes from "./routes/notificationsRoutes.js";
+import paymentRoutes from "./routes/paymentRoutes.js";
+import settingsRoutes from "./routes/settingsRoutes.js";
+import barcodeRoutes from "./routes/barcodeRoutes.js";
+import counterSaleRoutes from "./routes/counterSaleRoutes.js";
+import adminOrderRoutes from "./routes/adminOrderRoutes.js";
+import whatsappWebhookRoutes from "./routes/whatsappWebhookRoutes.js";
+import { handleWebhook } from "./controllers/paymentController.js";
 
 const app = express();
 
@@ -50,16 +60,13 @@ const app = express();
 
 const defaultAllowedOrigins = [
   "http://localhost:5173",
-  "http://127.0.0.1:5173",
-
   "http://localhost:5174",
+  "http://127.0.0.1:5173",
   "http://127.0.0.1:5174",
-
-  "http://localhost:3000",
-  "http://127.0.0.1:3000",
-
-  "http://localhost:5500",
-  "http://127.0.0.1:5500",
+  "http://192.168.1.4:5173",
+  "http://192.168.1.4:5174",
+  "http://192.168.1.14:5173",
+  "http://192.168.1.14:5174",
 ];
 
 const environmentOrigins = process.env.CORS_ORIGIN
@@ -75,79 +82,27 @@ const allowedOrigins = [
 
 const corsOptions = {
   origin(origin, callback) {
-    /*
-     * No Origin header:
-     * Allows Postman, curl, Swagger, mobile clients and server-to-server calls.
-     */
-    if (!origin) {
+    if (!origin || allowedOrigins.includes(origin)) {
       return callback(null, true);
     }
 
-    /*
-     * The literal string "null" commonly occurs when an HTML page is opened
-     * directly through file:// instead of through the Vite development server.
-     *
-     * Allow it only during local development.
-     */
-    if (origin === "null" && process.env.NODE_ENV !== "production") {
-      console.warn(
-        "CORS warning: allowing origin 'null' in development. Open the frontend through Vite instead of file://."
-      );
-
-      return callback(null, true);
-    }
-
-    if (allowedOrigins.includes(origin)) {
-      return callback(null, true);
-    }
-
-    console.error(`CORS blocked for origin: ${origin}`);
-
-    const corsError = new Error(`CORS blocked for origin: ${origin}`);
-    corsError.statusCode = 403;
-
-    return callback(corsError);
+    console.error("Blocked CORS origin:", origin);
+    return callback(new Error(`CORS blocked origin: ${origin}`));
   },
-
-  credentials: true,
-
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-
-  allowedHeaders: [
-    "Content-Type",
-    "Authorization",
-    "Accept",
-    "Origin",
-    "X-Requested-With",
-  ],
-
-  exposedHeaders: ["Content-Length"],
-
+  allowedHeaders: ["Content-Type", "Authorization", "Accept"],
+  credentials: true,
   optionsSuccessStatus: 204,
 };
 
-// CORS must be registered before routes
+// CORS must be before routes
 app.use(cors(corsOptions));
 
-// Handle browser preflight requests
-app.options("*", cors(corsOptions));
+// Explicitly handle browser preflight requests
+app.options(/.*/, cors(corsOptions));
 
-// ======================================================
-// Request middleware
-// ======================================================
-
-app.use(
-  express.json({
-    limit: "10mb",
-  })
-);
-
-app.use(
-  express.urlencoded({
-    extended: true,
-    limit: "10mb",
-  })
-);
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 // ======================================================
 // Database access
@@ -159,7 +114,17 @@ app.locals.pool = pool;
 // API routes
 // ======================================================
 
+app.post(
+  "/api/payments/webhook",
+  express.raw({
+    type: "application/json",
+    limit: "1mb",
+  }),
+  handleWebhook
+);
+
 app.use("/api/auth", authRoutes);
+app.use("/api/auth/whatsapp", whatsappAuthRoutes);
 app.use("/api/categories", categoriesRoutes);
 app.use("/api/menu", menuRoutes);
 app.use("/api/orders", ordersRoutes);
@@ -171,9 +136,18 @@ app.use("/api/predictions", predictionRoutes);
 app.use("/api/reports", reportsRoutes);
 app.use("/api/recommendations", recommendationsRoutes);
 app.use("/api/inventory", inventoryRoutes);
+app.use("/api/products", productsRoutes);
+app.use("/api/suppliers", supplierRoutes);
 app.use("/api/chatbot", chatbotRoutes);
 app.use("/api/ai-assistant", aiAssistantRoutes);
 app.use("/api/ocr", ocrRoutes);
+app.use("/api/notifications", notificationsRoutes);
+app.use("/api/payments", paymentRoutes);
+app.use("/api/settings", settingsRoutes);
+app.use("/api/barcodes", barcodeRoutes);
+app.use("/api/counter-sales", counterSaleRoutes);
+app.use("/api/admin/orders", adminOrderRoutes);
+app.use("/api/webhooks/whatsapp", whatsappWebhookRoutes);
 
 /*
  * Keep these aliases only if your frontend is already calling them.
@@ -181,6 +155,18 @@ app.use("/api/ocr", ocrRoutes);
  */
 app.use("/api/chat", aiAssistantRoutes);
 app.use("/chat", aiAssistantRoutes);
+
+// ======================================================
+// Customer frontend
+// ======================================================
+
+const frontendPath = path.resolve(__dirname, "../../frontend");
+
+app.use("/customer", express.static(frontendPath));
+
+app.get("/customer/*", (req, res) => {
+  res.sendFile(path.join(frontendPath, "index.html"));
+});
 
 // ======================================================
 // Health check
@@ -234,6 +220,26 @@ app.use((req, res) => {
 // Global error handler
 // ======================================================
 
-app.use(errorHandler);
+app.use((err, req, res, next) => {
+  console.error("Backend error:", err);
+
+  if (
+    err.message?.includes("Origin not allowed by CORS") ||
+    err.message?.includes("CORS blocked origin")
+  ) {
+    return res.status(403).json({
+      success: false,
+      message: err.message,
+    });
+  }
+
+  return res.status(err.status || 500).json({
+    success: false,
+    message:
+      process.env.NODE_ENV === "production"
+        ? "Internal server error"
+        : err.message || "Internal server error",
+  });
+});
 
 export default app;

@@ -113,6 +113,14 @@
                   Phone
                   <input id="customerPhone" type="tel" placeholder="Your phone" />
                 </label>
+                <div id="otpPanel" class="otp-panel" aria-live="polite">
+                  <div class="otp-actions">
+                    <button id="sendOtp" class="secondary-btn" type="button">Send OTP</button>
+                    <input id="otpInput" type="text" inputmode="numeric" maxlength="6" placeholder="6-digit OTP" />
+                    <button id="verifyOtp" class="primary-btn" type="button">Verify</button>
+                  </div>
+                  <small id="otpStatus">Verify your phone before placing an order.</small>
+                </div>
                 <label>
                   Order type
                   <select id="orderType">
@@ -144,9 +152,36 @@
                   <strong id="cartTotal">Rs. 0</strong>
                 </div>
               </div>
+              <fieldset id="paymentMethods" class="payment-methods" hidden>
+                <legend>Payment method</legend>
+                <label>
+                  <input type="radio" name="paymentMethod" value="upi" checked />
+                  <span>UPI</span>
+                </label>
+                <label>
+                  <input type="radio" name="paymentMethod" value="card" />
+                  <span>Debit/Credit Card</span>
+                </label>
+                <label>
+                  <input type="radio" name="paymentMethod" value="netbanking" />
+                  <span>Net Banking</span>
+                </label>
+                <label>
+                  <input type="radio" name="paymentMethod" value="wallet" />
+                  <span>Wallet</span>
+                </label>
+                <label>
+                  <input type="radio" name="paymentMethod" value="cash_on_delivery" />
+                  <span>Cash on Delivery</span>
+                </label>
+                <label>
+                  <input type="radio" name="paymentMethod" value="pay_at_counter" />
+                  <span>Pay at Restaurant Counter</span>
+                </label>
+              </fieldset>
               <div class="cart-actions">
                 <button id="clearCart" class="secondary-btn full-width" type="button">Clear cart</button>
-                <button id="placeOrder" class="primary-btn full-width" type="button">Send order request</button>
+                <button id="placeOrder" class="primary-btn full-width" type="button">Proceed to payment</button>
               </div>
               <p id="cartHint" class="cart-hint">Add at least one item before sending an order request.</p>
             </div>
@@ -241,11 +276,12 @@
           <div class="popular-questions">
             <strong>💡 Popular Questions</strong>
             <div id="chatPrompts" class="chat-prompts" aria-label="Popular AI questions">
-              <button type="button" data-question="Show pizza under Rs. 200">Show pizza under Rs. 200</button>
-              <button type="button" data-question="Recommend spicy snacks">Recommend spicy snacks</button>
-              <button type="button" data-question="Which cakes are eggless?">Which cakes are eggless?</button>
-              <button type="button" data-question="Suggest a birthday combo">Suggest a birthday combo</button>
+              <button type="button" data-question="What should I eat today?">What should I eat today?</button>
+              <button type="button" data-question="Show meals under Rs. 200">Show meals under Rs. 200</button>
+              <button type="button" data-question="Recommend something spicy">Recommend something spicy</button>
+              <button type="button" data-question="Suggest a combo for two">Suggest a combo for two</button>
               <button type="button" data-question="What is today's special?">What is today's special?</button>
+              <button type="button" data-question="Show vegetarian bestsellers">Show vegetarian bestsellers</button>
             </div>
           </div>
 
@@ -323,6 +359,6 @@
     </section>
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
-    <script src="script.js"></script>
+    <script src="script.js?v=otp-checkout-20260713a"></script>
   </body>
 </html>

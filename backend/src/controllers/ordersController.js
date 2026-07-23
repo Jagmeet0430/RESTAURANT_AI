@@ -1,6 +1,46 @@
 // Orders Controller
 import { pool } from "../config/database.js";
 import { successResponse, errorResponse, asyncHandler } from "../utils/index.js";
+import {
+  ORDER_VISIBILITY_MINUTES,
+  cancelExpiredPendingOrders,
+  createCustomerNotification,
+  ensureNotificationTable,
+  terminalVisibilitySql,
+} from "../services/orderLifecycleService.js";
+import { requireVerifiedPhoneToken } from "../services/otpService.js";
+import { createBillForOrder } from "../services/billingService.js";
+import { deductInventoryForOrder } from "../services/inventoryStockService.js";
+import { ensureOrderSecuritySchema } from "../services/orderSchemaService.js";
+import { updateOrderStatusWithHistory } from "../services/orderStatusService.js";
+import { sendOrderStatusNotification } from "../services/notificationService.js";
+import { generateTrackingToken } from "../utils/trackingToken.js";
+import { normalizePhoneNumber } from "../utils/phoneNumber.js";
+
+const MAX_ITEM_QUANTITY = 20;
+const MAX_CART_ITEMS = 50;
+const LARGE_ORDER_LOGIN_AMOUNT = 1000;
+const MINIMUM_ORDER_VALUE = Number(process.env.MINIMUM_ORDER_VALUE || 0);
+
+const requiresPaymentBeforeKitchen = (order) => {
+  const method = String(order.payment_method || "").toLowerCase();
+  const paymentStatus = String(order.payment_status || "").toLowerCase();
+
+  return paymentStatus !== "paid" && (method.startsWith("razorpay") || method === "pay at counter");
+};
+
+function clientIp(req) {
+  const forwarded = req.headers["x-forwarded-for"];
+  return String(Array.isArray(forwarded) ? forwarded[0] : forwarded || req.ip || req.socket?.remoteAddress || "")
+    .split(",")[0]
+    .trim()
+    .slice(0, 80);
+}
+
+function normalizeOrderType(value) {
+  const normalized = String(value || "pickup").trim().toLowerCase().replace(/\s+/g, "_");
+  return ["pickup", "delivery", "dine_in"].includes(normalized) ? normalized : "pickup";
+}
 
 // Generate unique order number
 const generateOrderNumber = async () => {
@@ -11,23 +51,44 @@ const generateOrderNumber = async () => {
 
 // Get all orders
 export const getAllOrders = asyncHandler(async (req, res) => {
+  await ensureOrderSecuritySchema();
+  await cancelExpiredPendingOrders();
+
   const { status, payment_status, customer_id, date } = req.query;
+  const includeExpired = req.query.include_expired === "true";
   const limit = parseInt(req.query.limit) || 50;
   const offset = parseInt(req.query.offset) || 0;
 
   let query = `
     SELECT o.id, o.order_number, o.status, o.payment_status, o.payment_method,
+           o.transaction_id, o.paid_at,
            o.subtotal, o.tax, o.delivery_charge, o.discount, o.total_amount,
-           o.created_at, o.estimated_delivery_time, c.name as customer_name,
-           c.phone as customer_phone, o.delivery_address, COUNT(oi.id) as item_count,
+           o.phone_verified, o.order_type, o.tracking_token, o.cancellation_reason, o.estimated_ready_at,
+           wn.delivery_status AS whatsapp_status, wn.error_message AS whatsapp_error,
+           o.created_at, o.updated_at, o.estimated_delivery_time, o.actual_delivery_time,
+           COALESCE(o.customer_name, c.name) as customer_name,
+           COALESCE(o.customer_phone, c.phone) as customer_phone,
+           o.delivery_address, COUNT(oi.id) as item_count,
            json_agg(json_build_object('name', m.name, 'quantity', oi.quantity)) FILTER (WHERE oi.id IS NOT NULL) as items
     FROM orders o
     JOIN customers c ON o.customer_id = c.id
     LEFT JOIN order_items oi ON o.id = oi.order_id
     LEFT JOIN menu m ON oi.menu_id = m.id
+    LEFT JOIN LATERAL (
+      SELECT delivery_status, error_message
+      FROM whatsapp_notifications
+      WHERE order_id = o.id
+      ORDER BY created_at DESC
+      LIMIT 1
+    ) wn ON TRUE
     WHERE 1=1
   `;
   const params = [];
+
+  if (!includeExpired) {
+    params.push(ORDER_VISIBILITY_MINUTES);
+    query += ` AND ${terminalVisibilitySql("o").replace("$__VISIBILITY_PARAM__", `$${params.length}`)}`;
+  }
 
   if (status) {
     query += ` AND o.status = $${params.length + 1}`;
@@ -49,7 +110,7 @@ export const getAllOrders = asyncHandler(async (req, res) => {
     params.push(date);
   }
 
-  query += ` GROUP BY o.id, c.id ORDER BY o.created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
+  query += ` GROUP BY o.id, c.id, wn.delivery_status, wn.error_message ORDER BY o.created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
   params.push(limit, offset);
 
   const result = await pool.query(query, params);
@@ -58,6 +119,8 @@ export const getAllOrders = asyncHandler(async (req, res) => {
 
 // Public recent orders endpoint for customer/order confirmation screens
 export const getRecentPublicOrders = asyncHandler(async (req, res) => {
+  await cancelExpiredPendingOrders();
+
   const result = await pool.query(
     `SELECT
        o.id,
@@ -67,12 +130,23 @@ export const getRecentPublicOrders = asyncHandler(async (req, res) => {
        o.created_at,
        c.name AS customer_name,
        c.phone AS customer_phone,
-       COUNT(oi.id) AS item_count
+       COUNT(oi.id) AS item_count,
+       json_agg(
+         json_build_object(
+           'menu_id', oi.menu_id,
+           'name', m.name,
+           'quantity', oi.quantity,
+           'unit_price', oi.unit_price,
+           'total_price', oi.total_price
+         )
+       ) FILTER (WHERE oi.id IS NOT NULL) AS items
      FROM orders o
      JOIN customers c
        ON c.id = o.customer_id
      LEFT JOIN order_items oi
        ON oi.order_id = o.id
+     LEFT JOIN menu m
+       ON m.id = oi.menu_id
      GROUP BY o.id, c.id
      ORDER BY o.created_at DESC
      LIMIT 10`
@@ -87,6 +161,7 @@ export const getOrderById = asyncHandler(async (req, res) => {
 
   const orderResult = await pool.query(
     `SELECT o.id, o.order_number, o.status, o.payment_status, o.payment_method,
+            o.transaction_id, o.paid_at,
             o.subtotal, o.tax, o.delivery_charge, o.discount, o.total_amount,
             o.special_instructions, o.delivery_address, o.created_at,
             o.estimated_delivery_time, o.actual_delivery_time,
@@ -115,28 +190,88 @@ export const getOrderById = asyncHandler(async (req, res) => {
 
 // Create new order
 export const createOrder = asyncHandler(async (req, res) => {
-  const { customer_id, items, special_instructions, delivery_address, payment_method } = req.body;
+  await ensureOrderSecuritySchema();
+  const {
+    customer_id,
+    customerName,
+    phone,
+    items,
+    special_instructions,
+    delivery_address,
+    payment_method,
+    paymentMethod,
+    otp_verification_token,
+    verificationToken,
+    order_type,
+    orderType,
+  } = req.body;
+  let resolvedCustomerId = customer_id;
 
   // Validate required fields
-  if (!customer_id || !items || items.length === 0) {
-    return errorResponse(res, "Customer ID and items are required", 400);
+  if ((!resolvedCustomerId && (!customerName || !phone)) || !items || items.length === 0) {
+    return errorResponse(res, "Customer details and items are required", 400);
+  }
+
+  if (items.length > MAX_CART_ITEMS) {
+    return errorResponse(res, `Cart can contain at most ${MAX_CART_ITEMS} line items`, 400);
+  }
+
+  for (const item of items) {
+    item.menu_id = Number(item.menu_id || item.menuItemId || item.menu_item_id);
+    const quantity = Number(item.quantity);
+
+    if (!Number.isInteger(item.menu_id) || item.menu_id < 1) {
+      return errorResponse(res, "Invalid menu item", 400);
+    }
+
+    if (!Number.isInteger(quantity) || quantity < 1 || quantity > MAX_ITEM_QUANTITY) {
+      return errorResponse(res, `Quantity must be between 1 and ${MAX_ITEM_QUANTITY}`, 400);
+    }
+  }
+
+  if (!resolvedCustomerId) {
+    const normalizedPhone = normalizePhoneNumber(phone);
+    const existingCustomer = await pool.query("SELECT id FROM customers WHERE phone = $1 LIMIT 1", [normalizedPhone]);
+    if (existingCustomer.rowCount > 0) {
+      resolvedCustomerId = existingCustomer.rows[0].id;
+    } else {
+      const insertedCustomer = await pool.query(
+        `INSERT INTO customers (name, phone, country, is_active)
+         VALUES ($1, $2, 'India', TRUE)
+         RETURNING id`,
+        [String(customerName).trim(), normalizedPhone]
+      );
+      resolvedCustomerId = insertedCustomer.rows[0].id;
+    }
   }
 
   // Check customer exists
   const customer = await pool.query(
     "SELECT id, name, phone FROM customers WHERE id = $1",
-    [customer_id]
+    [resolvedCustomerId]
   );
   if (customer.rows.length === 0) {
     return errorResponse(res, "Customer not found", 404);
   }
 
   try {
+    await ensureNotificationTable();
+
     // Start transaction
     const client = await pool.connect();
 
     try {
       await client.query("BEGIN");
+      await ensureOrderSecuritySchema(client);
+
+      const idempotencyKey = String(req.get("Idempotency-Key") || req.body.idempotency_key || "").trim().slice(0, 120) || null;
+      if (idempotencyKey) {
+        const existingOrder = await client.query("SELECT * FROM orders WHERE idempotency_key = $1 LIMIT 1", [idempotencyKey]);
+        if (existingOrder.rowCount > 0) {
+          await client.query("COMMIT");
+          return successResponse(res, existingOrder.rows[0], "Duplicate order request ignored");
+        }
+      }
 
       // Calculate totals
       let subtotal = 0;
@@ -164,16 +299,49 @@ export const createOrder = asyncHandler(async (req, res) => {
       const tax = Math.round(subtotal * 0.05 * 100) / 100; // 5% GST
       const deliveryCharge = 10; // Packing charge
       const totalAmount = subtotal + tax + deliveryCharge;
+      if (subtotal < MINIMUM_ORDER_VALUE) {
+        throw Object.assign(new Error(`Minimum order value is Rs. ${MINIMUM_ORDER_VALUE}`), { statusCode: 400 });
+      }
+
+      const normalizedPhone = normalizePhoneNumber(customer.rows[0].phone);
+      await requireVerifiedPhoneToken(normalizedPhone, otp_verification_token || verificationToken, {
+        client,
+        largeOrder: totalAmount >= LARGE_ORDER_LOGIN_AMOUNT,
+      });
 
       // Generate order number
       const orderNumber = await generateOrderNumber();
 
       // Insert order
+      const trackingToken = generateTrackingToken();
       const orderResult = await client.query(
-        `INSERT INTO orders (customer_id, order_number, status, payment_status, payment_method, subtotal, tax, delivery_charge, total_amount, special_instructions, delivery_address)
-         VALUES ($1, $2, 'Pending', 'Pending', $3, $4, $5, $6, $7, $8, $9)
+        `INSERT INTO orders (
+           customer_id, order_number, status, payment_status, payment_method,
+           subtotal, tax, delivery_charge, total_amount, special_instructions, delivery_address,
+           customer_name, customer_phone, phone_verified, order_type, tracking_token,
+           ip_address, user_agent, idempotency_key
+         )
+         VALUES ($1, $2, 'Confirmed', 'Pending', $3, $4, $5, $6, $7, $8, $9,
+                 $10, $11, TRUE, $12, $13, $14, $15, $16)
          RETURNING *`,
-        [customer_id, orderNumber, payment_method || "Cash", subtotal, tax, deliveryCharge, totalAmount, special_instructions, delivery_address]
+        [
+          resolvedCustomerId,
+          orderNumber,
+          payment_method || paymentMethod || "Cash",
+          subtotal,
+          tax,
+          deliveryCharge,
+          totalAmount,
+          special_instructions,
+          delivery_address,
+          customer.rows[0].name,
+          normalizedPhone,
+          normalizeOrderType(order_type || orderType),
+          trackingToken,
+          clientIp(req),
+          String(req.headers["user-agent"] || "").slice(0, 500),
+          idempotencyKey,
+        ]
       );
 
       const order = orderResult.rows[0];
@@ -188,7 +356,32 @@ export const createOrder = asyncHandler(async (req, res) => {
         );
       }
 
+      const inventoryMovements = await deductInventoryForOrder(client, order.id, {
+        createdBy: req.user?.id || null,
+      });
+      const bill = await createBillForOrder(client, {
+        orderId: order.id,
+        billType: "order",
+        createdBy: req.user?.id || null,
+      });
+      await client.query(
+        `INSERT INTO order_status_history (order_id, previous_status, new_status, changed_by)
+         VALUES ($1, NULL, 'Confirmed', $2)`,
+        [order.id, req.user?.id || null]
+      );
+
       await client.query("COMMIT");
+      sendOrderStatusNotification(order).catch((error) =>
+        console.error("WhatsApp order confirmation failed:", error.message)
+      );
+
+      const notification = await createCustomerNotification({
+        customerId: order.customer_id,
+        orderId: order.id,
+        type: "order_placed",
+        title: "Order placed",
+        message: `Order ${order.order_number} was placed successfully and is waiting for restaurant acceptance.`,
+      });
 
       console.log("========== NEW ORDER RECEIVED ==========");
       console.log("Order:", order.order_number);
@@ -201,7 +394,12 @@ export const createOrder = asyncHandler(async (req, res) => {
       console.log("Status:", order.status);
       console.log("========================================");
 
-      return successResponse(res, order, "Order created successfully", 201);
+      return successResponse(
+        res,
+        { ...order, notification, bill, inventory_movements: inventoryMovements },
+        "Order created successfully",
+        201
+      );
     } catch (error) {
       await client.query("ROLLBACK");
       throw error;
@@ -209,25 +407,58 @@ export const createOrder = asyncHandler(async (req, res) => {
       client.release();
     }
   } catch (error) {
-    return errorResponse(res, error.message, 400);
+    return errorResponse(res, error.message, error.statusCode || 400);
   }
 });
 
 // Update order status
 export const updateOrderStatus = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { status, payment_status } = req.body;
+  const { status, payment_status, estimatedMinutes, cancellationReason } = req.body;
 
   // Check if order exists
-  const existing = await pool.query("SELECT id FROM orders WHERE id = $1", [id]);
+  const existing = await pool.query(
+    "SELECT id, status, customer_id, order_number, payment_method, payment_status FROM orders WHERE id = $1",
+    [id]
+  );
   if (existing.rows.length === 0) {
     return errorResponse(res, "Order not found", 404);
   }
 
   // Valid status values (include 'Delivered' as synonym for 'Completed')
-  const validStatuses = ["Pending", "Accepted", "Preparing", "Ready", "Delivered", "Completed", "Cancelled"];
+  const validStatuses = [
+    "pending_verification",
+    "confirmed",
+    "accepted",
+    "preparing",
+    "ready",
+    "out_for_delivery",
+    "completed",
+    "cancelled",
+    "Pending",
+    "Confirmed",
+    "Accepted",
+    "Preparing",
+    "Ready",
+    "Out for Delivery",
+    "Delivered",
+    "Completed",
+    "Cancelled",
+  ];
   if (status && !validStatuses.includes(status)) {
     return errorResponse(res, `Invalid status. Must be one of: ${validStatuses.join(", ")}`, 400);
+  }
+
+  if (
+    status &&
+    !["Pending", "Cancelled"].includes(status) &&
+    requiresPaymentBeforeKitchen(existing.rows[0])
+  ) {
+    return errorResponse(
+      res,
+      "Collect and mark payment as paid before sending this order to the kitchen.",
+      409
+    );
   }
 
   const validPaymentStatuses = ["Pending", "Paid", "Failed", "Refunded"];
@@ -235,16 +466,51 @@ export const updateOrderStatus = asyncHandler(async (req, res) => {
     return errorResponse(res, `Invalid payment status. Must be one of: ${validPaymentStatuses.join(", ")}`, 400);
   }
 
-  const result = await pool.query(
-    `UPDATE orders 
-     SET status = COALESCE($1, status),
-       payment_status = COALESCE($2, payment_status),
-       actual_delivery_time = CASE WHEN $1 IN ('Completed','Delivered') THEN CURRENT_TIMESTAMP ELSE actual_delivery_time END,
-       updated_at = CURRENT_TIMESTAMP
-     WHERE id = $3
-     RETURNING *`,
-    [status, payment_status, id]
-  );
+  const client = await pool.connect();
+  let result;
+  try {
+    await client.query("BEGIN");
+    let updated = existing.rows[0];
+    if (status) {
+      updated = await updateOrderStatusWithHistory({
+        orderId: Number(id),
+        status,
+        estimatedMinutes,
+        cancellationReason,
+        changedBy: req.user?.id || null,
+        client,
+      });
+    }
+
+    if (payment_status) {
+      const paymentUpdate = await client.query(
+        `UPDATE orders
+         SET payment_status = $1, updated_at = CURRENT_TIMESTAMP
+         WHERE id = $2
+         RETURNING *`,
+        [payment_status, id]
+      );
+      updated = paymentUpdate.rows[0];
+    }
+
+    await client.query("COMMIT");
+    result = { rows: [updated] };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    return errorResponse(res, error.message, error.statusCode || 500);
+  } finally {
+    client.release();
+  }
+
+  if (status === "Cancelled" && existing.rows[0].status !== "Cancelled") {
+    await createCustomerNotification({
+      customerId: existing.rows[0].customer_id,
+      orderId: existing.rows[0].id,
+      type: "order_cancelled",
+      title: "Order cancelled",
+      message: `Order ${existing.rows[0].order_number} was cancelled by the restaurant.`,
+    });
+  }
 
   return successResponse(res, result.rows[0], "Order updated successfully");
 });
@@ -253,7 +519,7 @@ export const updateOrderStatus = asyncHandler(async (req, res) => {
 export const deleteOrder = asyncHandler(async (req, res) => {
   const { id } = req.params;
 
-  const existing = await pool.query("SELECT id, status FROM orders WHERE id = $1", [id]);
+  const existing = await pool.query("SELECT id, status, customer_id, order_number FROM orders WHERE id = $1", [id]);
   if (existing.rows.length === 0) {
     return errorResponse(res, "Order not found", 404);
   }
@@ -271,6 +537,14 @@ export const deleteOrder = asyncHandler(async (req, res) => {
      RETURNING id, status, payment_status`,
     [id]
   );
+
+  await createCustomerNotification({
+    customerId: existing.rows[0].customer_id,
+    orderId: existing.rows[0].id,
+    type: "order_cancelled",
+    title: "Order cancelled",
+    message: `Order ${existing.rows[0].order_number} was cancelled by the restaurant.`,
+  });
 
   return successResponse(res, result.rows[0], "Order cancelled successfully");
 });
@@ -294,6 +568,13 @@ export const getOrdersByStatus = asyncHandler(async (req, res) => {
      LEFT JOIN menu m ON oi.menu_id = m.id
      JOIN customers c ON o.customer_id = c.id
      WHERE o.status = $1
+       AND NOT (
+         o.payment_status <> 'Paid'
+         AND (
+           o.payment_method LIKE 'Razorpay%'
+           OR o.payment_method = 'Pay at Counter'
+         )
+       )
      GROUP BY o.id, c.name
      ORDER BY o.created_at ASC`,
     [status]

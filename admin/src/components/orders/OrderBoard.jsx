@@ -10,15 +10,17 @@ import {
 } from "@mui/material";
 import AccessTimeIcon from "@mui/icons-material/AccessTime";
 import ArrowForwardIcon from "@mui/icons-material/ArrowForward";
+import PaidOutlinedIcon from "@mui/icons-material/PaidOutlined";
 import ReceiptLongIcon from "@mui/icons-material/ReceiptLong";
 import VisibilityIcon from "@mui/icons-material/Visibility";
 import OrderStatusChip from "./OrderStatusChip";
 
 const lanes = [
-  { status: "Pending", title: "New", color: "#f59e0b", bg: "#fffbeb", next: "Accepted" },
+  { status: "Confirmed", title: "Confirmed", color: "#f59e0b", bg: "#fffbeb", next: "Accepted" },
   { status: "Accepted", title: "Accepted", color: "#0284c7", bg: "#eff6ff", next: "Preparing" },
   { status: "Preparing", title: "Preparing", color: "#4f46e5", bg: "#eef2ff", next: "Ready" },
   { status: "Ready", title: "Ready", color: "#059669", bg: "#ecfdf5", next: "Completed" },
+  { status: "Out for Delivery", title: "Out for delivery", color: "#0f766e", bg: "#f0fdfa", next: "Completed" },
   { status: "Completed", title: "Completed", color: "#16a34a", bg: "#f0fdf4" },
   { status: "Cancelled", title: "Cancelled", color: "#dc2626", bg: "#fef2f2" },
 ];
@@ -68,7 +70,16 @@ function customerLabel(order) {
   return order.customer_name || "Walk-in customer";
 }
 
-function OrderCard({ order, lane, onViewDetails, onStatusChange }) {
+function isPayAtCounterPending(order) {
+  return (
+    String(order.payment_method || "").toLowerCase() === "pay at counter" &&
+    String(order.payment_status || "").toLowerCase() !== "paid"
+  );
+}
+
+function OrderCard({ order, lane, onViewDetails, onStatusChange, onMarkPaid }) {
+  const needsCounterPayment = isPayAtCounterPending(order);
+
   return (
     <Paper
       sx={{
@@ -115,15 +126,33 @@ function OrderCard({ order, lane, onViewDetails, onStatusChange }) {
 
       <Stack direction="row" justifyContent="space-between" alignItems="center">
         <Typography sx={{ fontWeight: 900 }}>{formatCurrency(order.total_amount)}</Typography>
-        <Chip
-          size="small"
-          label={order.payment_status || "Pending"}
-          color={paymentColor(order.payment_status)}
-          variant="outlined"
-        />
+        <Stack direction="row" spacing={0.75} alignItems="center">
+          {order.payment_method && (
+            <Chip size="small" label={order.payment_method} variant="outlined" />
+          )}
+          <Chip
+            size="small"
+            label={needsCounterPayment ? "Collect at counter" : order.payment_status || "Pending"}
+            color={paymentColor(order.payment_status)}
+            variant="outlined"
+          />
+        </Stack>
       </Stack>
 
       <Stack direction="row" spacing={1} sx={{ mt: 1.5 }}>
+        {needsCounterPayment && (
+          <Button
+            fullWidth
+            size="small"
+            variant="contained"
+            color="success"
+            startIcon={<PaidOutlinedIcon />}
+            onClick={() => onMarkPaid?.(order.id)}
+            sx={{ textTransform: "none", fontWeight: 800 }}
+          >
+            Mark paid
+          </Button>
+        )}
         <Button
           fullWidth
           size="small"
@@ -138,9 +167,10 @@ function OrderCard({ order, lane, onViewDetails, onStatusChange }) {
           <Button
             fullWidth
             size="small"
-            variant="contained"
+            variant={needsCounterPayment ? "outlined" : "contained"}
             endIcon={<ArrowForwardIcon />}
             onClick={() => onStatusChange(order.id, lane.next)}
+            disabled={needsCounterPayment}
             sx={{ textTransform: "none", fontWeight: 800 }}
           >
             {lane.next}
@@ -151,14 +181,14 @@ function OrderCard({ order, lane, onViewDetails, onStatusChange }) {
   );
 }
 
-function OrderBoard({ orders, onViewDetails, onStatusChange }) {
+function OrderBoard({ orders, onViewDetails, onStatusChange, onMarkPaid }) {
   const grouped = lanes.reduce((acc, lane) => {
     acc[lane.status] = [];
     return acc;
   }, {});
 
   orders.forEach((order) => {
-    const status = order.status || "Pending";
+  const status = order.status || "Confirmed";
     if (!grouped[status]) grouped[status] = [];
     grouped[status].push(order);
   });
@@ -223,6 +253,7 @@ function OrderBoard({ orders, onViewDetails, onStatusChange }) {
                     lane={lane}
                     onViewDetails={onViewDetails}
                     onStatusChange={onStatusChange}
+                    onMarkPaid={onMarkPaid}
                   />
                 ))
               ) : (

@@ -2,24 +2,61 @@
 
 import express from "express";
 import { authMiddleware } from "../middleware/index.js";
-import { getAllOrders, updateOrderStatus, getOrdersByStatus } from "../controllers/ordersController.js";
+import { updateOrderStatus, getOrdersByStatus } from "../controllers/ordersController.js";
+import { cancelExpiredPendingOrders } from "../services/orderLifecycleService.js";
 
 const router = express.Router();
 
-// Get kitchen orders (Pending, Preparing, Ready, Completed)
+// Get live kitchen orders using the same workflow statuses as the Orders board.
 router.get("/orders", authMiddleware, async (req, res) => {
   try {
-    const statuses = ["Pending", "Accepted", "Preparing", "Ready", "Completed"];
+    await cancelExpiredPendingOrders();
+
+    const statuses = ["Confirmed", "Accepted", "Preparing", "Ready", "Out for Delivery"];
     const result = await req.app.locals.pool.query(
-      `SELECT o.id, o.order_number, o.status, COUNT(oi.id) as item_count,
-              json_agg(json_build_object('name', m.name, 'quantity', oi.quantity)) FILTER (WHERE oi.id IS NOT NULL) as items,
-              o.created_at, c.name as customer_name, o.special_instructions
+      `SELECT o.id,
+              o.order_number,
+              o.status,
+              o.payment_status,
+              o.payment_method,
+              o.subtotal,
+              o.tax,
+              o.delivery_charge,
+              o.discount,
+              o.total_amount,
+              o.created_at,
+              o.updated_at,
+              o.delivery_address,
+              o.special_instructions,
+              c.name AS customer_name,
+              c.phone AS customer_phone,
+              COUNT(oi.id) AS item_count,
+              COALESCE(
+                json_agg(
+                  json_build_object(
+                    'name', m.name,
+                    'quantity', oi.quantity,
+                    'unit_price', oi.unit_price,
+                    'total_price', oi.total_price,
+                    'special_instructions', oi.special_instructions
+                  )
+                  ORDER BY oi.id
+                ) FILTER (WHERE oi.id IS NOT NULL),
+                '[]'::json
+              ) AS items
        FROM orders o
+       JOIN customers c ON o.customer_id = c.id
        LEFT JOIN order_items oi ON o.id = oi.order_id
        LEFT JOIN menu m ON oi.menu_id = m.id
-       JOIN customers c ON o.customer_id = c.id
        WHERE o.status = ANY($1)
-       GROUP BY o.id, c.name
+         AND NOT (
+           COALESCE(o.payment_status, 'Pending') <> 'Paid'
+           AND (
+             LOWER(COALESCE(o.payment_method, '')) LIKE 'razorpay%'
+             OR LOWER(COALESCE(o.payment_method, '')) = 'pay at counter'
+           )
+         )
+       GROUP BY o.id, c.id
        ORDER BY o.created_at ASC`,
       [statuses]
     );

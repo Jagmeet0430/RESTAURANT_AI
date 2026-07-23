@@ -15,9 +15,10 @@ import {
   Stack,
   Typography,
 } from "@mui/material";
+import PaidOutlinedIcon from "@mui/icons-material/PaidOutlined";
 import OrderStatusChip from "./OrderStatusChip";
 
-const statuses = ["Pending", "Accepted", "Preparing", "Ready", "Completed", "Cancelled"];
+const statuses = ["Confirmed", "Accepted", "Preparing", "Ready", "Out for Delivery", "Completed", "Cancelled"];
 
 function formatCurrency(value) {
   const amount = Number(value || 0);
@@ -37,10 +38,25 @@ function paymentColor(status) {
   return "error";
 }
 
-function OrderDetails({ open, order, onClose, onStatusUpdate }) {
+function isPayAtCounterPending(order) {
+  return (
+    String(order?.payment_method || "").toLowerCase() === "pay at counter" &&
+    String(order?.payment_status || "").toLowerCase() !== "paid"
+  );
+}
+
+function OrderDetails({ open, order, onClose, onStatusUpdate, onMarkPaid, onRetryWhatsApp }) {
   if (!order) return null;
 
   const handleStatusChange = (newStatus) => {
+    if (newStatus === "Cancelled") {
+      const reason = window.prompt("Cancellation reason");
+      if (!reason) return;
+      onStatusUpdate(order.id, newStatus, { cancellationReason: reason });
+      onClose();
+      return;
+    }
+
     onStatusUpdate(order.id, newStatus);
     onClose();
   };
@@ -172,6 +188,49 @@ function OrderDetails({ open, order, onClose, onStatusUpdate }) {
                   <Typography sx={{ fontWeight: 900 }}>Total</Typography>
                   <Typography sx={{ fontWeight: 900 }}>{formatCurrency(order.total_amount)}</Typography>
                 </Stack>
+              </Stack>
+            </Paper>
+
+            <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
+              <Typography sx={{ fontWeight: 900, mb: 1 }}>Payment Check</Typography>
+              <Stack spacing={1}>
+                <Typography variant="body2">
+                  <strong>Method:</strong> {order.payment_method || "Cash"}
+                </Typography>
+                <Typography variant="body2">
+                  <strong>Status:</strong> {order.payment_status || "Pending"}
+                </Typography>
+                <Typography variant="body2">
+                  <strong>Phone verified:</strong> {order.phone_verified ? "Yes" : "No"}
+                </Typography>
+                <Typography variant="body2">
+                  <strong>WhatsApp:</strong> {order.whatsapp_status || "Not sent"}
+                  {order.whatsapp_error ? ` (${order.whatsapp_error})` : ""}
+                </Typography>
+                {["failed", "retryable_failed"].includes(order.whatsapp_status) && (
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    onClick={() => onRetryWhatsApp?.(order.id)}
+                    sx={{ mt: 1, textTransform: "none", fontWeight: 800 }}
+                  >
+                    Retry WhatsApp notification
+                  </Button>
+                )}
+                <Typography variant="body2">
+                  <strong>Transaction:</strong> {order.transaction_id || "-"}
+                </Typography>
+                {isPayAtCounterPending(order) && (
+                  <Button
+                    variant="contained"
+                    color="success"
+                    startIcon={<PaidOutlinedIcon />}
+                    onClick={() => onMarkPaid?.(order.id)}
+                    sx={{ mt: 1, textTransform: "none", fontWeight: 800 }}
+                  >
+                    Mark paid after collecting counter payment
+                  </Button>
+                )}
               </Stack>
             </Paper>
 

@@ -1,14 +1,18 @@
 import os
-import shutil
+from pathlib import Path
 
 from dotenv import load_dotenv
 
 from src.database_loader import load_menu_documents
 from src.document_loader import load_knowledge_base_documents
 from src.embeddings import get_embedding_model
-from src.vector_store import create_vector_store, resolve_persist_directory
+from src.vector_store import rebuild_vector_store, resolve_persist_directory
 
-load_dotenv()
+BASE_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = BASE_DIR.parents[1]
+
+load_dotenv(PROJECT_ROOT / "backend" / ".env", override=True)
+load_dotenv(BASE_DIR / ".env", override=False)
 
 
 def rebuild_knowledge_base():
@@ -36,21 +40,17 @@ def rebuild_knowledge_base():
     print(f"Database documents: {len(menu_documents)}")
     print(f"Total documents: {len(all_documents)}")
 
-    if os.path.exists(chroma_path):
-        print("Deleting old vector database...")
-        shutil.rmtree(chroma_path)
-
     print("Creating embeddings...")
     embedding_model = get_embedding_model()
 
-    print("Building new Chroma knowledge base...")
-    create_vector_store(
+    print("Rebuilding Chroma knowledge base collection...")
+    collection = rebuild_vector_store(
         documents=all_documents,
         embedding_model=embedding_model,
         persist_directory=chroma_path,
     )
 
-    print("Knowledge base rebuilt successfully.")
+    print(f"Knowledge base rebuilt successfully. Vector count: {collection.count()}")
 
 
 if __name__ == "__main__":

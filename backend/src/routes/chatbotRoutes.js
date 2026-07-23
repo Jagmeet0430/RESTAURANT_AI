@@ -1,5 +1,5 @@
 import express from "express";
-import { askChatbot } from "../controllers/chatbotController.js";
+import { askAIAssistant } from "../controllers/aiAssistantController.js";
 
 const router = express.Router();
 
@@ -10,6 +10,6 @@ router.get("/", (req, res) => {
   });
 });
 
-router.post("/", askChatbot);
+router.post("/", askAIAssistant);
 
 export default router;

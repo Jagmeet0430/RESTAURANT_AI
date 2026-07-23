@@ -6,6 +6,193 @@ import { authMiddleware, authorizeRoles } from "../middleware/index.js";
 
 const router = express.Router();
 
+const formatDate = (value) => {
+  if (!value) return "-";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleDateString("en-IN");
+};
+
+const formatMoney = (value) => `Rs. ${Number(value || 0).toFixed(2)}`;
+
+const addSectionTitle = (doc, title) => {
+  doc.moveDown();
+  doc.fontSize(15).fillColor("#111827").text(title, { underline: true });
+  doc.moveDown(0.35);
+  doc.fontSize(10).fillColor("#111827");
+};
+
+const addRows = (doc, rows, emptyText, renderRow) => {
+  if (!rows.length) {
+    doc.fontSize(10).fillColor("#6b7280").text(emptyText);
+    doc.fillColor("#111827");
+    return;
+  }
+
+  rows.forEach((row, index) => {
+    renderRow(row, index);
+  });
+};
+
+// Export all reports in one PDF: /api/reports/all/export
+router.get(
+  "/all/export",
+  authMiddleware,
+  authorizeRoles(["admin"]),
+  asyncHandler(async (req, res) => {
+    const client = await pool.connect();
+
+    try {
+      const [
+        dailyRes,
+        weeklyRes,
+        monthlyRes,
+        topFoodRes,
+        summaryRes,
+        inventoryRes,
+        customersRes,
+      ] = await Promise.all([
+        client.query(`
+          SELECT DATE(created_at) as date,
+                 COUNT(*)::int as orders,
+                 COALESCE(SUM(total_amount), 0) as revenue
+          FROM orders
+          WHERE created_at >= CURRENT_DATE - INTERVAL '30 days'
+            AND COALESCE(status, '') <> 'Cancelled'
+          GROUP BY DATE(created_at)
+          ORDER BY DATE(created_at) DESC
+          LIMIT 30
+        `),
+        client.query(`
+          SELECT date_trunc('week', created_at)::date as week_start,
+                 COUNT(*)::int as orders,
+                 COALESCE(SUM(total_amount), 0) as revenue
+          FROM orders
+          WHERE created_at >= CURRENT_DATE - INTERVAL '12 weeks'
+            AND COALESCE(status, '') <> 'Cancelled'
+          GROUP BY week_start
+          ORDER BY week_start DESC
+          LIMIT 12
+        `),
+        client.query(`
+          SELECT date_trunc('month', created_at)::date as month_start,
+                 COUNT(*)::int as orders,
+                 COALESCE(SUM(total_amount), 0) as revenue
+          FROM orders
+          WHERE created_at >= (date_trunc('month', CURRENT_DATE) - INTERVAL '11 months')
+            AND COALESCE(status, '') <> 'Cancelled'
+          GROUP BY month_start
+          ORDER BY month_start DESC
+          LIMIT 12
+        `),
+        client.query(`
+          SELECT m.name,
+                 COALESCE(SUM(oi.quantity), 0)::int as quantity,
+                 COALESCE(SUM(oi.total_price), 0) as revenue
+          FROM order_items oi
+          JOIN menu m ON oi.menu_id = m.id
+          JOIN orders o ON oi.order_id = o.id
+          WHERE o.created_at >= CURRENT_DATE - INTERVAL '30 days'
+            AND COALESCE(o.status, '') <> 'Cancelled'
+          GROUP BY m.name
+          ORDER BY quantity DESC, revenue DESC
+          LIMIT 10
+        `),
+        client.query(`
+          SELECT COALESCE(SUM(total_amount), 0) as revenue,
+                 COUNT(*)::int as orders,
+                 COUNT(DISTINCT customer_id)::int as customers
+          FROM orders
+          WHERE created_at >= CURRENT_DATE - INTERVAL '30 days'
+            AND COALESCE(status, '') <> 'Cancelled'
+        `),
+        client.query(`
+          SELECT ing.name as ingredient,
+                 i.stock_quantity,
+                 i.min_threshold,
+                 i.expiry_date,
+                 s.name as supplier
+          FROM inventory_items i
+          JOIN ingredients ing ON i.ingredient_id = ing.id
+          LEFT JOIN suppliers s ON i.supplier_id = s.id
+          ORDER BY ing.name
+          LIMIT 50
+        `).catch(() => ({ rows: [] })),
+        client.query(`
+          SELECT id, name, email, phone, loyalty_points, total_orders, total_spent
+          FROM customers
+          ORDER BY total_spent DESC
+          LIMIT 50
+        `),
+      ]);
+
+      const summary = summaryRes.rows[0] || {};
+      const revenue = Number(summary.revenue || 0);
+      const estimatedProfit = revenue * 0.35;
+
+      const PDFDocument = (await import("pdfkit")).default;
+      const doc = new PDFDocument({ margin: 36, size: "A4" });
+
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", 'attachment; filename="restaurantai_all_reports.pdf"');
+
+      doc.pipe(res);
+
+      doc.fontSize(20).fillColor("#111827").text("RestaurantAI - All Reports", { align: "center" });
+      doc.fontSize(10).fillColor("#6b7280").text(`Generated on ${new Date().toLocaleString("en-IN")}`, {
+        align: "center",
+      });
+      doc.moveDown();
+
+      addSectionTitle(doc, "Executive Summary");
+      doc.text(`Revenue (last 30 days): ${formatMoney(revenue)}`);
+      doc.text(`Orders (last 30 days): ${Number(summary.orders || 0)}`);
+      doc.text(`Customers (last 30 days): ${Number(summary.customers || 0)}`);
+      doc.text(`Estimated profit at 35% margin: ${formatMoney(estimatedProfit)}`);
+
+      addSectionTitle(doc, "Daily Sales");
+      addRows(doc, dailyRes.rows, "No daily sales found.", (row) => {
+        doc.text(`${formatDate(row.date)} - ${row.orders} orders - ${formatMoney(row.revenue)}`);
+      });
+
+      addSectionTitle(doc, "Weekly Sales");
+      addRows(doc, weeklyRes.rows, "No weekly sales found.", (row) => {
+        doc.text(`Week of ${formatDate(row.week_start)} - ${row.orders} orders - ${formatMoney(row.revenue)}`);
+      });
+
+      addSectionTitle(doc, "Monthly Sales");
+      addRows(doc, monthlyRes.rows, "No monthly sales found.", (row) => {
+        doc.text(`${formatDate(row.month_start)} - ${row.orders} orders - ${formatMoney(row.revenue)}`);
+      });
+
+      addSectionTitle(doc, "Top Selling Food");
+      addRows(doc, topFoodRes.rows, "No selling food data found.", (row, index) => {
+        doc.text(`${index + 1}. ${row.name} - ${row.quantity} sold - ${formatMoney(row.revenue)}`);
+      });
+
+      addSectionTitle(doc, "Inventory");
+      addRows(doc, inventoryRes.rows, "No inventory data found.", (row) => {
+        doc.text(
+          `${row.ingredient} - stock ${row.stock_quantity ?? "-"} / min ${row.min_threshold ?? "-"} - supplier ${row.supplier || "N/A"}`
+        );
+      });
+
+      addSectionTitle(doc, "Customers");
+      addRows(doc, customersRes.rows, "No customers found.", (row) => {
+        doc.text(
+          `${row.name} - ${row.phone || "N/A"} - orders ${row.total_orders || 0} - spent ${formatMoney(row.total_spent)}`
+        );
+      });
+
+      doc.end();
+    } catch (err) {
+      console.error(err);
+      return errorResponse(res, err.message || "All reports export failed", 500);
+    } finally {
+      client.release();
+    }
+  })
+);
+
 // Export endpoints: /api/reports/sales/export?format=pdf|excel
 router.get(
   "/sales/export",
@@ -47,6 +234,137 @@ router.get(
     } catch (err) {
       console.error(err);
       return errorResponse(res, err.message || 'Export failed', 500);
+    } finally {
+      client.release();
+    }
+  })
+);
+
+// Export all sales in one PDF: /api/reports/sales/all/export
+router.get(
+  "/sales/all/export",
+  authMiddleware,
+  authorizeRoles(["admin", "staff"]),
+  asyncHandler(async (req, res) => {
+    const client = await pool.connect();
+
+    try {
+      const [summaryRes, dailyRes, weeklyRes, monthlyRes, topFoodRes, transactionsRes] = await Promise.all([
+        client.query(`
+          SELECT COALESCE(SUM(total_amount), 0) as revenue,
+                 COUNT(*)::int as orders,
+                 COUNT(DISTINCT customer_id)::int as customers,
+                 COALESCE(AVG(total_amount), 0) as avg_order_value
+          FROM orders
+          WHERE COALESCE(status, '') <> 'Cancelled'
+        `),
+        client.query(`
+          SELECT DATE(created_at) as date,
+                 COUNT(*)::int as orders,
+                 COALESCE(SUM(total_amount), 0) as revenue
+          FROM orders
+          WHERE COALESCE(status, '') <> 'Cancelled'
+          GROUP BY DATE(created_at)
+          ORDER BY DATE(created_at) DESC
+        `),
+        client.query(`
+          SELECT date_trunc('week', created_at)::date as week_start,
+                 COUNT(*)::int as orders,
+                 COALESCE(SUM(total_amount), 0) as revenue
+          FROM orders
+          WHERE COALESCE(status, '') <> 'Cancelled'
+          GROUP BY week_start
+          ORDER BY week_start DESC
+        `),
+        client.query(`
+          SELECT date_trunc('month', created_at)::date as month_start,
+                 COUNT(*)::int as orders,
+                 COALESCE(SUM(total_amount), 0) as revenue
+          FROM orders
+          WHERE COALESCE(status, '') <> 'Cancelled'
+          GROUP BY month_start
+          ORDER BY month_start DESC
+        `),
+        client.query(`
+          SELECT m.name,
+                 COALESCE(SUM(oi.quantity), 0)::int as quantity,
+                 COALESCE(SUM(oi.total_price), 0) as revenue
+          FROM order_items oi
+          JOIN menu m ON oi.menu_id = m.id
+          JOIN orders o ON oi.order_id = o.id
+          WHERE COALESCE(o.status, '') <> 'Cancelled'
+          GROUP BY m.name
+          ORDER BY quantity DESC, revenue DESC
+          LIMIT 25
+        `),
+        client.query(`
+          SELECT o.order_number,
+                 o.created_at,
+                 o.status,
+                 o.payment_status,
+                 o.payment_method,
+                 o.total_amount,
+                 c.name as customer_name,
+                 c.phone as customer_phone
+          FROM orders o
+          JOIN customers c ON o.customer_id = c.id
+          WHERE COALESCE(o.status, '') <> 'Cancelled'
+          ORDER BY o.created_at DESC
+        `),
+      ]);
+
+      const summary = summaryRes.rows[0] || {};
+      const PDFDocument = (await import("pdfkit")).default;
+      const doc = new PDFDocument({ margin: 36, size: "A4" });
+
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", 'attachment; filename="restaurantai_all_sales.pdf"');
+
+      doc.pipe(res);
+
+      doc.fontSize(20).fillColor("#111827").text("RestaurantAI - All Sales Report", { align: "center" });
+      doc.fontSize(10).fillColor("#6b7280").text(`Generated on ${new Date().toLocaleString("en-IN")}`, {
+        align: "center",
+      });
+      doc.moveDown();
+
+      addSectionTitle(doc, "Sales Summary");
+      doc.text(`Total revenue: ${formatMoney(summary.revenue)}`);
+      doc.text(`Total orders: ${Number(summary.orders || 0)}`);
+      doc.text(`Unique customers: ${Number(summary.customers || 0)}`);
+      doc.text(`Average order value: ${formatMoney(summary.avg_order_value)}`);
+
+      addSectionTitle(doc, "Daily Sales");
+      addRows(doc, dailyRes.rows, "No daily sales found.", (row) => {
+        doc.text(`${formatDate(row.date)} - ${row.orders} orders - ${formatMoney(row.revenue)}`);
+      });
+
+      addSectionTitle(doc, "Weekly Sales");
+      addRows(doc, weeklyRes.rows, "No weekly sales found.", (row) => {
+        doc.text(`Week of ${formatDate(row.week_start)} - ${row.orders} orders - ${formatMoney(row.revenue)}`);
+      });
+
+      addSectionTitle(doc, "Monthly Sales");
+      addRows(doc, monthlyRes.rows, "No monthly sales found.", (row) => {
+        doc.text(`${formatDate(row.month_start)} - ${row.orders} orders - ${formatMoney(row.revenue)}`);
+      });
+
+      addSectionTitle(doc, "Top Selling Food");
+      addRows(doc, topFoodRes.rows, "No item sales found.", (row, index) => {
+        doc.text(`${index + 1}. ${row.name} - ${row.quantity} sold - ${formatMoney(row.revenue)}`);
+      });
+
+      addSectionTitle(doc, "Sales Transactions");
+      addRows(doc, transactionsRes.rows, "No sales transactions found.", (row) => {
+        doc.text(
+          `${formatDate(row.created_at)} - ${row.order_number} - ${row.customer_name} (${row.customer_phone || "N/A"}) - ${row.status} / ${row.payment_status} - ${formatMoney(row.total_amount)}`
+        );
+      });
+
+      doc.end();
+    } catch (err) {
+      console.error(err);
+      return errorResponse(res, err.message || "All sales export failed", 500);
     } finally {
       client.release();
     }
@@ -192,10 +510,46 @@ router.get(
         ORDER BY month_start
       `;
 
-      const [dailyRes, weeklyRes, monthlyRes] = await Promise.all([
+      const currentSummaryQ = `
+        SELECT
+          COALESCE(SUM(total_amount), 0) as revenue,
+          COUNT(*)::int as orders,
+          COUNT(DISTINCT customer_id)::int as customers
+        FROM orders
+        WHERE created_at >= CURRENT_DATE - INTERVAL '30 days'
+          AND COALESCE(status, '') <> 'Cancelled'
+      `;
+
+      const previousSummaryQ = `
+        SELECT
+          COALESCE(SUM(total_amount), 0) as revenue,
+          COUNT(*)::int as orders,
+          COUNT(DISTINCT customer_id)::int as customers
+        FROM orders
+        WHERE created_at >= CURRENT_DATE - INTERVAL '60 days'
+          AND created_at < CURRENT_DATE - INTERVAL '30 days'
+          AND COALESCE(status, '') <> 'Cancelled'
+      `;
+
+      const peakHoursQ = `
+        SELECT
+          EXTRACT(HOUR FROM created_at)::int as hour,
+          COUNT(*)::int as orders
+        FROM orders
+        WHERE created_at >= CURRENT_DATE - INTERVAL '30 days'
+          AND COALESCE(status, '') <> 'Cancelled'
+        GROUP BY hour
+        ORDER BY orders DESC, hour ASC
+        LIMIT 4
+      `;
+
+      const [dailyRes, weeklyRes, monthlyRes, currentSummaryRes, previousSummaryRes, peakHoursRes] = await Promise.all([
         client.query(dailyQ),
         client.query(weeklyQ),
         client.query(monthlyQ),
+        client.query(currentSummaryQ),
+        client.query(previousSummaryQ),
+        client.query(peakHoursQ),
       ]);
 
       // AI Prediction vs Actual for last 7 days
@@ -254,12 +608,37 @@ router.get(
 
       const predictions = await Promise.all(aiPromises);
 
+      const currentSummary = currentSummaryRes.rows[0] || {};
+      const previousSummary = previousSummaryRes.rows[0] || {};
+
+      const percentageChange = (currentValue, previousValue) => {
+        const current = Number(currentValue) || 0;
+        const previous = Number(previousValue) || 0;
+
+        if (previous === 0) {
+          return current > 0 ? 100 : 0;
+        }
+
+        return Number((((current - previous) / previous) * 100).toFixed(1));
+      };
+
       return successResponse(res, {
         daily: dailyRes.rows,
         weekly: weeklyRes.rows,
         monthly: monthlyRes.rows,
         recent: recentRes.rows,
         predictions,
+        summary: {
+          revenue: Number(currentSummary.revenue) || 0,
+          orders: Number(currentSummary.orders) || 0,
+          customers: Number(currentSummary.customers) || 0,
+          changes: {
+            revenue: percentageChange(currentSummary.revenue, previousSummary.revenue),
+            orders: percentageChange(currentSummary.orders, previousSummary.orders),
+            customers: percentageChange(currentSummary.customers, previousSummary.customers),
+          },
+          peak_hours: peakHoursRes.rows,
+        },
       });
     } catch (err) {
       console.error(err);

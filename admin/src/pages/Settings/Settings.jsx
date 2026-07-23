@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Box,
@@ -24,6 +24,7 @@ import SettingsIcon from "@mui/icons-material/Settings";
 import StorefrontIcon from "@mui/icons-material/Storefront";
 import VerifiedUserIcon from "@mui/icons-material/VerifiedUser";
 import { PageHeader, StatCard, StatGrid } from "../../components/common/PageKit";
+import { settingsService } from "../../services/settings";
 
 const STORAGE_KEY = "restaurantai_settings";
 
@@ -71,14 +72,80 @@ function applyTheme(theme) {
   document.documentElement.dataset.adminTheme = theme;
 }
 
+function cacheSettings(settings) {
+  const cached = { ...settings, password: "" };
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(cached));
+  window.dispatchEvent(new CustomEvent("restaurantai-settings-updated", { detail: cached }));
+}
+
+function validateSettings(settings, includePassword = false) {
+  if (!settings.restaurantName.trim()) {
+    return "Restaurant name is required because customers see it on the website.";
+  }
+
+  if (!settings.phone.trim()) {
+    return "Phone number is required so customers can contact the restaurant.";
+  }
+
+  if (settings.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(settings.email)) {
+    return "Enter a valid email address or leave it blank.";
+  }
+
+  if (includePassword && settings.password && settings.password.length < 6) {
+    return "New password must be at least 6 characters.";
+  }
+
+  return "";
+}
+
+function saveStatusLabel(status, lastSavedAt) {
+  if (status === "loading") return "Loading settings...";
+  if (status === "saving") return "Auto-saving changes...";
+  if (status === "offline") return "Saved in this browser. Backend sync is unavailable.";
+  if (status === "error") return "Changes need attention.";
+  if (status === "saved" && lastSavedAt) return `Saved ${lastSavedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+  return "Changes auto-save after you edit.";
+}
+
 function Settings() {
   const [formData, setFormData] = useState(loadSavedSettings);
-  const [saved, setSaved] = useState(false);
+  const [saveStatus, setSaveStatus] = useState("idle");
+  const [lastSavedAt, setLastSavedAt] = useState(null);
+  const [settingsReady, setSettingsReady] = useState(false);
   const [error, setError] = useState("");
+  const skipAutoSaveRef = useRef(true);
 
   useEffect(() => {
     applyTheme(formData.theme);
   }, [formData.theme]);
+
+  const loadSettings = useCallback(async () => {
+    setSaveStatus("loading");
+
+    try {
+      const response = await settingsService.getSettings();
+      const nextSettings = { ...defaultSettings, ...(response.data || {}), password: "" };
+      skipAutoSaveRef.current = true;
+      setFormData(nextSettings);
+      cacheSettings(nextSettings);
+      setSaveStatus("saved");
+      setLastSavedAt(new Date());
+      setError("");
+    } catch (loadError) {
+      const cachedSettings = loadSavedSettings();
+      skipAutoSaveRef.current = true;
+      setFormData(cachedSettings);
+      setSaveStatus("offline");
+      setError(loadError?.response?.data?.message || "Backend settings are unavailable. Changes will still stay in this browser.");
+    } finally {
+      setSettingsReady(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    const loadId = window.setTimeout(loadSettings, 0);
+    return () => window.clearTimeout(loadId);
+  }, [loadSettings]);
 
   const publicInfoComplete = useMemo(() => {
     const fields = ["restaurantName", "address", "phone", "openingTime", "closingTime"];
@@ -88,32 +155,76 @@ function Settings() {
 
   const handleChange = (event) => {
     const { name, value } = event.target;
-    setSaved(false);
     setError("");
     setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
   const handleThemeChange = (theme) => {
-    setSaved(false);
     setFormData((prev) => ({ ...prev, theme }));
   };
 
+  const saveSettings = useCallback(
+    async ({ includePassword = false } = {}) => {
+      const validationError = validateSettings(formData, includePassword);
+      if (validationError) {
+        setSaveStatus("error");
+        setError(validationError);
+        return;
+      }
+
+      const payload = {
+        ...formData,
+        password: includePassword ? formData.password : "",
+      };
+
+      cacheSettings({ ...formData, password: "" });
+      setSaveStatus("saving");
+
+      try {
+        const response = await settingsService.updateSettings(payload);
+        const serverSettings = { ...defaultSettings, ...(response.data || {}) };
+        const nextSettings = {
+          ...serverSettings,
+          password: includePassword ? "" : formData.password,
+        };
+
+        skipAutoSaveRef.current = true;
+        setFormData(nextSettings);
+        cacheSettings(nextSettings);
+        setSaveStatus("saved");
+        setLastSavedAt(new Date());
+        setError("");
+      } catch (saveError) {
+        setSaveStatus("offline");
+        setLastSavedAt(new Date());
+        setError(saveError?.response?.data?.message || "Backend sync failed. Settings were saved in this browser only.");
+      }
+    },
+    [formData]
+  );
+
+  useEffect(() => {
+    if (!settingsReady) {
+      return;
+    }
+
+    if (skipAutoSaveRef.current) {
+      skipAutoSaveRef.current = false;
+      return;
+    }
+
+    const saveId = window.setTimeout(() => {
+      saveSettings({ includePassword: false });
+    }, 700);
+
+    return () => window.clearTimeout(saveId);
+  }, [formData, saveSettings, settingsReady]);
+
   const handleSave = () => {
-    if (!formData.restaurantName.trim()) {
-      setError("Restaurant name is required because customers see it on the website.");
-      return;
-    }
-
-    if (!formData.phone.trim()) {
-      setError("Phone number is required so customers can contact the restaurant.");
-      return;
-    }
-
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(formData));
-    applyTheme(formData.theme);
-    setSaved(true);
-    setError("");
+    saveSettings({ includePassword: Boolean(formData.password) });
   };
+
+  const statusMessage = saveStatusLabel(saveStatus, lastSavedAt);
 
   return (
     <Box sx={{ p: 3 }}>
@@ -141,20 +252,18 @@ function Settings() {
         <StatCard
           label="Admin theme"
           value={themeOptions.find((item) => item.value === formData.theme)?.label || "Light"}
-          helper="This option now applies immediately"
+          helper="Applies immediately and auto-saves"
           icon={<SettingsIcon />}
           accent="#7c3aed"
         />
       </StatGrid>
 
-      {saved && (
-        <Alert severity="success" sx={{ mb: 3 }}>
-          Settings saved. They will remain after refreshing this browser.
-        </Alert>
-      )}
+      <Alert severity={saveStatus === "error" ? "error" : saveStatus === "offline" ? "warning" : "info"} sx={{ mb: 3 }}>
+        {statusMessage}
+      </Alert>
 
       {error && (
-        <Alert severity="error" sx={{ mb: 3 }}>
+        <Alert severity={saveStatus === "offline" ? "warning" : "error"} sx={{ mb: 3 }}>
           {error}
         </Alert>
       )}
@@ -430,8 +539,8 @@ function Settings() {
               </CardContent>
             </Card>
 
-            <Button variant="contained" size="large" onClick={handleSave}>
-              Save Settings
+            <Button variant="contained" size="large" onClick={handleSave} disabled={saveStatus === "saving"}>
+              {formData.password ? "Save Settings and Password" : "Save Settings Now"}
             </Button>
           </Stack>
         </Grid>

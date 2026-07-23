@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { openSync } from "node:fs";
+import { existsSync, openSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -15,11 +15,25 @@ const projectRoot = path.resolve(__dirname, "../../..");
 const ragDirectory = path.join(projectRoot, "ai", "Rag_chatbot");
 const ragPython = path.join(ragDirectory, ".venv", "Scripts", "python.exe");
 const ragLauncher = path.join(ragDirectory, "run_server.py");
+const ragSyncScript = path.join(ragDirectory, "sync_database.py");
 const ragOutLog = path.join(ragDirectory, "logs", "rag_server.out.log");
 const ragErrLog = path.join(ragDirectory, "logs", "rag_server.err.log");
+const ragSyncOutLog = path.join(ragDirectory, "logs", "rag_sync.out.log");
+const ragSyncErrLog = path.join(ragDirectory, "logs", "rag_sync.err.log");
 
 let startPromise = null;
 let ragProcess = null;
+let syncPromise = null;
+let syncTimer = null;
+let lastSyncStatus = {
+  running: false,
+  queued: false,
+  lastStartedAt: null,
+  lastFinishedAt: null,
+  lastExitCode: null,
+  lastReason: null,
+  lastError: null,
+};
 
 const sleep = (milliseconds) =>
   new Promise((resolve) => {
@@ -39,6 +53,11 @@ export const isRagServiceHealthy = async () => {
 };
 
 const startRagProcess = () => {
+  if (!existsSync(ragPython)) {
+    console.error(`RAG Python not found: ${ragPython}`);
+    return;
+  }
+
   const out = openSync(ragOutLog, "a");
   const err = openSync(ragErrLog, "a");
 
@@ -56,6 +75,112 @@ const startRagProcess = () => {
   });
 
   console.log(`Starting RAG service on ${RAG_BASE_URL}`);
+};
+
+export const getRagSyncStatus = () => ({ ...lastSyncStatus });
+
+export const syncRagKnowledgeBase = async (reason = "manual") => {
+  if (syncPromise) {
+    lastSyncStatus.queued = true;
+    return syncPromise;
+  }
+
+  if (!existsSync(ragPython)) {
+    const error = `RAG Python not found: ${ragPython}`;
+    lastSyncStatus = {
+      ...lastSyncStatus,
+      running: false,
+      queued: false,
+      lastReason: reason,
+      lastError: error,
+    };
+    console.error(error);
+    return { ok: false, error };
+  }
+
+  if (!existsSync(ragSyncScript)) {
+    const error = `RAG sync script not found: ${ragSyncScript}`;
+    lastSyncStatus = {
+      ...lastSyncStatus,
+      running: false,
+      queued: false,
+      lastReason: reason,
+      lastError: error,
+    };
+    console.error(error);
+    return { ok: false, error };
+  }
+
+  syncPromise = new Promise((resolve) => {
+    const out = openSync(ragSyncOutLog, "a");
+    const err = openSync(ragSyncErrLog, "a");
+    const startedAt = new Date().toISOString();
+
+    lastSyncStatus = {
+      running: true,
+      queued: false,
+      lastStartedAt: startedAt,
+      lastFinishedAt: null,
+      lastExitCode: null,
+      lastReason: reason,
+      lastError: null,
+    };
+
+    console.log(`Starting RAG knowledge sync: ${reason}`);
+
+    const child = spawn(ragPython, [ragSyncScript], {
+      cwd: ragDirectory,
+      stdio: ["ignore", out, err],
+      windowsHide: true,
+    });
+
+    child.on("error", (error) => {
+      lastSyncStatus = {
+        ...lastSyncStatus,
+        running: false,
+        lastFinishedAt: new Date().toISOString(),
+        lastError: error.message,
+      };
+      console.error("RAG knowledge sync failed:", error.message);
+      resolve({ ok: false, error: error.message });
+    });
+
+    child.on("close", (code) => {
+      lastSyncStatus = {
+        ...lastSyncStatus,
+        running: false,
+        lastFinishedAt: new Date().toISOString(),
+        lastExitCode: code,
+        lastError: code === 0 ? null : `sync_database.py exited with code ${code}`,
+      };
+
+      console.log(`RAG knowledge sync finished with code ${code}`);
+      resolve({ ok: code === 0, exitCode: code });
+    });
+  }).finally(() => {
+    syncPromise = null;
+  });
+
+  return syncPromise;
+};
+
+export const scheduleRagKnowledgeSync = (reason = "menu_changed", delayMs = 3000) => {
+  lastSyncStatus = {
+    ...lastSyncStatus,
+    queued: true,
+    lastReason: reason,
+  };
+
+  if (syncTimer) {
+    clearTimeout(syncTimer);
+  }
+
+  syncTimer = setTimeout(() => {
+    syncTimer = null;
+    syncRagKnowledgeBase(reason).catch((error) => {
+      console.error("Scheduled RAG sync failed:", error.message);
+    });
+  }, delayMs);
 };
 
 export const ensureRagServiceRunning = async () => {

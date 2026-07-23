@@ -9,6 +9,8 @@ import {
   updateCustomer,
   getCustomerByPhone,
   getCustomerByEmail,
+  sendCustomerOtp,
+  verifyCustomerOtp,
   addLoyaltyPoints,
   searchCustomers,
   deleteCustomer,
@@ -16,14 +18,31 @@ import {
   addFavorite,
   removeFavorite,
 } from "../controllers/customersController.js";
+import { createRateLimiter } from "../middleware/rateLimiter.js";
 
 const router = express.Router();
+
+const otpSendLimiter = createRateLimiter({
+  windowMs: 60_000,
+  max: 5,
+  keyPrefix: "customers:otp:send",
+  message: "Too many OTP requests. Please wait a moment and try again.",
+});
+
+const otpVerifyLimiter = createRateLimiter({
+  windowMs: 60_000,
+  max: 10,
+  keyPrefix: "customers:otp:verify",
+  message: "Too many OTP verification attempts. Please wait a moment and try again.",
+});
 
 // Public routes
 router.get("/search", searchCustomers);
 router.get("/phone/:phone", getCustomerByPhone);
 router.get("/email/:email", getCustomerByEmail);
 router.post("/", createCustomer);
+router.post("/otp/send", otpSendLimiter, sendCustomerOtp);
+router.post("/otp/verify", otpVerifyLimiter, verifyCustomerOtp);
 
 // Admin routes (requires authentication)
 router.get("/", authMiddleware, getAllCustomers);

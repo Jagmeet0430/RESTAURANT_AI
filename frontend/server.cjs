@@ -42,7 +42,18 @@ function sendFile(res, filePath) {
       return;
     }
 
-    res.writeHead(200, { "Content-Type": contentTypes[path.extname(filePath).toLowerCase()] || "application/octet-stream" });
+    const extension = path.extname(filePath).toLowerCase();
+    const noCacheAssets = new Set([".html", ".css", ".js", ".svg"]);
+    res.writeHead(200, {
+      "Content-Type": contentTypes[extension] || "application/octet-stream",
+      ...(noCacheAssets.has(extension)
+        ? {
+            "Cache-Control": "no-store, max-age=0",
+            Pragma: "no-cache",
+            Expires: "0",
+          }
+        : {}),
+    });
     res.end(data);
   });
 }

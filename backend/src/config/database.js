@@ -4,30 +4,44 @@ import { dbConfig } from "./index.js";
 
 const { Pool } = pg;
 
+const isProduction = process.env.NODE_ENV === "production";
+
+const poolConfig = process.env.DATABASE_URL
+  ? {
+      connectionString: process.env.DATABASE_URL,
+      ssl: isProduction ? { rejectUnauthorized: false } : false,
+    }
+  : {
+      user: dbConfig.user,
+      password: dbConfig.password,
+      host: dbConfig.host,
+      port: Number(dbConfig.port),
+      database: dbConfig.database,
+    };
+
 // Create a connection pool
 export const pool = new Pool({
-  user: dbConfig.user,
-  password: dbConfig.password,
-  host: dbConfig.host,
-  port: Number(dbConfig.port),
-  database: dbConfig.database,
-  max: 20,
-  idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 2000,
+  ...poolConfig,
+  max: isProduction ? 5 : 20,
+  idleTimeoutMillis: isProduction ? 10000 : 30000,
+  connectionTimeoutMillis: isProduction ? 10000 : 2000,
 });
 
 // Handle pool errors
 pool.on("error", (err) => {
   console.error("Unexpected error on idle client", err);
-  process.exit(-1);
 });
 
 // Test connection
 export const testConnection = async () => {
   console.log("========== DATABASE CONFIG ==========");
   console.log({
-    ...dbConfig,
-    password: dbConfig.password ? "[set]" : "[missing]",
+    ...(process.env.DATABASE_URL
+      ? { connectionString: "[DATABASE_URL set]" }
+      : {
+          ...dbConfig,
+          password: dbConfig.password ? "[set]" : "[missing]",
+        }),
   });
   console.log("=====================================");
 

@@ -304,10 +304,15 @@ export const createOrder = asyncHandler(async (req, res) => {
       }
 
       const normalizedPhone = normalizePhoneNumber(customer.rows[0].phone);
-      await requireVerifiedPhoneToken(normalizedPhone, otp_verification_token || verificationToken, {
-        client,
-        largeOrder: totalAmount >= LARGE_ORDER_LOGIN_AMOUNT,
-      });
+      const verificationTokenToUse = otp_verification_token || verificationToken;
+      let phoneVerified = false;
+      if (verificationTokenToUse) {
+        await requireVerifiedPhoneToken(normalizedPhone, verificationTokenToUse, {
+          client,
+          largeOrder: totalAmount >= LARGE_ORDER_LOGIN_AMOUNT,
+        });
+        phoneVerified = true;
+      }
 
       // Generate order number
       const orderNumber = await generateOrderNumber();
@@ -322,7 +327,7 @@ export const createOrder = asyncHandler(async (req, res) => {
            ip_address, user_agent, idempotency_key
          )
          VALUES ($1, $2, 'Confirmed', 'Pending', $3, $4, $5, $6, $7, $8, $9,
-                 $10, $11, TRUE, $12, $13, $14, $15, $16)
+                 $10, $11, $12, $13, $14, $15, $16, $17)
          RETURNING *`,
         [
           resolvedCustomerId,
@@ -336,6 +341,7 @@ export const createOrder = asyncHandler(async (req, res) => {
           delivery_address,
           customer.rows[0].name,
           normalizedPhone,
+          phoneVerified,
           normalizeOrderType(order_type || orderType),
           trackingToken,
           clientIp(req),

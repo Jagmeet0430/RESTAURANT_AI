@@ -1,7 +1,50 @@
-import { TextField, MenuItem, FormControlLabel, Switch, Box, Stack, Button, Typography } from "@mui/material";
+import { useState } from "react";
+import { TextField, MenuItem, FormControlLabel, Switch, Box, Stack, Button, Typography, Alert } from "@mui/material";
 import UploadFileIcon from "@mui/icons-material/UploadFile";
 
+const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
+const MAX_IMAGE_EDGE = 900;
+const IMAGE_QUALITY = 0.82;
+
+function loadImage(src) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("Could not read this image."));
+    image.src = src;
+  });
+}
+
+async function compressImageFile(file) {
+  if (!file.type.startsWith("image/")) {
+    throw new Error("Please upload an image file.");
+  }
+
+  if (file.size > MAX_UPLOAD_BYTES) {
+    throw new Error("Image is too large. Please upload a photo under 8 MB.");
+  }
+
+  const objectUrl = URL.createObjectURL(file);
+  try {
+    const image = await loadImage(objectUrl);
+    const scale = Math.min(1, MAX_IMAGE_EDGE / Math.max(image.width, image.height));
+    const width = Math.max(1, Math.round(image.width * scale));
+    const height = Math.max(1, Math.round(image.height * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext("2d");
+    context.drawImage(image, 0, 0, width, height);
+    return canvas.toDataURL("image/jpeg", IMAGE_QUALITY);
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}
+
 function MenuForm({ formData, onFormChange, categories }) {
+  const [uploadError, setUploadError] = useState("");
+  const [uploadingImage, setUploadingImage] = useState(false);
+
   const handleInputChange = (e) => {
     const { name, value } = e.target;
     onFormChange({
@@ -15,15 +58,22 @@ function MenuForm({ formData, onFormChange, categories }) {
     onFormChange({ ...formData, [name]: checked });
   };
 
-  const handleFileChange = (e) => {
+  const handleFileChange = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      onFormChange({ ...formData, image_url: reader.result });
-    };
-    reader.readAsDataURL(file);
+    setUploadError("");
+    setUploadingImage(true);
+
+    try {
+      const imageDataUrl = await compressImageFile(file);
+      onFormChange({ ...formData, image_url: imageDataUrl });
+    } catch (error) {
+      setUploadError(error.message || "Unable to upload this image.");
+    } finally {
+      setUploadingImage(false);
+      e.target.value = "";
+    }
   };
 
   return (
@@ -103,8 +153,9 @@ function MenuForm({ formData, onFormChange, categories }) {
           variant="outlined"
           component="label"
           startIcon={<UploadFileIcon />}
+          disabled={uploadingImage}
         >
-          Upload Image
+          {uploadingImage ? "Preparing..." : "Upload Image"}
           <input
             hidden
             accept="image/*"
@@ -112,6 +163,11 @@ function MenuForm({ formData, onFormChange, categories }) {
             onChange={handleFileChange}
           />
         </Button>
+        {uploadError && (
+          <Alert severity="warning" sx={{ mt: 2 }}>
+            {uploadError}
+          </Alert>
+        )}
         {formData.image_url && (
           <Box mt={2} display="flex" alignItems="center" gap={2}>
             <img

@@ -45,12 +45,24 @@ for (const line of output.split(/\r?\n/)) {
   }
 }
 
+const isPortStillListening = () => {
+  const currentOutput = execFileSync("netstat", ["-ano"], {
+    encoding: "utf8",
+  });
+
+  return currentOutput.split(/\r?\n/).some((line) => {
+    const columns = line.trim().split(/\s+/);
+    const localAddress = columns[1] || "";
+    const state = columns[3] || "";
+
+    return state === "LISTENING" && localAddress.endsWith(`:${port}`);
+  });
+};
+
 for (const processId of processIds) {
   console.log(`Stopping existing process ${processId} on port ${port}`);
   try {
-    execFileSync("taskkill", ["/PID", processId, "/F"], {
-      stdio: "inherit",
-    });
+    execFileSync("taskkill", ["/PID", processId, "/F"]);
   } catch {
     try {
       execFileSync(
@@ -62,9 +74,6 @@ for (const processId of processIds) {
           "-Command",
           `Stop-Process -Id ${processId} -Force`,
         ],
-        {
-          stdio: "inherit",
-        }
       );
     } catch {
       console.warn(
@@ -72,4 +81,11 @@ for (const processId of processIds) {
       );
     }
   }
+}
+
+if (processIds.size > 0 && isPortStillListening()) {
+  console.error(
+    `Port ${port} is still in use. Close the existing backend window or run PowerShell as Administrator and stop the process above.`
+  );
+  process.exit(1);
 }

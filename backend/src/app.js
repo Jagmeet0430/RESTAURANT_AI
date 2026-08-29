@@ -59,8 +59,13 @@ const app = express();
 // ======================================================
 
 const defaultAllowedOrigins = [
+  "https://mahesh-bakery-menu.dwivedibharat969.chatgpt.site",
+  "http://localhost:5500",
+  "http://localhost:5501",
   "http://localhost:5173",
   "http://localhost:5174",
+  "http://127.0.0.1:5500",
+  "http://127.0.0.1:5501",
   "http://127.0.0.1:5173",
   "http://127.0.0.1:5174",
   "http://192.168.1.4:5173",
@@ -77,12 +82,46 @@ const environmentOrigins = process.env.CORS_ORIGIN
   : [];
 
 const allowedOrigins = [
-  ...new Set([...defaultAllowedOrigins, ...environmentOrigins]),
+  ...new Set(
+    [
+      ...defaultAllowedOrigins,
+      ...environmentOrigins,
+      process.env.FRONTEND_URL,
+      process.env.ADMIN_URL,
+    ].filter(Boolean)
+  ),
 ];
+
+const isDevelopment = process.env.NODE_ENV !== "production";
+
+const isAllowedDevelopmentOrigin = (origin) => {
+  if (!isDevelopment) {
+    return false;
+  }
+
+  try {
+    const { hostname, port, protocol } = new URL(origin);
+    const isHttp = protocol === "http:" || protocol === "https:";
+    const isLocalFrontendPort = ["5173", "5174", "5175", "5500", "5501"].includes(port);
+    const isLocalHost = hostname === "localhost" || hostname === "127.0.0.1";
+    const isPrivateLan =
+      hostname.startsWith("192.168.") ||
+      hostname.startsWith("10.") ||
+      /^172\.(1[6-9]|2\d|3[0-1])\./.test(hostname);
+
+    return isHttp && isLocalFrontendPort && (isLocalHost || isPrivateLan);
+  } catch {
+    return false;
+  }
+};
 
 const corsOptions = {
   origin(origin, callback) {
-    if (!origin || allowedOrigins.includes(origin)) {
+    if (origin === "null" && isDevelopment) {
+      return callback(null, true);
+    }
+
+    if (!origin || allowedOrigins.includes(origin) || isAllowedDevelopmentOrigin(origin)) {
       return callback(null, true);
     }
 
@@ -90,7 +129,7 @@ const corsOptions = {
     return callback(new Error(`CORS blocked origin: ${origin}`));
   },
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization", "Accept"],
+  allowedHeaders: ["Content-Type", "Authorization", "Accept", "Idempotency-Key"],
   credentials: true,
   optionsSuccessStatus: 204,
 };
@@ -101,8 +140,8 @@ app.use(cors(corsOptions));
 // Explicitly handle browser preflight requests
 app.options(/.*/, cors(corsOptions));
 
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: "6mb" }));
+app.use(express.urlencoded({ extended: true, limit: "6mb" }));
 
 // ======================================================
 // Database access
@@ -172,26 +211,12 @@ app.get("/customer/*", (req, res) => {
 // Health check
 // ======================================================
 
-app.get("/api/health", async (req, res, next) => {
-  try {
-    const databaseResult = await pool.query(
-      "SELECT NOW() AS database_time"
-    );
-
-    res.status(200).json({
-      success: true,
-      status: "OK",
-      message: "RestaurantAI Backend Running",
-      database: {
-        connected: true,
-        name: process.env.DB_NAME || null,
-        time: databaseResult.rows[0].database_time,
-      },
-      serverTime: new Date().toISOString(),
-    });
-  } catch (error) {
-    next(error);
-  }
+app.get("/api/health", (req, res) => {
+  res.status(200).json({
+    success: true,
+    message: "RestaurantAI backend is running",
+    timestamp: new Date().toISOString(),
+  });
 });
 
 // Root route

@@ -6,6 +6,8 @@ async function queryWith(client, sql, params = []) {
 
 export async function ensureBarcodeStockSchema(client = pool) {
   await queryWith(client, "ALTER TABLE menu ADD COLUMN IF NOT EXISTS barcode VARCHAR(100)");
+  await queryWith(client, "ALTER TABLE menu ADD COLUMN IF NOT EXISTS image_url TEXT");
+  await queryWith(client, "ALTER TABLE menu ALTER COLUMN image_url TYPE TEXT");
   await queryWith(
     client,
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_menu_barcode_unique ON menu(barcode) WHERE barcode IS NOT NULL AND barcode <> ''"

@@ -5,11 +5,11 @@ import { asyncHandler, errorResponse, successResponse } from "../utils/index.js"
 const SETTINGS_KEY = "restaurant";
 
 const defaultSettings = {
-  restaurantName: "Restaurant AI",
-  gst: "27ABCDE1234F1Z5",
-  address: "123 Main Street, Bengaluru",
-  phone: "+91 98765 43210",
-  email: "hello@restaurantai.com",
+  restaurantName: "MAHESH Sweets & Bakers",
+  gst: "",
+  address: "Jaja Chowk, Opp. State Bank of India, Tanda, Punjab-144024, India",
+  phone: "",
+  email: "",
   openingTime: "10:00",
   closingTime: "22:00",
   logo: "",
@@ -28,6 +28,27 @@ const publicFields = [
   "logo",
 ];
 
+const placeholderValues = {
+  restaurantName: ["Restaurant AI", "RestaurantAI", "RESTAURANT NAME"],
+  gst: ["27ABCDE1234F1Z5"],
+  address: ["123 Main Street, Bengaluru", "123 Main St", "123 Main St, Apt 4B"],
+  phone: ["+91 98765 43210", "+91-9876543210", "9876543210"],
+  email: ["hello@restaurantai.com", "admin@restaurantai.com", "customer@email.com"],
+};
+
+function cleanSettingValue(field, value) {
+  const text = String(value ?? "").trim();
+  const isPlaceholder = placeholderValues[field]?.some(
+    (placeholder) => text.toLowerCase() === placeholder.toLowerCase()
+  );
+
+  if (!isPlaceholder) {
+    return text;
+  }
+
+  return field === "restaurantName" || field === "address" ? defaultSettings[field] : "";
+}
+
 async function ensureSettingsTable() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS app_settings (
@@ -41,10 +62,11 @@ async function ensureSettingsTable() {
 
 function normalizeSettings(value = {}) {
   return editableFields.reduce((settings, field) => {
-    settings[field] =
+    const nextValue =
       value[field] === undefined || value[field] === null
         ? defaultSettings[field]
         : String(value[field]);
+    settings[field] = cleanSettingValue(field, nextValue);
     return settings;
   }, {});
 }
@@ -70,10 +92,6 @@ function validateSettings(settings) {
     return "Restaurant name is required because customers see it on the website.";
   }
 
-  if (!settings.phone.trim()) {
-    return "Phone number is required so customers can contact the restaurant.";
-  }
-
   if (settings.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(settings.email)) {
     return "Enter a valid email address or leave it blank.";
   }
@@ -88,6 +106,7 @@ export const getSettings = asyncHandler(async (req, res) => {
 
 export const getPublicSettings = asyncHandler(async (req, res) => {
   const settings = await readSettings();
+  res.set("Cache-Control", "no-store");
   return successResponse(res, publicSettings(settings), "Public settings retrieved successfully");
 });
 

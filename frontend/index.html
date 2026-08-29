@@ -113,14 +113,6 @@
                   Phone
                   <input id="customerPhone" type="tel" placeholder="Your phone" />
                 </label>
-                <div id="otpPanel" class="otp-panel" aria-live="polite">
-                  <div class="otp-actions">
-                    <button id="sendOtp" class="secondary-btn" type="button">Send OTP</button>
-                    <input id="otpInput" type="text" inputmode="numeric" maxlength="6" placeholder="6-digit OTP" />
-                    <button id="verifyOtp" class="primary-btn" type="button">Verify</button>
-                  </div>
-                  <small id="otpStatus">Verify your phone before placing an order.</small>
-                </div>
                 <label>
                   Order type
                   <select id="orderType">
@@ -155,7 +147,7 @@
               <fieldset id="paymentMethods" class="payment-methods" hidden>
                 <legend>Payment method</legend>
                 <label>
-                  <input type="radio" name="paymentMethod" value="upi" checked />
+                  <input type="radio" name="paymentMethod" value="upi" />
                   <span>UPI</span>
                 </label>
                 <label>
@@ -175,7 +167,7 @@
                   <span>Cash on Delivery</span>
                 </label>
                 <label>
-                  <input type="radio" name="paymentMethod" value="pay_at_counter" />
+                  <input type="radio" name="paymentMethod" value="pay_at_counter" checked />
                   <span>Pay at Restaurant Counter</span>
                 </label>
               </fieldset>
@@ -242,7 +234,7 @@
       <section id="ai" class="ai-section scroll-mt-24">
         <div>
           <span class="eyebrow">RAG chatbot and voice ordering</span>
-          <h2>Restaurant AI Assistant</h2>
+          <h2>MAHESH AI Assistant</h2>
           <p>
             Ask anything about the menu, budget, dietary preferences, combos,
             or ordering. The assistant uses the backend AI service and can also
@@ -250,7 +242,7 @@
           </p>
         </div>
 
-        <div id="chatPanel" class="ai-chat-card" aria-label="Restaurant AI chat window">
+        <div id="chatPanel" class="ai-chat-card" aria-label="MAHESH AI chat window">
           <div class="chat-header">
             <span class="chat-header-avatar" aria-hidden="true">
               <svg viewBox="0 0 48 48" focusable="false">
@@ -262,7 +254,7 @@
             </span>
             <div>
               <span class="eyebrow">Ask anything...</span>
-              <h3>Restaurant AI Assistant</h3>
+              <h3>MAHESH AI Assistant</h3>
               <small id="chatStatus">Backend AI ready</small>
             </div>
           </div>
@@ -299,37 +291,85 @@
       </section>
 
       <section id="contact" class="contact-section scroll-mt-24">
-        <div>
+        <div class="contact-showcase">
           <span class="eyebrow">Since 1993</span>
-          <h2>MAHESH Sweets &amp; Bakers, Tanda.</h2>
+          <h2>MAHESH Sweets &amp; Bakers</h2>
           <p>
-            Fresh sweets, bakery items, shakes, snacks and quick bites from
-            Jaja Chowk. The menu is 100% vegetarian and ready for pickup,
-            dine-in or order requests.
+            Fresh sweets, bakery items, shakes, snacks and quick bites from Jaja Chowk,
+            made for easy pickup, dine-in and order requests.
           </p>
+          <div class="contact-actions">
+            <a class="contact-primary" href="#menu">View Menu</a>
+            <a
+              class="contact-secondary"
+              href="https://www.google.com/maps/search/?api=1&query=Mahesh%20Sweets%20%26%20Bakers%20Jaja%20Chowk%20Tanda%20Punjab%20144024"
+              target="_blank"
+              rel="noopener"
+            >
+              Get Directions
+            </a>
+          </div>
+          <figure class="contact-photo">
+            <img src="assets/hero-food.png" alt="MAHESH sweets, bakery snacks and quick bites" />
+          </figure>
         </div>
         <div class="contact-card">
-          <img class="contact-logo" src="assets/mahesh-logo.svg" alt="MAHESH logo" />
-          <span class="since-label">Since : 1993</span>
-          <strong>MAHESH Sweets &amp; Bakers</strong>
-          <span class="veg-badge">100% Veg. Food</span>
+          <div class="contact-card-header">
+            <img class="contact-logo" src="assets/mahesh-logo.svg" alt="MAHESH Sweets & Bakers logo" />
+            <div>
+              <span class="since-label">Established 1993</span>
+              <strong>MAHESH Sweets &amp; Bakers</strong>
+              <span class="card-subtitle">Pure vegetarian sweets, bakery and quick bites</span>
+            </div>
+          </div>
 
-          <address class="restaurant-address">
-            Jaja Chowk,<br />
-            Opp. State Bank of India,<br />
-            Tanda, Punjab-144024, India
-          </address>
+          <span class="veg-badge">100% Veg Food</span>
+
+          <div class="contact-details">
+            <div class="contact-detail-row contact-address-row">
+              <span>Address</span>
+              <address class="restaurant-address">
+                Jaja Chowk, Opp. State Bank of India, Tanda, Punjab-144024, India
+              </address>
+            </div>
+            <div class="contact-detail-row contact-phone-row" hidden>
+              <span>Phone</span>
+              <a class="contact-phone" href=""></a>
+            </div>
+            <div class="contact-detail-row contact-email-row" hidden>
+              <span>Email</span>
+              <a class="contact-email" href=""></a>
+            </div>
+            <div class="contact-detail-row contact-hours-row">
+              <span>Hours</span>
+              <p class="contact-hours">10:00 AM to 10:00 PM</p>
+            </div>
+          </div>
 
           <div class="social-list" aria-label="Social media handles">
             <span>Follow &amp; Like us on</span>
             <a href="https://www.instagram.com/mahesh_sweets.tanda" target="_blank" rel="noopener">
-              <strong>IG</strong> Mahesh_Sweets.Tanda
+              <svg class="social-icon instagram-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <rect x="3" y="3" width="18" height="18" rx="5" />
+                <circle cx="12" cy="12" r="4" />
+                <circle cx="17.5" cy="6.5" r="1.2" />
+              </svg>
+              <span>Mahesh_Sweets.Tanda</span>
             </a>
             <a href="https://www.facebook.com/search/top?q=mahesh_sweets.tanda" target="_blank" rel="noopener">
-              <strong>FB</strong> Mahesh_Sweets.Tanda
+              <svg class="social-icon facebook-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M14.2 8.6V7.1c0-.8.4-1.2 1.3-1.2H17V3.2c-.7-.1-1.6-.2-2.5-.2-2.8 0-4.6 1.7-4.6 4.7v.9H7.4v3.1h2.5V21h3.4v-9.3h2.8l.5-3.1h-3.3Z" />
+              </svg>
+              <span>Mahesh_Sweets.Tanda</span>
             </a>
             <a href="https://www.google.com/search?q=Mahesh_Sweets.Tanda" target="_blank" rel="noopener">
-              <strong>G</strong> Mahesh_Sweets.Tanda
+              <svg class="social-icon google-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path class="google-blue" d="M21.6 12.2c0-.7-.1-1.4-.2-2H12v3.8h5.4c-.2 1.2-.9 2.2-1.9 2.9v2.4h3c1.9-1.7 3.1-4.2 3.1-7.1Z" />
+                <path class="google-green" d="M12 22c2.7 0 4.9-.9 6.5-2.4l-3-2.4c-.8.5-1.9.9-3.5.9-2.5 0-4.7-1.7-5.5-4H3.4v2.5C5 19.8 8.2 22 12 22Z" />
+                <path class="google-yellow" d="M6.5 14.1c-.2-.6-.3-1.3-.3-2.1s.1-1.4.3-2.1V7.4H3.4C2.8 8.8 2.4 10.3 2.4 12s.4 3.2 1 4.6l3.1-2.5Z" />
+                <path class="google-red" d="M12 5.9c1.5 0 2.8.5 3.8 1.5l2.8-2.8C16.9 3 14.7 2 12 2 8.2 2 5 4.2 3.4 7.4l3.1 2.5c.8-2.3 3-4 5.5-4Z" />
+              </svg>
+              <span>Mahesh_Sweets.Tanda</span>
             </a>
           </div>
         </div>
@@ -359,6 +399,6 @@
     </section>
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
-    <script src="script.js?v=otp-checkout-20260713a"></script>
+    <script src="script.js?v=checkout-without-otp-20260829b"></script>
   </body>
 </html>

@@ -284,10 +284,14 @@ async function insertOrderWithItems(client, {
   const customer = await requireCustomer(client, customerId);
   const normalizedPhone = normalizePhoneNumber(customer.phone);
   const totals = await calculateOrderAmount(client, items);
-  await requireVerifiedPhoneToken(normalizedPhone, otpToken, {
-    client,
-    largeOrder: totals.total >= LARGE_ORDER_LOGIN_AMOUNT,
-  });
+  let phoneVerified = false;
+  if (otpToken) {
+    await requireVerifiedPhoneToken(normalizedPhone, otpToken, {
+      client,
+      largeOrder: totals.total >= LARGE_ORDER_LOGIN_AMOUNT,
+    });
+    phoneVerified = true;
+  }
   const orderNumber = await generateOrderNumber(client);
   const trackingToken = generateTrackingToken();
 
@@ -299,7 +303,7 @@ async function insertOrderWithItems(client, {
        ip_address, user_agent, idempotency_key
      )
      VALUES ($1, $2, 'Confirmed', $3, $4, $5, $6, $7, $8, $9, $10,
-             $11, $12, TRUE, $13, $14, $15, $16, $17)
+             $11, $12, $13, $14, $15, $16, $17, $18)
      RETURNING *`,
     [
       customer.id,
@@ -314,6 +318,7 @@ async function insertOrderWithItems(client, {
       specialInstructions || null,
       customer.name,
       normalizedPhone,
+      phoneVerified,
       normalizeOrderType(orderType),
       trackingToken,
       clientIp(req),

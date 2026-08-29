@@ -152,7 +152,7 @@ const state = {
   cartFeedback: null,
   orderSuccess: null,
   checkoutStep: "cart",
-  paymentMethod: "upi",
+  paymentMethod: "pay_at_counter",
   onlinePaymentsEnabled: true,
   paymentMethodsLoaded: false,
   menuStatus: "loading",
@@ -162,12 +162,6 @@ const state = {
   isListening: false,
   lastRecommendedItems: [],
   chatSending: false,
-  phoneVerification: {
-    phone: "",
-    token: "",
-  },
-  otpResendUntil: 0,
-  otpCountdownTimer: null,
   orderIdempotencyKey: "",
   restaurantSettings: null,
 };
@@ -184,11 +178,6 @@ const elements = {
   placeOrder: document.querySelector("#placeOrder"),
   customerName: document.querySelector("#customerName"),
   customerPhone: document.querySelector("#customerPhone"),
-  otpPanel: document.querySelector("#otpPanel"),
-  sendOtp: document.querySelector("#sendOtp"),
-  otpInput: document.querySelector("#otpInput"),
-  verifyOtp: document.querySelector("#verifyOtp"),
-  otpStatus: document.querySelector("#otpStatus"),
   orderType: document.querySelector("#orderType"),
   menuCount: document.querySelector("#menuCount"),
   activeCategoryLabel: document.querySelector("#activeCategoryLabel"),
@@ -209,21 +198,24 @@ const elements = {
   toast: document.querySelector("#toast"),
 };
 
-const DEFAULT_API_BASE_URL = "http://localhost:5001/api";
-const LOOPBACK_API_BASE_URL = "http://127.0.0.1:5001/api";
-const LEGACY_API_BASE_URL = "http://localhost:5001/api";
+const LOCAL_API_BASE_URL = "http://localhost:5001/api";
+const PRODUCTION_API_BASE_URL = "https://restaurantai-api.vercel.app/api";
 const storedApiBaseUrl = localStorage.getItem("restaurantApiBaseUrl");
 const configuredApiBaseUrl = window.RESTAURANT_API_BASE_URL || "";
-const sameOriginApiBaseUrl = window.location.protocol.startsWith("http")
-  ? `${window.location.origin}/api`
-  : "";
+const isLocalApiHost =
+  window.location.hostname === "localhost" ||
+  window.location.hostname === "127.0.0.1" ||
+  window.location.hostname === "" ||
+  window.location.hostname.startsWith("192.168.") ||
+  window.location.hostname.startsWith("10.") ||
+  /^172\.(1[6-9]|2\d|3[0-1])\./.test(window.location.hostname);
+const environmentApiBaseUrl = isLocalApiHost ? LOCAL_API_BASE_URL : PRODUCTION_API_BASE_URL;
 const API_BASE_URLS = [
   configuredApiBaseUrl,
-  sameOriginApiBaseUrl,
-  DEFAULT_API_BASE_URL,
-  LOOPBACK_API_BASE_URL,
+  LOCAL_API_BASE_URL,
+  environmentApiBaseUrl,
   storedApiBaseUrl,
-  LEGACY_API_BASE_URL,
+  PRODUCTION_API_BASE_URL,
 ]
   .filter(Boolean)
   .map((url) => url.replace(/\/$/, ""))
@@ -232,14 +224,13 @@ let API_BASE_URL = API_BASE_URLS[0];
 const CART_STORAGE_KEY = "restaurantai_cart";
 const CUSTOMER_PHONE_STORAGE_KEY = "restaurantai_customer_phone";
 const CUSTOMER_NOTIFICATION_SEEN_KEY = "restaurantai_seen_notifications";
-const CUSTOMER_OTP_TOKEN_STORAGE_KEY = "restaurantai_phone_verification";
 const PUBLIC_SETTINGS_STORAGE_KEY = "restaurantai_public_settings";
+const DEFAULT_LOGO_PATH = "assets/mahesh-logo.svg";
 const GST_RATE = 0.05;
 const PACKING_CHARGE = 10;
 const MAX_MESSAGE_LENGTH = 500;
 const MAX_ITEM_QUANTITY = 20;
 const MAX_CART_ITEMS = 50;
-const LARGE_ORDER_LOGIN_AMOUNT = 1000;
 const RAZORPAY_CHECKOUT_SCRIPT = "https://checkout.razorpay.com/v1/checkout.js";
 const ONLINE_PAYMENT_METHODS = new Set(["upi", "card", "netbanking", "wallet"]);
 
@@ -266,13 +257,13 @@ async function fetchApi(path, options = {}) {
 
 function friendlyNetworkError(error) {
   if (/failed to fetch|networkerror|load failed/i.test(error?.message || "")) {
-    return "Backend server is not running at port 5001. Start the backend, then try Send OTP again.";
+    return "Backend server is not running at port 5001. Start the backend, then try again.";
   }
   return error?.message || "Please try again.";
 }
 
 const defaultRestaurantSettings = {
-  restaurantName: "MAHESH",
+  restaurantName: "MAHESH Sweets & Bakers",
   gst: "",
   address: "Jaja Chowk, Opp. State Bank of India, Tanda, Punjab-144024, India",
   phone: "",
@@ -281,6 +272,39 @@ const defaultRestaurantSettings = {
   closingTime: "22:00",
   logo: "",
 };
+
+function cleanPublicSetting(field, value) {
+  const text = String(value || "").trim();
+  const placeholders = {
+    restaurantName: ["Restaurant AI", "RestaurantAI", "RESTAURANT NAME"],
+    address: ["123 Main Street, Bengaluru", "123 Main St", "123 Main St, Apt 4B"],
+    phone: ["+91 98765 43210", "+91-9876543210", "9876543210"],
+    email: ["hello@restaurantai.com", "admin@restaurantai.com", "customer@email.com"],
+  };
+
+  if (placeholders[field]?.some((placeholder) => text.toLowerCase() === placeholder.toLowerCase())) {
+    return field === "restaurantName" || field === "address" ? defaultRestaurantSettings[field] : "";
+  }
+
+  return text;
+}
+
+function sanitizedPublicSettings(settings = {}) {
+  const merged = { ...defaultRestaurantSettings, ...settings };
+  const hasSetting = (field) => Object.prototype.hasOwnProperty.call(settings, field);
+  const addressSource = hasSetting("address") ? settings.address : defaultRestaurantSettings.address;
+
+  return {
+    ...merged,
+    restaurantName:
+      cleanPublicSetting("restaurantName", merged.restaurantName) ||
+      defaultRestaurantSettings.restaurantName,
+    address: cleanPublicSetting("address", addressSource),
+    phone: cleanPublicSetting("phone", merged.phone),
+    email: cleanPublicSetting("email", merged.email),
+    logo: String(merged.logo || "").trim(),
+  };
+}
 
 function formatTimeLabel(value) {
   if (!value) return "";
@@ -306,22 +330,36 @@ function cachePublicSettings(settings) {
 function loadCachedPublicSettings() {
   try {
     const cached = JSON.parse(localStorage.getItem(PUBLIC_SETTINGS_STORAGE_KEY) || "{}");
-    return { ...defaultRestaurantSettings, ...cached };
+    return sanitizedPublicSettings(cached);
   } catch {
     return { ...defaultRestaurantSettings };
   }
 }
 
 function applyPublicSettings(settings) {
-  const nextSettings = { ...defaultRestaurantSettings, ...settings };
+  const nextSettings = sanitizedPublicSettings(settings);
   state.restaurantSettings = nextSettings;
   cachePublicSettings(nextSettings);
 
-  const name = nextSettings.restaurantName || defaultRestaurantSettings.restaurantName;
-  const address = nextSettings.address || defaultRestaurantSettings.address;
-  const phone = nextSettings.phone || "";
-  const email = nextSettings.email || "";
+  const name = nextSettings.restaurantName;
+  const address = nextSettings.address;
+  const phone = nextSettings.phone;
+  const email = nextSettings.email;
   const hours = restaurantHoursText(nextSettings);
+  const contactSection = document.querySelector("#contact");
+
+  window.restaurantPublicSettingsDebug = {
+    apiBaseUrl: API_BASE_URL,
+    updatedAt: new Date().toISOString(),
+    settings: nextSettings,
+  };
+
+  if (contactSection) {
+    contactSection.dataset.settingsSource = API_BASE_URL || "fallback";
+    contactSection.dataset.settingsUpdatedAt = window.restaurantPublicSettingsDebug.updatedAt;
+    contactSection.dataset.settingsPhone = phone || "";
+    contactSection.dataset.settingsHours = hours;
+  }
 
   document.title = `${name} | Fresh Menu and Ordering`;
 
@@ -338,24 +376,22 @@ function applyPublicSettings(settings) {
   });
 
   const brandHelper = document.querySelector(".brand-text small");
-  if (brandHelper) brandHelper.textContent = "Fresh menu and ordering";
+  if (brandHelper) brandHelper.textContent = "Sweets, Bakers and Quick Bites";
 
   const brandLink = document.querySelector(".brand");
   if (brandLink) brandLink.setAttribute("aria-label", `${name} home`);
 
-  if (nextSettings.logo) {
-    document.querySelectorAll(".brand-logo, .contact-logo").forEach((image) => {
-      image.src = nextSettings.logo;
-      image.alt = `${name} logo`;
-    });
-  }
+  document.querySelectorAll(".brand-logo, .contact-logo").forEach((image) => {
+    image.src = nextSettings.logo || DEFAULT_LOGO_PATH;
+    image.alt = `${name} logo`;
+  });
 
   const heroTitle = document.querySelector(".hero-copy h1");
-  if (heroTitle) heroTitle.textContent = `Order from ${name} with a clear live menu.`;
+  if (heroTitle) heroTitle.textContent = `Order fresh sweets, bakery and snacks from ${name}.`;
 
   const heroCopy = document.querySelector(".hero-copy p");
   if (heroCopy) {
-    heroCopy.textContent = `Browse items, build your cart, and contact ${name} with the latest restaurant details.`;
+    heroCopy.textContent = `Browse live menu items, build your cart, and plan pickup or dine-in with the latest restaurant details.`;
   }
 
   const contactTitle = document.querySelector("#contact h2");
@@ -363,29 +399,58 @@ function applyPublicSettings(settings) {
 
   const contactCopy = document.querySelector("#contact p");
   if (contactCopy) {
-    contactCopy.textContent = `Visit or contact ${name}. Current hours are ${hours}.`;
+    const locationLabel = address ? ` from ${address.split(",")[0]}` : "";
+    contactCopy.textContent = `Fresh sweets, bakery items, shakes, snacks and quick bites${locationLabel}, ready for pickup, dine-in and order requests.`;
   }
 
-  const contactName = document.querySelector(".contact-card > strong");
+  const directionsLink = document.querySelector(".contact-secondary");
+  if (directionsLink) {
+    directionsLink.href = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+      [name, address].filter(Boolean).join(" ")
+    )}`;
+  }
+
+  const contactName = document.querySelector(".contact-card-header strong");
   if (contactName) contactName.textContent = name;
 
   const addressElement = document.querySelector(".restaurant-address");
-  if (addressElement) {
-    const contactLines = [
-      address,
-      phone ? `Phone: ${phone}` : "",
-      email ? `Email: ${email}` : "",
-      `Hours: ${hours}`,
-    ].filter(Boolean);
-    addressElement.innerHTML = contactLines.map((line) => escapeHtml(line)).join("<br />");
+  const addressRow = document.querySelector(".contact-address-row");
+  if (addressRow) {
+    addressRow.hidden = !address;
   }
+
+  if (addressElement) {
+    addressElement.textContent = address;
+  }
+
+  const phoneRow = document.querySelector(".contact-phone-row");
+  const phoneLink = document.querySelector(".contact-phone");
+  if (phoneRow && phoneLink) {
+    phoneRow.hidden = !phone;
+    phoneLink.textContent = phone;
+    phoneLink.href = phone ? `tel:${phone.replace(/[^\d+]/g, "")}` : "";
+  }
+
+  const emailRow = document.querySelector(".contact-email-row");
+  const emailLink = document.querySelector(".contact-email");
+  if (emailRow && emailLink) {
+    emailRow.hidden = !email;
+    emailLink.textContent = email;
+    emailLink.href = email ? `mailto:${email}` : "";
+  }
+
+  const hoursElement = document.querySelector(".contact-hours");
+  if (hoursElement) hoursElement.textContent = hours;
 }
 
 async function loadPublicSettings() {
-  applyPublicSettings(loadCachedPublicSettings());
+  if (!state.restaurantSettings) {
+    applyPublicSettings(loadCachedPublicSettings());
+  }
 
   try {
-    const response = await fetchApi("/settings/public", {
+    const response = await fetchApi(`/settings/public?t=${Date.now()}`, {
+      cache: "no-store",
       headers: {
         Accept: "application/json",
       },
@@ -421,161 +486,6 @@ function normalizePhone(phone = "") {
   return String(phone)
     .trim()
     .replace(/[^\d+]/g, "");
-}
-
-function savePhoneVerification(phone, token) {
-  const verification = {
-    phone: normalizePhone(phone),
-    token,
-    savedAt: Date.now(),
-  };
-  state.phoneVerification = verification;
-  localStorage.setItem(CUSTOMER_OTP_TOKEN_STORAGE_KEY, JSON.stringify(verification));
-}
-
-function loadPhoneVerification() {
-  try {
-    const saved = JSON.parse(localStorage.getItem(CUSTOMER_OTP_TOKEN_STORAGE_KEY) || "{}");
-    if (saved.phone && saved.token) {
-      state.phoneVerification = saved;
-    }
-  } catch {
-    localStorage.removeItem(CUSTOMER_OTP_TOKEN_STORAGE_KEY);
-  }
-}
-
-function clearPhoneVerification() {
-  state.phoneVerification = { phone: "", token: "" };
-  localStorage.removeItem(CUSTOMER_OTP_TOKEN_STORAGE_KEY);
-  if (elements.customerPhone) {
-    elements.customerPhone.disabled = false;
-  }
-}
-
-function isCurrentPhoneVerified() {
-  const phone = normalizePhone(elements.customerPhone.value);
-  return Boolean(phone && state.phoneVerification.phone === phone && state.phoneVerification.token);
-}
-
-function updateOtpStatus(message) {
-  if (elements.otpStatus) {
-    elements.otpStatus.textContent = message || "Verify your phone before placing an order.";
-  }
-}
-
-function refreshOtpUi() {
-  const phone = normalizePhone(elements.customerPhone.value);
-  const verified = isCurrentPhoneVerified();
-  const secondsRemaining = Math.max(0, Math.ceil((state.otpResendUntil - Date.now()) / 1000));
-
-  if (!phone) {
-    updateOtpStatus("Enter your phone number to receive OTP.");
-  } else if (verified) {
-    updateOtpStatus("Phone verified. You can place orders from this number.");
-  } else {
-    updateOtpStatus("Verify your phone before placing an order.");
-  }
-
-  if (elements.sendOtp) {
-    elements.sendOtp.textContent = secondsRemaining > 0 ? `Resend in ${secondsRemaining}s` : verified ? "Verified" : "Send OTP";
-    elements.sendOtp.disabled = verified || !phone || secondsRemaining > 0;
-  }
-
-  if (elements.customerPhone) {
-    elements.customerPhone.disabled = verified;
-  }
-
-  if (elements.otpInput) {
-    elements.otpInput.disabled = verified || !phone;
-  }
-
-  if (elements.verifyOtp) {
-    elements.verifyOtp.disabled = verified || !phone;
-  }
-}
-
-function startOtpCountdown(seconds = 30) {
-  state.otpResendUntil = Date.now() + seconds * 1000;
-  window.clearInterval(state.otpCountdownTimer);
-  state.otpCountdownTimer = window.setInterval(() => {
-    if (Date.now() >= state.otpResendUntil) {
-      window.clearInterval(state.otpCountdownTimer);
-    }
-    refreshOtpUi();
-  }, 1000);
-  refreshOtpUi();
-}
-
-async function sendPhoneOtp({ announceDevOtp = true } = {}) {
-  const phone = normalizePhone(elements.customerPhone.value);
-
-  if (!phone) {
-    showToast("Phone required", "Enter your phone number first.", "warning");
-    return null;
-  }
-
-  elements.sendOtp.disabled = true;
-  elements.sendOtp.textContent = "Sending...";
-
-  try {
-    const result = await requestJson("/auth/whatsapp/send-otp", {
-      method: "POST",
-      body: JSON.stringify({ phone }),
-    });
-
-    updateOtpStatus("OTP sent to WhatsApp. Enter the 6-digit code to verify your phone.");
-    elements.otpInput.disabled = false;
-    elements.verifyOtp.disabled = false;
-    elements.otpInput.focus();
-    startOtpCountdown(Number(result.resend_after_seconds || 30));
-    showToast("OTP sent", "Check WhatsApp for the verification code.", "success");
-
-    return result;
-  } catch (error) {
-    const message = friendlyNetworkError(error);
-    showToast("Unable to send OTP", message, "warning");
-    updateOtpStatus(message);
-    return null;
-  } finally {
-    elements.sendOtp.disabled = false;
-    refreshOtpUi();
-  }
-}
-
-async function verifyPhoneOtp() {
-  const phone = normalizePhone(elements.customerPhone.value);
-  const otp = elements.otpInput.value.trim();
-
-  if (!phone || !otp) {
-    showToast("OTP required", "Enter phone and the 6-digit OTP.", "warning");
-    return false;
-  }
-
-  elements.verifyOtp.disabled = true;
-  elements.verifyOtp.textContent = "Checking...";
-
-  try {
-    const result = await requestJson("/auth/whatsapp/verify-otp", {
-      method: "POST",
-      body: JSON.stringify({ phone, otp }),
-    });
-
-    savePhoneVerification(phone, result.verification_token);
-    elements.otpInput.value = "";
-    refreshOtpUi();
-    renderCart();
-    showToast("Phone verified", "You can now place your order.", "success");
-    return true;
-  } catch (error) {
-    const message = friendlyNetworkError(error);
-    showToast("OTP verification failed", message, "warning");
-    updateOtpStatus(message);
-    return false;
-  } finally {
-    elements.verifyOtp.disabled = false;
-    elements.verifyOtp.textContent = "Verify";
-    refreshOtpUi();
-  }
 }
 
 function selectedPaymentMethod() {
@@ -1346,10 +1256,9 @@ function renderCart() {
   state.cartFeedback = null;
 
   setPaymentSelectorVisible(state.checkoutStep === "payment");
-  elements.placeOrder.disabled = !isCurrentPhoneVerified();
-  elements.cartHint.textContent = !isCurrentPhoneVerified()
-    ? "Verify your WhatsApp number before placing the order."
-    : state.checkoutStep === "payment"
+  elements.placeOrder.disabled = false;
+  elements.cartHint.textContent =
+    state.checkoutStep === "payment"
       ? "Choose a payment method, then confirm your order."
       : "Check your name and phone, then proceed to choose a payment method.";
   updatePlaceOrderButtonText();
@@ -1421,7 +1330,6 @@ function buildPaymentPayload(customer) {
   return {
     customer_id: customer.id,
     payment_method: selectedPaymentMethod(),
-    otp_verification_token: state.phoneVerification.token,
     order_type: String(elements.orderType.value || "Pickup").toLowerCase().replace(/\s+/g, "_"),
     idempotency_key: ensureOrderIdempotencyKey(),
     special_instructions: `Order type: ${elements.orderType.value}`,
@@ -1462,9 +1370,6 @@ async function handleOnlinePayment(customer) {
 
   const result = await requestJson("/payments/create-order", {
     method: "POST",
-    headers: {
-      "Idempotency-Key": ensureOrderIdempotencyKey(),
-    },
     body: JSON.stringify(buildPaymentPayload(customer)),
   });
 
@@ -1525,9 +1430,6 @@ async function handleOnlinePayment(customer) {
 async function handleOfflinePayment(customer) {
   return requestJson("/payments/cash-order", {
     method: "POST",
-    headers: {
-      "Idempotency-Key": ensureOrderIdempotencyKey(),
-    },
     body: JSON.stringify(buildPaymentPayload(customer)),
   });
 }
@@ -1565,7 +1467,6 @@ function startCustomerNotificationPolling() {
   const savedPhone = localStorage.getItem(CUSTOMER_PHONE_STORAGE_KEY);
   if (savedPhone && !elements.customerPhone.value.trim()) {
     elements.customerPhone.value = savedPhone;
-    refreshOtpUi();
   }
 
   loadCustomerNotifications({ announce: false });
@@ -1583,25 +1484,9 @@ async function placeOrder() {
 
   const name = elements.customerName.value.trim();
   const phone = elements.customerPhone.value.trim();
-  const { total } = cartTotals();
 
   if (!name || !phone) {
     showToast("Name and phone required", "Add customer details before sending the order.", "warning");
-    return;
-  }
-
-  if (!isCurrentPhoneVerified()) {
-    const largeOrder = total >= LARGE_ORDER_LOGIN_AMOUNT;
-    const sent = await sendPhoneOtp({ announceDevOtp: true });
-    if (sent) {
-      showToast(
-        largeOrder ? "Phone login required" : "Verify phone",
-        largeOrder
-          ? "Large orders of Rs. 1000+ need OTP verification before checkout."
-          : "Enter the OTP to continue checkout.",
-        "warning"
-      );
-    }
     return;
   }
 
@@ -2628,11 +2513,7 @@ function bindEvents() {
   elements.clearCart.addEventListener("click", clearCart);
   elements.customerName.addEventListener("input", renderCart);
   elements.customerPhone.addEventListener("input", () => {
-    if (normalizePhone(elements.customerPhone.value) !== state.phoneVerification.phone) {
-      clearPhoneVerification();
-    }
     renderCart();
-    refreshOtpUi();
     saveCustomerPhone(elements.customerPhone.value);
   });
   elements.orderType.addEventListener("change", renderCart);
@@ -2642,22 +2523,6 @@ function bindEvents() {
   });
 
   elements.placeOrder.addEventListener("click", placeOrder);
-  elements.sendOtp?.addEventListener("click", () => {
-    sendPhoneOtp();
-  });
-  elements.verifyOtp?.addEventListener("click", () => {
-    verifyPhoneOtp();
-  });
-  elements.otpInput?.addEventListener("input", () => {
-    elements.otpInput.value = elements.otpInput.value.replace(/\D/g, "").slice(0, 6);
-  });
-  elements.otpInput?.addEventListener("keydown", (event) => {
-    if (event.key === "Enter") {
-      event.preventDefault();
-      verifyPhoneOtp();
-    }
-  });
-
   elements.chatToggle.addEventListener("click", () => {
     document.querySelector("#ai").scrollIntoView({ behavior: "smooth" });
     window.setTimeout(() => {
@@ -2913,17 +2778,16 @@ if (startTrackingPage()) {
 loadPublicSettings();
 updateMenuStats();
 restoreCart();
-loadPhoneVerification();
 renderFilters();
 renderMenu();
 renderCart();
 bindEvents();
-refreshOtpUi();
 setupActiveNavigation();
 setupVoiceSystem();
 startCustomerNotificationPolling();
 loadPaymentMethods();
 loadLiveMenu();
 window.setInterval(loadLiveMenu, 60000);
-window.setInterval(loadPublicSettings, 30000);
+window.setInterval(loadPublicSettings, 5000);
+window.addEventListener("focus", loadPublicSettings);
 }

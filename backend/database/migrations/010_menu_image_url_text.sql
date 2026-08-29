@@ -1,0 +1,5 @@
+ALTER TABLE menu
+  ADD COLUMN IF NOT EXISTS image_url TEXT;
+
+ALTER TABLE menu
+  ALTER COLUMN image_url TYPE TEXT;

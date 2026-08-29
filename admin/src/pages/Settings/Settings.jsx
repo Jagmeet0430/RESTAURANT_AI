@@ -29,17 +29,54 @@ import { settingsService } from "../../services/settings";
 const STORAGE_KEY = "restaurantai_settings";
 
 const defaultSettings = {
-  restaurantName: "Restaurant AI",
-  gst: "27ABCDE1234F1Z5",
-  address: "123 Main Street, Bengaluru",
-  phone: "+91 98765 43210",
-  email: "hello@restaurantai.com",
+  restaurantName: "MAHESH Sweets & Bakers",
+  gst: "",
+  address: "Jaja Chowk, Opp. State Bank of India, Tanda, Punjab-144024, India",
+  phone: "",
+  email: "",
   openingTime: "10:00",
   closingTime: "22:00",
   logo: "",
   password: "",
   theme: "light",
 };
+
+const placeholderValues = {
+  restaurantName: ["Restaurant AI", "RestaurantAI", "RESTAURANT NAME"],
+  gst: ["27ABCDE1234F1Z5"],
+  address: ["123 Main Street, Bengaluru", "123 Main St", "123 Main St, Apt 4B"],
+  phone: ["+91 98765 43210", "+91-9876543210", "9876543210"],
+  email: ["hello@restaurantai.com", "admin@restaurantai.com", "customer@email.com"],
+};
+
+function cleanSettingValue(field, value) {
+  const text = String(value ?? "").trim();
+  const isPlaceholder = placeholderValues[field]?.some(
+    (placeholder) => text.toLowerCase() === placeholder.toLowerCase()
+  );
+
+  if (!isPlaceholder) {
+    return text;
+  }
+
+  return field === "restaurantName" || field === "address" ? defaultSettings[field] : "";
+}
+
+function normalizeSettings(settings = {}) {
+  return Object.keys(defaultSettings).reduce((normalized, field) => {
+    const value =
+      settings[field] === undefined || settings[field] === null
+        ? defaultSettings[field]
+        : settings[field];
+    normalized[field] = cleanSettingValue(field, value);
+    return normalized;
+  }, {});
+}
+
+function settingsSignature(settings = {}) {
+  const comparable = normalizeSettings({ ...settings, password: "" });
+  return JSON.stringify(comparable);
+}
 
 const themeOptions = [
   {
@@ -62,7 +99,7 @@ const themeOptions = [
 function loadSavedSettings() {
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
-    return saved ? { ...defaultSettings, ...JSON.parse(saved) } : defaultSettings;
+    return saved ? normalizeSettings(JSON.parse(saved)) : defaultSettings;
   } catch {
     return defaultSettings;
   }
@@ -73,7 +110,7 @@ function applyTheme(theme) {
 }
 
 function cacheSettings(settings) {
-  const cached = { ...settings, password: "" };
+  const cached = normalizeSettings({ ...settings, password: "" });
   localStorage.setItem(STORAGE_KEY, JSON.stringify(cached));
   window.dispatchEvent(new CustomEvent("restaurantai-settings-updated", { detail: cached }));
 }
@@ -81,10 +118,6 @@ function cacheSettings(settings) {
 function validateSettings(settings, includePassword = false) {
   if (!settings.restaurantName.trim()) {
     return "Restaurant name is required because customers see it on the website.";
-  }
-
-  if (!settings.phone.trim()) {
-    return "Phone number is required so customers can contact the restaurant.";
   }
 
   if (settings.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(settings.email)) {
@@ -100,7 +133,8 @@ function validateSettings(settings, includePassword = false) {
 
 function saveStatusLabel(status, lastSavedAt) {
   if (status === "loading") return "Loading settings...";
-  if (status === "saving") return "Auto-saving changes...";
+  if (status === "pending") return "Unsaved changes. Click Save Settings Now or wait for auto-save.";
+  if (status === "saving") return "Saving changes...";
   if (status === "offline") return "Saved in this browser. Backend sync is unavailable.";
   if (status === "error") return "Changes need attention.";
   if (status === "saved" && lastSavedAt) return `Saved ${lastSavedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
@@ -113,7 +147,9 @@ function Settings() {
   const [lastSavedAt, setLastSavedAt] = useState(null);
   const [settingsReady, setSettingsReady] = useState(false);
   const [error, setError] = useState("");
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const skipAutoSaveRef = useRef(true);
+  const lastServerSettingsRef = useRef("");
 
   useEffect(() => {
     applyTheme(formData.theme);
@@ -124,10 +160,12 @@ function Settings() {
 
     try {
       const response = await settingsService.getSettings();
-      const nextSettings = { ...defaultSettings, ...(response.data || {}), password: "" };
+      const nextSettings = normalizeSettings({ ...(response.data || {}), password: "" });
       skipAutoSaveRef.current = true;
       setFormData(nextSettings);
       cacheSettings(nextSettings);
+      lastServerSettingsRef.current = settingsSignature(nextSettings);
+      setHasUnsavedChanges(false);
       setSaveStatus("saved");
       setLastSavedAt(new Date());
       setError("");
@@ -135,6 +173,7 @@ function Settings() {
       const cachedSettings = loadSavedSettings();
       skipAutoSaveRef.current = true;
       setFormData(cachedSettings);
+      setHasUnsavedChanges(false);
       setSaveStatus("offline");
       setError(loadError?.response?.data?.message || "Backend settings are unavailable. Changes will still stay in this browser.");
     } finally {
@@ -148,7 +187,7 @@ function Settings() {
   }, [loadSettings]);
 
   const publicInfoComplete = useMemo(() => {
-    const fields = ["restaurantName", "address", "phone", "openingTime", "closingTime"];
+    const fields = ["restaurantName", "address", "openingTime", "closingTime"];
     const completed = fields.filter((field) => String(formData[field] || "").trim()).length;
     return `${completed}/${fields.length}`;
   }, [formData]);
@@ -156,10 +195,15 @@ function Settings() {
   const handleChange = (event) => {
     const { name, value } = event.target;
     setError("");
+    setHasUnsavedChanges(true);
+    setSaveStatus("pending");
     setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
   const handleThemeChange = (theme) => {
+    setError("");
+    setHasUnsavedChanges(true);
+    setSaveStatus("pending");
     setFormData((prev) => ({ ...prev, theme }));
   };
 
@@ -182,7 +226,7 @@ function Settings() {
 
       try {
         const response = await settingsService.updateSettings(payload);
-        const serverSettings = { ...defaultSettings, ...(response.data || {}) };
+        const serverSettings = normalizeSettings(response.data || {});
         const nextSettings = {
           ...serverSettings,
           password: includePassword ? "" : formData.password,
@@ -191,10 +235,13 @@ function Settings() {
         skipAutoSaveRef.current = true;
         setFormData(nextSettings);
         cacheSettings(nextSettings);
+        lastServerSettingsRef.current = settingsSignature(nextSettings);
+        setHasUnsavedChanges(false);
         setSaveStatus("saved");
         setLastSavedAt(new Date());
         setError("");
       } catch (saveError) {
+        setHasUnsavedChanges(true);
         setSaveStatus("offline");
         setLastSavedAt(new Date());
         setError(saveError?.response?.data?.message || "Backend sync failed. Settings were saved in this browser only.");
@@ -219,6 +266,44 @@ function Settings() {
 
     return () => window.clearTimeout(saveId);
   }, [formData, saveSettings, settingsReady]);
+
+  useEffect(() => {
+    if (!settingsReady) {
+      return undefined;
+    }
+
+    const pollBackendSettings = async () => {
+      if (hasUnsavedChanges || saveStatus === "saving") {
+        return;
+      }
+
+      try {
+        const response = await settingsService.getSettings();
+        const nextSettings = normalizeSettings({ ...(response.data || {}), password: formData.password });
+        const nextSignature = settingsSignature(nextSettings);
+
+        if (!lastServerSettingsRef.current) {
+          lastServerSettingsRef.current = nextSignature;
+          return;
+        }
+
+        if (nextSignature !== lastServerSettingsRef.current) {
+          skipAutoSaveRef.current = true;
+          setFormData(nextSettings);
+          cacheSettings(nextSettings);
+          lastServerSettingsRef.current = nextSignature;
+          setSaveStatus("saved");
+          setLastSavedAt(new Date());
+          setError("");
+        }
+      } catch {
+        // Keep the current form values if the background refresh misses once.
+      }
+    };
+
+    const pollId = window.setInterval(pollBackendSettings, 5000);
+    return () => window.clearInterval(pollId);
+  }, [formData.password, hasUnsavedChanges, saveStatus, settingsReady]);
 
   const handleSave = () => {
     saveSettings({ includePassword: Boolean(formData.password) });
@@ -293,7 +378,7 @@ function Settings() {
                       name="restaurantName"
                       value={formData.restaurantName}
                       onChange={handleChange}
-                      helperText="Example: RestaurantAI Bakery and Quick Bites"
+                      helperText="Example: MAHESH Sweets & Bakers"
                       InputProps={{
                         startAdornment: (
                           <InputAdornment position="start">
@@ -539,8 +624,19 @@ function Settings() {
               </CardContent>
             </Card>
 
-            <Button variant="contained" size="large" onClick={handleSave} disabled={saveStatus === "saving"}>
-              {formData.password ? "Save Settings and Password" : "Save Settings Now"}
+            <Button
+              variant="contained"
+              size="large"
+              onClick={handleSave}
+              disabled={saveStatus === "saving" || saveStatus === "loading"}
+            >
+              {saveStatus === "saving"
+                ? "Saving..."
+                : formData.password
+                  ? "Save Settings and Password"
+                  : hasUnsavedChanges
+                    ? "Save Pending Changes"
+                    : "Save Settings Now"}
             </Button>
           </Stack>
         </Grid>

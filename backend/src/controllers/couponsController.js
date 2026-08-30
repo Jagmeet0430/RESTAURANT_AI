@@ -1,6 +1,58 @@
 import { pool } from "../config/database.js";
 import { successResponse, errorResponse, asyncHandler } from "../utils/index.js";
 
+let couponSchemaReady;
+
+const ensureCouponSchema = () => {
+  if (!couponSchemaReady) {
+    couponSchemaReady = (async () => {
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS coupons (
+          id SERIAL PRIMARY KEY,
+          code VARCHAR(50) UNIQUE NOT NULL,
+          description TEXT,
+          discount_type VARCHAR(50) NOT NULL,
+          discount_value DECIMAL(10, 2) NOT NULL,
+          minimum_order_value DECIMAL(10, 2),
+          maximum_discount_value DECIMAL(10, 2),
+          usage_limit INT,
+          used_count INT DEFAULT 0,
+          usage_per_customer INT DEFAULT 1,
+          start_date TIMESTAMP,
+          expiry_date TIMESTAMP NOT NULL,
+          is_active BOOLEAN DEFAULT true,
+          created_by INT,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+
+      await pool.query("ALTER TABLE coupons ADD COLUMN IF NOT EXISTS description TEXT");
+      await pool.query("ALTER TABLE coupons ADD COLUMN IF NOT EXISTS discount_type VARCHAR(50) NOT NULL DEFAULT 'Percentage'");
+      await pool.query("ALTER TABLE coupons ADD COLUMN IF NOT EXISTS discount_value DECIMAL(10, 2) NOT NULL DEFAULT 0");
+      await pool.query("ALTER TABLE coupons ADD COLUMN IF NOT EXISTS minimum_order_value DECIMAL(10, 2)");
+      await pool.query("ALTER TABLE coupons ADD COLUMN IF NOT EXISTS maximum_discount_value DECIMAL(10, 2)");
+      await pool.query("ALTER TABLE coupons ADD COLUMN IF NOT EXISTS usage_limit INT");
+      await pool.query("ALTER TABLE coupons ADD COLUMN IF NOT EXISTS used_count INT DEFAULT 0");
+      await pool.query("ALTER TABLE coupons ADD COLUMN IF NOT EXISTS usage_per_customer INT DEFAULT 1");
+      await pool.query("ALTER TABLE coupons ADD COLUMN IF NOT EXISTS start_date TIMESTAMP");
+      await pool.query("ALTER TABLE coupons ADD COLUMN IF NOT EXISTS expiry_date TIMESTAMP NOT NULL DEFAULT (CURRENT_TIMESTAMP + INTERVAL '1 year')");
+      await pool.query("ALTER TABLE coupons ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true");
+      await pool.query("ALTER TABLE coupons ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
+      await pool.query("ALTER TABLE coupons ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
+
+      await pool.query("CREATE INDEX IF NOT EXISTS idx_coupons_code ON coupons(code)");
+      await pool.query("CREATE INDEX IF NOT EXISTS idx_coupons_active ON coupons(is_active)");
+      await pool.query("CREATE INDEX IF NOT EXISTS idx_coupons_expiry ON coupons(expiry_date)");
+    })().catch((error) => {
+      couponSchemaReady = undefined;
+      throw error;
+    });
+  }
+
+  return couponSchemaReady;
+};
+
 const normalizeCoupon = (coupon) => ({
   ...coupon,
   discount_value: Number(coupon.discount_value),
@@ -9,6 +61,8 @@ const normalizeCoupon = (coupon) => ({
 });
 
 export const getAllCoupons = asyncHandler(async (req, res) => {
+  await ensureCouponSchema();
+
   const result = await pool.query(
     `SELECT id, code, description, discount_type, discount_value, minimum_order_value,
             maximum_discount_value, usage_limit, used_count, expiry_date, is_active, created_at
@@ -20,6 +74,8 @@ export const getAllCoupons = asyncHandler(async (req, res) => {
 });
 
 export const createCoupon = asyncHandler(async (req, res) => {
+  await ensureCouponSchema();
+
   const {
     code,
     description,
@@ -66,6 +122,8 @@ export const createCoupon = asyncHandler(async (req, res) => {
 });
 
 export const updateCoupon = asyncHandler(async (req, res) => {
+  await ensureCouponSchema();
+
   const { id } = req.params;
   const {
     code,
@@ -124,6 +182,8 @@ export const updateCoupon = asyncHandler(async (req, res) => {
 });
 
 export const deleteCoupon = asyncHandler(async (req, res) => {
+  await ensureCouponSchema();
+
   const { id } = req.params;
 
   const result = await pool.query(

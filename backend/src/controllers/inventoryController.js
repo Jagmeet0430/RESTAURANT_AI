@@ -184,6 +184,8 @@ const ensureProductInventorySchema = async (client = pool) => {
     DECLARE
       constraint_name TEXT;
     BEGIN
+      LOCK TABLE inventory_transactions IN ACCESS EXCLUSIVE MODE;
+
       FOR constraint_name IN
         SELECT con.conname
         FROM pg_constraint con
@@ -196,23 +198,24 @@ const ensureProductInventorySchema = async (client = pool) => {
       LOOP
         EXECUTE format('ALTER TABLE inventory_transactions DROP CONSTRAINT IF EXISTS %I', constraint_name);
       END LOOP;
-    END $$;
-  `);
 
-  await client.query(`
-    ALTER TABLE inventory_transactions
-      ADD CONSTRAINT inventory_transactions_transaction_type_check
-      CHECK (
-        transaction_type IN (
-          'STOCK_IN',
-          'STOCK_OUT',
-          'SALE',
-          'RETURN',
-          'ADJUSTMENT',
-          'WASTE',
-          'WASTAGE'
-        )
-      )
+      ALTER TABLE inventory_transactions
+        ADD CONSTRAINT inventory_transactions_transaction_type_check
+        CHECK (
+          transaction_type IN (
+            'STOCK_IN',
+            'STOCK_OUT',
+            'SALE',
+            'RETURN',
+            'ADJUSTMENT',
+            'WASTE',
+            'WASTAGE'
+          )
+        );
+    EXCEPTION
+      WHEN duplicate_object THEN
+        NULL;
+    END $$;
   `);
 
   await client.query("CREATE INDEX IF NOT EXISTS idx_products_barcode ON products(barcode)");

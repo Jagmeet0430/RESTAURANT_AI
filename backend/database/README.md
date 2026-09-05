@@ -139,13 +139,15 @@ const pool = new Pool({
 
 **Backup:**
 ```bash
-pg_dump -U postgres restaurantai > backup.sql
+npm run backup
 ```
 
 **Restore:**
 ```bash
-psql -U postgres -d restaurantai -f backup.sql
+npm run restore -- "..\backups\database\restaurant_db_YYYY-MM-DD_HHMMSS.dump" --test --yes
 ```
+
+See `docs/BACKUP_RESTORE.md` for the full custom-format backup, restore-test, and disaster recovery workflow.
 
 ---
 

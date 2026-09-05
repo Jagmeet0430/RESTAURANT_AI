@@ -2,9 +2,12 @@
 import jwt from "jsonwebtoken";
 import { jwtConfig } from "../config/index.js";
 
+const getBearerToken = (authHeader = "") =>
+  authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : null;
+
 export const authMiddleware = (req, res, next) => {
   try {
-    const token = req.headers.authorization?.split(" ")[1];
+    const token = getBearerToken(req.headers.authorization || "");
     if (!token) {
       return res.status(401).json({ success: false, message: "No token provided" });
     }

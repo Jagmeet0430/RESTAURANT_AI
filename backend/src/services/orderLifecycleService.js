@@ -1,4 +1,5 @@
 import { pool } from "../config/database.js";
+import { updateOrderStatusWithHistory } from "./orderStatusService.js";
 
 export const ORDER_EXPIRY_MINUTES = Number(process.env.ORDER_EXPIRY_MINUTES || 20);
 export const ORDER_VISIBILITY_MINUTES = Number(process.env.ORDER_VISIBILITY_MINUTES || 20);
@@ -7,26 +8,6 @@ let notificationTableReady = false;
 
 export const ensureNotificationTable = async (client = pool) => {
   if (notificationTableReady) return;
-
-  await client.query(`
-    CREATE TABLE IF NOT EXISTS customer_notifications (
-      id SERIAL PRIMARY KEY,
-      customer_id INT NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
-      order_id INT REFERENCES orders(id) ON DELETE CASCADE,
-      type VARCHAR(50) NOT NULL,
-      title VARCHAR(255) NOT NULL,
-      message TEXT NOT NULL,
-      is_read BOOLEAN DEFAULT false,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-
-  await client.query(
-    "CREATE INDEX IF NOT EXISTS idx_customer_notifications_customer ON customer_notifications(customer_id, created_at DESC)"
-  );
-  await client.query(
-    "CREATE INDEX IF NOT EXISTS idx_customer_notifications_order ON customer_notifications(order_id)"
-  );
 
   notificationTableReady = true;
 };
@@ -67,17 +48,30 @@ export const cancelExpiredPendingOrders = async () => {
     await client.query("BEGIN");
 
     const result = await client.query(
-      `UPDATE orders
-       SET status = 'Cancelled',
-           payment_status = CASE WHEN payment_status = 'Paid' THEN 'Refunded' ELSE payment_status END,
-           updated_at = CURRENT_TIMESTAMP
+      `SELECT id, order_number, customer_id, total_amount, payment_status
+       FROM orders
        WHERE status = 'Pending'
          AND created_at <= CURRENT_TIMESTAMP - ($1::int * INTERVAL '1 minute')
-       RETURNING id, order_number, customer_id, total_amount`,
+       FOR UPDATE`,
       [ORDER_EXPIRY_MINUTES]
     );
 
     for (const order of result.rows) {
+      await updateOrderStatusWithHistory({
+        orderId: order.id,
+        status: "Cancelled",
+        cancellationReason: `Automatically cancelled after ${ORDER_EXPIRY_MINUTES} minutes without acceptance.`,
+        client,
+        notify: false,
+      });
+
+      if (order.payment_status === "Paid") {
+        await client.query(
+          "UPDATE orders SET payment_status = 'Refunded', updated_at = CURRENT_TIMESTAMP WHERE id = $1",
+          [order.id]
+        );
+      }
+
       await createCustomerNotification({
         client,
         customerId: order.customer_id,

@@ -12,7 +12,11 @@ import { requireVerifiedPhoneToken } from "../services/otpService.js";
 import { createBillForOrder } from "../services/billingService.js";
 import { deductInventoryForOrder } from "../services/inventoryStockService.js";
 import { ensureOrderSecuritySchema } from "../services/orderSchemaService.js";
-import { updateOrderStatusWithHistory } from "../services/orderStatusService.js";
+import {
+  normalizeOrderStatus,
+  statusForStorage,
+  updateOrderStatusWithHistory,
+} from "../services/orderStatusService.js";
 import { sendOrderStatusNotification } from "../services/notificationService.js";
 import { generateTrackingToken } from "../utils/trackingToken.js";
 import { normalizePhoneNumber } from "../utils/phoneNumber.js";
@@ -508,7 +512,7 @@ export const updateOrderStatus = asyncHandler(async (req, res) => {
     client.release();
   }
 
-  if (status === "Cancelled" && existing.rows[0].status !== "Cancelled") {
+  if (normalizeOrderStatus(status) === "cancelled" && existing.rows[0].status !== "Cancelled") {
     await createCustomerNotification({
       customerId: existing.rows[0].customer_id,
       orderId: existing.rows[0].id,
@@ -524,6 +528,9 @@ export const updateOrderStatus = asyncHandler(async (req, res) => {
 // Cancel or delete an order
 export const deleteOrder = asyncHandler(async (req, res) => {
   const { id } = req.params;
+  const cancellationReason =
+    String(req.body?.cancellationReason || req.body?.cancellation_reason || "").trim() ||
+    "Cancelled by restaurant";
 
   const existing = await pool.query("SELECT id, status, customer_id, order_number FROM orders WHERE id = $1", [id]);
   if (existing.rows.length === 0) {
@@ -534,25 +541,36 @@ export const deleteOrder = asyncHandler(async (req, res) => {
     return errorResponse(res, "Order is already cancelled", 409);
   }
 
-  const result = await pool.query(
-    `UPDATE orders
-     SET status = 'Cancelled',
-         payment_status = COALESCE(payment_status, 'Refunded'),
-         updated_at = CURRENT_TIMESTAMP
-     WHERE id = $1
-     RETURNING id, status, payment_status`,
-    [id]
-  );
+  const client = await pool.connect();
+  let cancelledOrder;
+
+  try {
+    await client.query("BEGIN");
+    cancelledOrder = await updateOrderStatusWithHistory({
+      orderId: Number(id),
+      status: "Cancelled",
+      cancellationReason,
+      changedBy: req.user?.id || null,
+      client,
+    });
+
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    return errorResponse(res, error.message, error.statusCode || 500);
+  } finally {
+    client.release();
+  }
 
   await createCustomerNotification({
     customerId: existing.rows[0].customer_id,
     orderId: existing.rows[0].id,
     type: "order_cancelled",
     title: "Order cancelled",
-    message: `Order ${existing.rows[0].order_number} was cancelled by the restaurant.`,
+    message: `Order ${existing.rows[0].order_number} was cancelled by the restaurant. Reason: ${cancellationReason}`,
   });
 
-  return successResponse(res, result.rows[0], "Order cancelled successfully");
+  return successResponse(res, cancelledOrder, "Order cancelled successfully");
 });
 
 export const cancelOrder = deleteOrder;
@@ -561,10 +579,21 @@ export const cancelOrder = deleteOrder;
 export const getOrdersByStatus = asyncHandler(async (req, res) => {
   const { status } = req.params;
 
-  const validStatuses = ["Pending", "Accepted", "Preparing", "Ready", "Completed", "Cancelled"];
+  const validStatuses = [
+    "Pending",
+    "Confirmed",
+    "Accepted",
+    "Preparing",
+    "Ready",
+    "Out for Delivery",
+    "Completed",
+    "Cancelled",
+  ];
   if (!validStatuses.includes(status)) {
     return errorResponse(res, `Invalid status. Must be one of: ${validStatuses.join(", ")}`, 400);
   }
+
+  const storageStatus = statusForStorage(status);
 
   const result = await pool.query(
     `SELECT o.id, o.order_number, o.status, COUNT(oi.id) as item_count,
@@ -583,8 +612,8 @@ export const getOrdersByStatus = asyncHandler(async (req, res) => {
        )
      GROUP BY o.id, c.name
      ORDER BY o.created_at ASC`,
-    [status]
+    [storageStatus]
   );
 
-  return successResponse(res, result.rows, `${status} orders retrieved successfully`);
+  return successResponse(res, result.rows, `${storageStatus} orders retrieved successfully`);
 });

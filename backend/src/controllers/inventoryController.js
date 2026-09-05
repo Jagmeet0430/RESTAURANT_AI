@@ -1,228 +1,43 @@
 import { pool } from "../config/database.js";
 import { asyncHandler } from "../utils/index.js";
-import { ensureBarcodeStockSchema } from "../services/inventoryStockService.js";
 
-const ensureInventorySchema = async () => {
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS suppliers (
-      id SERIAL PRIMARY KEY,
-      name VARCHAR(150) NOT NULL,
-      contact_person VARCHAR(120),
-      phone VARCHAR(20),
-      email VARCHAR(150),
-      address TEXT,
-      is_active BOOLEAN DEFAULT TRUE,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
+const liveInventorySelect = `
+  SELECT
+    CONCAT('ingredient-', i.id) AS id,
+    'ingredient' AS source_type,
+    i.id AS source_id,
+    i.id AS inventory_id,
+    NULL::INTEGER AS product_id,
+    i.ingredient_name,
+    i.quantity,
+    i.unit,
+    i.minimum_level,
+    i.cost_per_unit,
+    i.expiry_date,
+    i.supplier_id,
+    i.menu_id,
+    i.barcode,
+    i.stock_per_sale,
+    m.name AS menu_name,
+    m.price AS menu_price,
+    m.is_available AS menu_available,
+    s.name AS supplier_name,
+    s.phone AS supplier_phone,
+    CASE
+      WHEN i.quantity <= 0 THEN 'Out of stock'
+      WHEN i.quantity <= i.minimum_level THEN 'Low stock'
+      WHEN i.expiry_date IS NOT NULL AND i.expiry_date < CURRENT_DATE THEN 'Expired'
+      WHEN i.expiry_date IS NOT NULL AND i.expiry_date <= CURRENT_DATE + INTERVAL '3 days'
+        THEN 'Expiring soon'
+      ELSE 'Healthy'
+    END AS status
+  FROM inventory i
+  LEFT JOIN suppliers s ON s.id = i.supplier_id
+  LEFT JOIN menu m ON m.id = i.menu_id
+  WHERE COALESCE(i.is_active, TRUE) = TRUE
 
-  await pool.query(`
-    ALTER TABLE suppliers
-      ADD COLUMN IF NOT EXISTS contact_person VARCHAR(120),
-      ADD COLUMN IF NOT EXISTS phone VARCHAR(20),
-      ADD COLUMN IF NOT EXISTS email VARCHAR(150),
-      ADD COLUMN IF NOT EXISTS address TEXT,
-      ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE,
-      ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-  `);
+  UNION ALL
 
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS inventory (
-      id SERIAL PRIMARY KEY,
-      ingredient_name VARCHAR(150) NOT NULL,
-      quantity NUMERIC(12, 2) NOT NULL DEFAULT 0,
-      unit VARCHAR(30) NOT NULL,
-      minimum_level NUMERIC(12, 2) NOT NULL DEFAULT 0,
-      cost_per_unit NUMERIC(12, 2) DEFAULT 0,
-      expiry_date DATE,
-      supplier_id INTEGER REFERENCES suppliers(id) ON DELETE SET NULL,
-      is_active BOOLEAN DEFAULT TRUE,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-
-  await ensureBarcodeStockSchema();
-
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS inventory_transactions (
-      id SERIAL PRIMARY KEY,
-      inventory_id INTEGER NOT NULL REFERENCES inventory(id) ON DELETE CASCADE,
-      transaction_type VARCHAR(20) NOT NULL
-        CHECK (transaction_type IN ('STOCK_IN', 'STOCK_OUT', 'ADJUSTMENT', 'WASTE')),
-      quantity NUMERIC(12, 2) NOT NULL,
-      reference_type VARCHAR(50),
-      reference_id INTEGER,
-      notes TEXT,
-      created_by INTEGER,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-
-  await pool.query("CREATE INDEX IF NOT EXISTS idx_inventory_supplier ON inventory(supplier_id)");
-  await pool.query("CREATE INDEX IF NOT EXISTS idx_inventory_expiry ON inventory(expiry_date)");
-};
-
-const ensureProductInventorySchema = async (client = pool) => {
-  await ensureBarcodeStockSchema(client);
-
-  await client.query(`
-    CREATE TABLE IF NOT EXISTS suppliers (
-      id SERIAL PRIMARY KEY,
-      name VARCHAR(150) NOT NULL,
-      contact_person VARCHAR(120),
-      phone VARCHAR(20),
-      email VARCHAR(150),
-      address TEXT,
-      is_active BOOLEAN DEFAULT TRUE,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-
-  await client.query(`
-    ALTER TABLE suppliers
-      ADD COLUMN IF NOT EXISTS contact_person VARCHAR(120),
-      ADD COLUMN IF NOT EXISTS phone VARCHAR(20),
-      ADD COLUMN IF NOT EXISTS email VARCHAR(150),
-      ADD COLUMN IF NOT EXISTS address TEXT,
-      ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE,
-      ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-  `);
-
-  await client.query(`
-    CREATE TABLE IF NOT EXISTS products (
-      id SERIAL PRIMARY KEY,
-      barcode VARCHAR(50) UNIQUE NOT NULL,
-      name VARCHAR(150) NOT NULL,
-      category VARCHAR(100),
-      brand VARCHAR(120),
-      description TEXT,
-      unit VARCHAR(30) NOT NULL DEFAULT 'piece',
-      purchase_price NUMERIC(12, 2) NOT NULL DEFAULT 0,
-      selling_price NUMERIC(12, 2) NOT NULL DEFAULT 0,
-      quantity NUMERIC(12, 2) NOT NULL DEFAULT 0,
-      minimum_stock NUMERIC(12, 2) NOT NULL DEFAULT 5,
-      supplier_id INTEGER,
-      supplier_name VARCHAR(150),
-      batch_number VARCHAR(100),
-      expiry_date DATE,
-      image_url VARCHAR(500),
-      is_active BOOLEAN NOT NULL DEFAULT TRUE,
-      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-
-  await client.query(`
-    ALTER TABLE products
-      ADD COLUMN IF NOT EXISTS brand VARCHAR(120),
-      ADD COLUMN IF NOT EXISTS description TEXT,
-      ADD COLUMN IF NOT EXISTS supplier_name VARCHAR(150),
-      ADD COLUMN IF NOT EXISTS batch_number VARCHAR(100),
-      ADD COLUMN IF NOT EXISTS expiry_date DATE,
-      ADD COLUMN IF NOT EXISTS image_url VARCHAR(500),
-      ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-  `);
-
-  await client.query(`
-    CREATE TABLE IF NOT EXISTS inventory_transactions (
-      id SERIAL PRIMARY KEY,
-      inventory_id INTEGER REFERENCES inventory(id) ON DELETE CASCADE,
-      product_id INTEGER REFERENCES products(id) ON DELETE CASCADE,
-      transaction_type VARCHAR(30) NOT NULL,
-      quantity NUMERIC(12, 2) NOT NULL,
-      quantity_before NUMERIC(12, 2),
-      quantity_after NUMERIC(12, 2),
-      reference_type VARCHAR(50),
-      reference_id INTEGER,
-      reference_number VARCHAR(100),
-      notes TEXT,
-      created_by INTEGER,
-      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-
-  await client.query(`
-    ALTER TABLE inventory_transactions
-      ADD COLUMN IF NOT EXISTS inventory_id INTEGER REFERENCES inventory(id) ON DELETE CASCADE,
-      ADD COLUMN IF NOT EXISTS product_id INTEGER REFERENCES products(id) ON DELETE CASCADE,
-      ADD COLUMN IF NOT EXISTS quantity_before NUMERIC(12, 2),
-      ADD COLUMN IF NOT EXISTS quantity_after NUMERIC(12, 2),
-      ADD COLUMN IF NOT EXISTS reference_type VARCHAR(50),
-      ADD COLUMN IF NOT EXISTS reference_id INTEGER,
-      ADD COLUMN IF NOT EXISTS reference_number VARCHAR(100),
-      ADD COLUMN IF NOT EXISTS created_by INTEGER,
-      ADD COLUMN IF NOT EXISTS created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-  `);
-
-  await client.query(`
-    ALTER TABLE inventory_transactions
-      ALTER COLUMN inventory_id DROP NOT NULL,
-      ALTER COLUMN quantity_before SET DEFAULT 0,
-      ALTER COLUMN quantity_after SET DEFAULT 0
-  `);
-
-  await client.query(`
-    UPDATE inventory_transactions
-    SET
-      quantity_before = COALESCE(quantity_before, 0),
-      quantity_after = COALESCE(quantity_after, 0)
-    WHERE quantity_before IS NULL
-       OR quantity_after IS NULL
-  `);
-
-  await client.query(`
-    ALTER TABLE inventory_transactions
-      ALTER COLUMN quantity_before SET NOT NULL,
-      ALTER COLUMN quantity_after SET NOT NULL
-  `);
-
-  await client.query(`
-    DO $$
-    DECLARE
-      constraint_name TEXT;
-    BEGIN
-      LOCK TABLE inventory_transactions IN ACCESS EXCLUSIVE MODE;
-
-      FOR constraint_name IN
-        SELECT con.conname
-        FROM pg_constraint con
-        JOIN pg_class rel ON rel.oid = con.conrelid
-        JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace
-        WHERE rel.relname = 'inventory_transactions'
-          AND nsp.nspname = current_schema()
-          AND con.contype = 'c'
-          AND pg_get_constraintdef(con.oid) ILIKE '%transaction_type%'
-      LOOP
-        EXECUTE format('ALTER TABLE inventory_transactions DROP CONSTRAINT IF EXISTS %I', constraint_name);
-      END LOOP;
-
-      ALTER TABLE inventory_transactions
-        ADD CONSTRAINT inventory_transactions_transaction_type_check
-        CHECK (
-          transaction_type IN (
-            'STOCK_IN',
-            'STOCK_OUT',
-            'SALE',
-            'RETURN',
-            'ADJUSTMENT',
-            'WASTE',
-            'WASTAGE'
-          )
-        );
-    EXCEPTION
-      WHEN duplicate_object THEN
-        NULL;
-    END $$;
-  `);
-
-  await client.query("CREATE INDEX IF NOT EXISTS idx_products_barcode ON products(barcode)");
-  await client.query("CREATE INDEX IF NOT EXISTS idx_transactions_product ON inventory_transactions(product_id)");
-};
-
-const liveProductInventorySelect = `
   SELECT
     CONCAT('product-', p.id) AS id,
     'product' AS source_type,
@@ -264,6 +79,8 @@ const normalizeNumber = (value, fallback = 0) => {
 };
 
 const normalizeBarcode = (value) => String(value ?? "").trim();
+const subtractingTransactionTypes = new Set(["STOCK_OUT", "WASTE", "WASTAGE"]);
+const validTransactionTypes = new Set(["STOCK_IN", "STOCK_OUT", "ADJUSTMENT", "WASTE", "WASTAGE"]);
 
 const parseInventoryRecordRef = (value) => {
   const recordRef = String(value || "").trim();
@@ -302,13 +119,39 @@ const syncMenuAvailabilityFromInventory = async (client, item) => {
   );
 };
 
+const calculateNextQuantity = (transactionType, currentQuantity, transactionQuantity) => {
+  if (transactionType === "ADJUSTMENT") {
+    return {
+      nextQuantity: transactionQuantity,
+      movementQuantity: Math.abs(Number((transactionQuantity - currentQuantity).toFixed(2))),
+    };
+  }
+
+  if (subtractingTransactionTypes.has(transactionType)) {
+    if (transactionQuantity > currentQuantity) {
+      const error = new Error(`Cannot ${transactionType.toLowerCase().replace("_", " ")} more stock than available`);
+      error.statusCode = 409;
+      error.status = 409;
+      throw error;
+    }
+
+    return {
+      nextQuantity: Number((currentQuantity - transactionQuantity).toFixed(2)),
+      movementQuantity: transactionQuantity,
+    };
+  }
+
+  return {
+    nextQuantity: Number((currentQuantity + transactionQuantity).toFixed(2)),
+    movementQuantity: transactionQuantity,
+  };
+};
+
 /**
  * GET /api/inventory/barcode/:barcode
  * Find a product before receiving stock.
  */
 export const getProductByBarcode = asyncHandler(async (req, res) => {
-  await ensureProductInventorySchema();
-
   const barcode = normalizeBarcode(req.params.barcode);
 
   if (!barcode) {
@@ -429,7 +272,6 @@ export const receiveStock = async (req, res, next) => {
   try {
     await client.query("BEGIN");
     transactionStarted = true;
-    await ensureProductInventorySchema(client);
 
     const existingProduct = await client.query(
       `
@@ -675,7 +517,6 @@ export const registerAndReceiveProduct = async (req, res, next) => {
 
     await client.query("BEGIN");
     transactionStarted = true;
-    await ensureProductInventorySchema(client);
 
     const duplicate = await client.query(
       `
@@ -822,11 +663,8 @@ export const registerAndReceiveProduct = async (req, res, next) => {
 };
 
 export const getInventoryItems = asyncHandler(async (req, res) => {
-  await ensureInventorySchema();
-  await ensureProductInventorySchema();
-
   const result = await pool.query(`
-    ${liveProductInventorySelect}
+    ${liveInventorySelect}
     ORDER BY ingredient_name ASC
   `);
 
@@ -837,15 +675,49 @@ export const getInventoryItems = asyncHandler(async (req, res) => {
   });
 });
 
-export const getInventorySummary = asyncHandler(async (req, res) => {
-  await ensureInventorySchema();
-  await ensureProductInventorySchema();
+export const getInventoryItemById = asyncHandler(async (req, res) => {
+  const recordRef = parseInventoryRecordRef(req.params.id);
 
+  if (!recordRef.id) {
+    return res.status(400).json({
+      success: false,
+      message: "Invalid inventory item",
+    });
+  }
+
+  const result = await pool.query(
+    `
+      SELECT *
+      FROM (${liveInventorySelect}) stock_items
+      WHERE source_type = $1 AND source_id = $2
+      LIMIT 1
+    `,
+    [recordRef.source, recordRef.id]
+  );
+
+  if (result.rowCount === 0) {
+    return res.status(404).json({
+      success: false,
+      message: "Inventory item not found",
+    });
+  }
+
+  return res.status(200).json({
+    success: true,
+    data: result.rows[0],
+  });
+});
+
+export const getInventorySummary = asyncHandler(async (req, res) => {
   const result = await pool.query(`
     WITH stock_rows AS (
       SELECT quantity, minimum_stock AS minimum_level, expiry_date
       FROM products
       WHERE is_active = TRUE
+      UNION ALL
+      SELECT quantity, minimum_level, expiry_date
+      FROM inventory
+      WHERE COALESCE(is_active, TRUE) = TRUE
     )
     SELECT
       COUNT(*)::INTEGER AS total_ingredients,
@@ -874,8 +746,6 @@ export const getInventorySummary = asyncHandler(async (req, res) => {
 });
 
 export const createInventoryItem = asyncHandler(async (req, res) => {
-  await ensureInventorySchema();
-
   const {
     ingredient_name,
     quantity,
@@ -937,9 +807,6 @@ export const createInventoryItem = asyncHandler(async (req, res) => {
 });
 
 export const updateInventoryItem = asyncHandler(async (req, res) => {
-  await ensureInventorySchema();
-  await ensureProductInventorySchema();
-
   const recordRef = parseInventoryRecordRef(req.params.id);
   const {
     ingredient_name,
@@ -971,8 +838,8 @@ export const updateInventoryItem = asyncHandler(async (req, res) => {
           unit = COALESCE($3, unit),
           minimum_stock = COALESCE($4, minimum_stock),
           purchase_price = COALESCE($5, purchase_price),
-          expiry_date = $6,
-          supplier_id = $7,
+          expiry_date = COALESCE($6, expiry_date),
+          supplier_id = COALESCE($7, supplier_id),
           barcode = COALESCE(NULLIF($8, ''), barcode),
           updated_at = CURRENT_TIMESTAMP
         WHERE id = $9 AND is_active = TRUE
@@ -1014,8 +881,8 @@ export const updateInventoryItem = asyncHandler(async (req, res) => {
         unit = COALESCE($3, unit),
         minimum_level = COALESCE($4, minimum_level),
         cost_per_unit = COALESCE($5, cost_per_unit),
-        expiry_date = $6,
-        supplier_id = $7,
+        expiry_date = COALESCE($6, expiry_date),
+        supplier_id = COALESCE($7, supplier_id),
         menu_id = COALESCE($8, menu_id),
         barcode = COALESCE(NULLIF($9, ''), barcode),
         stock_per_sale = COALESCE($10, stock_per_sale),
@@ -1065,9 +932,6 @@ export const updateInventoryItem = asyncHandler(async (req, res) => {
 });
 
 export const deleteInventoryItem = asyncHandler(async (req, res) => {
-  await ensureInventorySchema();
-  await ensureProductInventorySchema();
-
   const recordRef = parseInventoryRecordRef(req.params.id);
 
   if (!recordRef.id) {
@@ -1125,9 +989,6 @@ export const deleteInventoryItem = asyncHandler(async (req, res) => {
 });
 
 export const recordInventoryTransaction = asyncHandler(async (req, res) => {
-  await ensureInventorySchema();
-  await ensureProductInventorySchema();
-
   const recordRef = parseInventoryRecordRef(req.params.id);
   const { transaction_type, quantity, notes } = req.body;
   const transactionQuantity = normalizeNumber(quantity);
@@ -1139,7 +1000,7 @@ export const recordInventoryTransaction = asyncHandler(async (req, res) => {
     });
   }
 
-  if (!["STOCK_IN", "STOCK_OUT", "ADJUSTMENT", "WASTE"].includes(transaction_type)) {
+  if (!validTransactionTypes.has(transaction_type)) {
     return res.status(400).json({
       success: false,
       message: "Invalid transaction type",
@@ -1173,10 +1034,11 @@ export const recordInventoryTransaction = asyncHandler(async (req, res) => {
       }
 
       const currentQuantity = Number(productResult.rows[0].quantity || 0);
-      const signedQuantity = ["STOCK_OUT", "WASTE"].includes(transaction_type)
-        ? -transactionQuantity
-        : transactionQuantity;
-      const nextQuantity = Math.max(0, currentQuantity + signedQuantity);
+      const { nextQuantity, movementQuantity } = calculateNextQuantity(
+        transaction_type,
+        currentQuantity,
+        transactionQuantity
+      );
 
       const transactionResult = await client.query(
         `
@@ -1188,7 +1050,7 @@ export const recordInventoryTransaction = asyncHandler(async (req, res) => {
         [
           recordRef.id,
           transaction_type,
-          transactionQuantity,
+          movementQuantity,
           currentQuantity,
           nextQuantity,
           notes || null,
@@ -1232,19 +1094,28 @@ export const recordInventoryTransaction = asyncHandler(async (req, res) => {
     }
 
     const currentQuantity = Number(itemResult.rows[0].quantity || 0);
-    const signedQuantity = ["STOCK_OUT", "WASTE"].includes(transaction_type)
-      ? -transactionQuantity
-      : transactionQuantity;
-    const nextQuantity = Math.max(0, currentQuantity + signedQuantity);
+    const { nextQuantity, movementQuantity } = calculateNextQuantity(
+      transaction_type,
+      currentQuantity,
+      transactionQuantity
+    );
 
     const transactionResult = await client.query(
       `
         INSERT INTO inventory_transactions
-          (inventory_id, transaction_type, quantity, notes, created_by)
-        VALUES ($1, $2, $3, $4, $5)
+          (inventory_id, transaction_type, quantity, quantity_before, quantity_after, notes, created_by)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
         RETURNING *
       `,
-      [recordRef.id, transaction_type, transactionQuantity, notes || null, req.user?.id || null]
+      [
+        recordRef.id,
+        transaction_type,
+        movementQuantity,
+        currentQuantity,
+        nextQuantity,
+        notes || null,
+        req.user?.id || null,
+      ]
     );
 
     const updatedItemResult = await client.query(
@@ -1278,9 +1149,6 @@ export const recordInventoryTransaction = asyncHandler(async (req, res) => {
 });
 
 export const getInventoryTransactions = asyncHandler(async (req, res) => {
-  await ensureInventorySchema();
-  await ensureProductInventorySchema();
-
   const result = await pool.query(`
     SELECT
       t.id,
@@ -1290,7 +1158,7 @@ export const getInventoryTransactions = asyncHandler(async (req, res) => {
         WHEN t.product_id IS NOT NULL THEN CONCAT('product-', t.product_id)
         ELSE CONCAT('ingredient-', t.inventory_id)
       END AS stock_item_id,
-      p.name AS ingredient_name,
+      COALESCE(p.name, i.ingredient_name) AS ingredient_name,
       t.transaction_type,
       t.quantity,
       t.quantity_before,
@@ -1298,7 +1166,8 @@ export const getInventoryTransactions = asyncHandler(async (req, res) => {
       t.notes,
       t.created_at
     FROM inventory_transactions t
-    JOIN products p ON p.id = t.product_id
+    LEFT JOIN products p ON p.id = t.product_id
+    LEFT JOIN inventory i ON i.id = t.inventory_id
     ORDER BY t.created_at DESC
     LIMIT 50
   `);

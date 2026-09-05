@@ -1,14 +1,15 @@
 // Kitchen Routes
 
 import express from "express";
-import { authMiddleware } from "../middleware/index.js";
+import { authMiddleware, authorizeRoles } from "../middleware/index.js";
 import { updateOrderStatus, getOrdersByStatus } from "../controllers/ordersController.js";
 import { cancelExpiredPendingOrders } from "../services/orderLifecycleService.js";
 
 const router = express.Router();
+const kitchenRoles = authorizeRoles(["admin", "staff", "kitchen_staff"]);
 
 // Get live kitchen orders using the same workflow statuses as the Orders board.
-router.get("/orders", authMiddleware, async (req, res) => {
+router.get("/orders", authMiddleware, kitchenRoles, async (req, res) => {
   try {
     await cancelExpiredPendingOrders();
 
@@ -67,9 +68,9 @@ router.get("/orders", authMiddleware, async (req, res) => {
 });
 
 // Get orders by specific status
-router.get("/orders/status/:status", authMiddleware, getOrdersByStatus);
+router.get("/orders/status/:status", authMiddleware, kitchenRoles, getOrdersByStatus);
 
 // Update order status (move to next stage)
-router.put("/orders/:id/status", authMiddleware, updateOrderStatus);
+router.put("/orders/:id/status", authMiddleware, kitchenRoles, updateOrderStatus);
 
 export default router;

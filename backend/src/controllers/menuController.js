@@ -2,7 +2,6 @@
 import { pool } from "../config/database.js";
 import { successResponse, errorResponse, asyncHandler } from "../utils/index.js";
 import { scheduleRagKnowledgeSync } from "../services/ragService.js";
-import { ensureBarcodeStockSchema } from "../services/inventoryStockService.js";
 
 const getValidCreatedByUserId = async (userId) => {
   if (!userId) return null;
@@ -13,8 +12,6 @@ const getValidCreatedByUserId = async (userId) => {
 
 // Get all menu items
 export const getAllMenuItems = asyncHandler(async (req, res) => {
-  await ensureBarcodeStockSchema();
-
   const { category, search, available } = req.query;
 
   let query = `
@@ -53,8 +50,6 @@ export const getAllMenuItems = asyncHandler(async (req, res) => {
 
 // Get menu item by ID
 export const getMenuItemById = asyncHandler(async (req, res) => {
-  await ensureBarcodeStockSchema();
-
   const { id } = req.params;
 
   const result = await pool.query(
@@ -77,8 +72,6 @@ export const getMenuItemById = asyncHandler(async (req, res) => {
 
 // Create new menu item
 export const createMenuItem = asyncHandler(async (req, res) => {
-  await ensureBarcodeStockSchema();
-
   const { name, category_id, description, price, veg_type, image_url, is_available, is_featured, preparation_time, calories, is_spicy, barcode } = req.body;
   const userId = await getValidCreatedByUserId(req.user?.id);
 
@@ -146,8 +139,6 @@ export const createMenuItem = asyncHandler(async (req, res) => {
 
 // Update menu item
 export const updateMenuItem = asyncHandler(async (req, res) => {
-  await ensureBarcodeStockSchema();
-
   const { id } = req.params;
   const { name, category_id, description, price, veg_type, image_url, is_available, is_featured, preparation_time, calories, is_spicy, barcode } = req.body;
 
@@ -219,8 +210,6 @@ export const deleteMenuItem = asyncHandler(async (req, res) => {
 
 // Get featured menu items
 export const getFeaturedItems = asyncHandler(async (req, res) => {
-  await ensureBarcodeStockSchema();
-
   const result = await pool.query(
     `SELECT m.id, m.name, m.description, m.price, m.veg_type, m.is_available, 
             m.is_featured, m.preparation_time, m.calories, m.is_spicy, m.image_url,

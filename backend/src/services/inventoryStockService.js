@@ -5,74 +5,7 @@ async function queryWith(client, sql, params = []) {
 }
 
 export async function ensureBarcodeStockSchema(client = pool) {
-  await queryWith(client, "ALTER TABLE menu ADD COLUMN IF NOT EXISTS barcode VARCHAR(100)");
-  await queryWith(client, "ALTER TABLE menu ADD COLUMN IF NOT EXISTS image_url TEXT");
-  await queryWith(client, "ALTER TABLE menu ALTER COLUMN image_url TYPE TEXT");
-  await queryWith(
-    client,
-    "CREATE UNIQUE INDEX IF NOT EXISTS idx_menu_barcode_unique ON menu(barcode) WHERE barcode IS NOT NULL AND barcode <> ''"
-  );
-
-  await queryWith(client, `
-    CREATE TABLE IF NOT EXISTS inventory (
-      id SERIAL PRIMARY KEY,
-      ingredient_name VARCHAR(150),
-      quantity NUMERIC(12, 2) NOT NULL DEFAULT 0,
-      unit VARCHAR(30) NOT NULL DEFAULT 'pcs',
-      minimum_level NUMERIC(12, 2) NOT NULL DEFAULT 0,
-      cost_per_unit NUMERIC(12, 2) DEFAULT 0,
-      expiry_date DATE,
-      is_active BOOLEAN DEFAULT TRUE,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-
-  await queryWith(client, `
-    ALTER TABLE inventory
-      ADD COLUMN IF NOT EXISTS ingredient_name VARCHAR(150),
-      ADD COLUMN IF NOT EXISTS quantity NUMERIC(12, 2) NOT NULL DEFAULT 0,
-      ADD COLUMN IF NOT EXISTS unit VARCHAR(30) NOT NULL DEFAULT 'pcs',
-      ADD COLUMN IF NOT EXISTS minimum_level NUMERIC(12, 2) NOT NULL DEFAULT 0,
-      ADD COLUMN IF NOT EXISTS cost_per_unit NUMERIC(12, 2) DEFAULT 0,
-      ADD COLUMN IF NOT EXISTS expiry_date DATE,
-      ADD COLUMN IF NOT EXISTS supplier_id INTEGER,
-      ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE,
-      ADD COLUMN IF NOT EXISTS menu_id INTEGER,
-      ADD COLUMN IF NOT EXISTS barcode VARCHAR(100),
-      ADD COLUMN IF NOT EXISTS stock_per_sale NUMERIC(12, 2) NOT NULL DEFAULT 1,
-      ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-  `);
-
-  await queryWith(client, `
-    DO $$
-    BEGIN
-      IF EXISTS (
-        SELECT 1
-        FROM information_schema.columns
-        WHERE table_name = 'inventory' AND column_name = 'menu_item_id'
-      ) THEN
-        ALTER TABLE inventory ALTER COLUMN menu_item_id DROP NOT NULL;
-      END IF;
-    END $$;
-  `);
-
-  await queryWith(client, `
-    CREATE TABLE IF NOT EXISTS inventory_transactions (
-      id SERIAL PRIMARY KEY,
-      inventory_id INTEGER NOT NULL REFERENCES inventory(id) ON DELETE CASCADE,
-      transaction_type VARCHAR(20) NOT NULL,
-      quantity NUMERIC(12, 2) NOT NULL,
-      reference_type VARCHAR(50),
-      reference_id INTEGER,
-      notes TEXT,
-      created_by INTEGER,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-
-  await queryWith(client, "CREATE INDEX IF NOT EXISTS idx_inventory_menu ON inventory(menu_id)");
-  await queryWith(client, "CREATE INDEX IF NOT EXISTS idx_inventory_barcode ON inventory(barcode)");
+  return undefined;
 }
 
 function statusForInventory(row) {
@@ -232,11 +165,13 @@ export async function deductInventoryForOrder(client, orderId, { createdBy = nul
     await queryWith(
       client,
       `INSERT INTO inventory_transactions
-         (inventory_id, transaction_type, quantity, reference_type, reference_id, notes, created_by)
-       VALUES ($1, 'STOCK_OUT', $2, 'ORDER', $3, $4, $5)`,
+         (inventory_id, transaction_type, quantity, quantity_before, quantity_after, reference_type, reference_id, notes, created_by)
+       VALUES ($1, 'STOCK_OUT', $2, $3, $4, 'ORDER', $5, $6, $7)`,
       [
         inventory.id,
         consumedQuantity,
+        currentQuantity,
+        nextQuantity,
         orderId,
         `Auto deducted for order ${orderId}`,
         createdBy,

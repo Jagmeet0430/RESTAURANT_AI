@@ -1,5 +1,4 @@
 import { pool } from "../config/database.js";
-import { ensureOrderSecuritySchema } from "./orderSchemaService.js";
 import { sendOrderStatusNotification } from "./notificationService.js";
 
 export const statusAliases = {
@@ -20,6 +19,7 @@ export const statusAliases = {
   confirmed: "confirmed",
   Confirmed: "confirmed",
   out_for_delivery: "out_for_delivery",
+  "Out for Delivery": "out_for_delivery",
   "Out for delivery": "out_for_delivery",
 };
 
@@ -35,7 +35,8 @@ export const displayStatus = {
 };
 
 export function normalizeOrderStatus(status) {
-  return statusAliases[status] || statusAliases[String(status || "").trim()] || String(status || "").trim().toLowerCase();
+  const trimmed = String(status || "").trim();
+  return statusAliases[status] || statusAliases[trimmed] || trimmed.toLowerCase().replace(/\s+/g, "_");
 }
 
 export function statusForStorage(status) {
@@ -80,9 +81,8 @@ export async function updateOrderStatusWithHistory({
   cancellationReason = null,
   changedBy = null,
   client = pool,
+  notify = true,
 } = {}) {
-  await ensureOrderSecuritySchema(client);
-
   const orderResult = await client.query(
     `SELECT o.*, c.name AS customer_name_fallback, c.phone AS customer_phone_fallback
      FROM orders o
@@ -100,6 +100,15 @@ export async function updateOrderStatusWithHistory({
 
   const order = orderResult.rows[0];
   const nextStatus = assertValidStatusTransition(order.status, status, order.order_type);
+  const nextStatusForStorage = statusForStorage(nextStatus);
+
+  if (normalizeOrderStatus(order.status) === nextStatus) {
+    return {
+      ...order,
+      customer_name: order.customer_name || order.customer_name_fallback,
+      customer_phone: order.customer_phone || order.customer_phone_fallback,
+    };
+  }
 
   if (nextStatus === "cancelled" && !String(cancellationReason || "").trim()) {
     const error = new Error("Cancellation reason is required");
@@ -121,8 +130,8 @@ export async function updateOrderStatusWithHistory({
      WHERE id = $5
      RETURNING *`,
     [
-      statusForStorage(nextStatus),
-      statusForStorage(nextStatus),
+      nextStatusForStorage,
+      nextStatusForStorage,
       cancellationReason || null,
       estimatedReadyAt || null,
       orderId,
@@ -133,7 +142,7 @@ export async function updateOrderStatusWithHistory({
     `INSERT INTO order_status_history
        (order_id, previous_status, new_status, changed_by, cancellation_reason)
      VALUES ($1, $2, $3, $4, $5)`,
-    [orderId, order.status, statusForStorage(nextStatus), changedBy, cancellationReason || null]
+    [orderId, order.status, nextStatusForStorage, changedBy, cancellationReason || null]
   );
 
   const updatedOrder = {
@@ -142,11 +151,13 @@ export async function updateOrderStatusWithHistory({
     customer_phone: updated.rows[0].customer_phone || order.customer_phone_fallback,
   };
 
-  setImmediate(() => {
-    sendOrderStatusNotification(updatedOrder).catch((error) => {
-      console.error("WhatsApp notification failed:", error.message);
+  if (notify) {
+    setImmediate(() => {
+      sendOrderStatusNotification(updatedOrder).catch((error) => {
+        console.error("WhatsApp notification failed:", error.message);
+      });
     });
-  });
+  }
 
   return updatedOrder;
 }

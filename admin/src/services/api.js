@@ -20,7 +20,7 @@ const getApiBaseUrl = () => {
   return configuredApiUrl;
 };
 
-const API_BASE_URL = getApiBaseUrl().replace(/\/+$/, "");
+export const API_BASE_URL = getApiBaseUrl().replace(/\/+$/, "");
 
 // Create axios instance with default headers
 const apiClient = axios.create({

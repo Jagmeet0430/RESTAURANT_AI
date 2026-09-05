@@ -1,35 +1,7 @@
 import { pool } from "../config/database.js";
 import { asyncHandler } from "../utils/index.js";
 
-const ensureSupplierSchema = async () => {
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS suppliers (
-      id SERIAL PRIMARY KEY,
-      name VARCHAR(150) NOT NULL,
-      contact_person VARCHAR(120),
-      phone VARCHAR(20),
-      email VARCHAR(150),
-      address TEXT,
-      is_active BOOLEAN DEFAULT TRUE,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-
-  await pool.query(`
-    ALTER TABLE suppliers
-      ADD COLUMN IF NOT EXISTS contact_person VARCHAR(120),
-      ADD COLUMN IF NOT EXISTS phone VARCHAR(20),
-      ADD COLUMN IF NOT EXISTS email VARCHAR(150),
-      ADD COLUMN IF NOT EXISTS address TEXT,
-      ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE,
-      ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-  `);
-};
-
 export const getSuppliers = asyncHandler(async (req, res) => {
-  await ensureSupplierSchema();
-
   const result = await pool.query(`
     SELECT
       id,
@@ -50,9 +22,41 @@ export const getSuppliers = asyncHandler(async (req, res) => {
   });
 });
 
-export const createSupplier = asyncHandler(async (req, res) => {
-  await ensureSupplierSchema();
+export const getSupplierById = asyncHandler(async (req, res) => {
+  const result = await pool.query(
+    `
+      SELECT
+        id,
+        name,
+        contact_person,
+        phone,
+        email,
+        address,
+        is_active,
+        created_at,
+        updated_at
+      FROM suppliers
+      WHERE id = $1
+        AND is_active = TRUE
+      LIMIT 1
+    `,
+    [req.params.id]
+  );
 
+  if (result.rowCount === 0) {
+    return res.status(404).json({
+      success: false,
+      message: "Supplier not found",
+    });
+  }
+
+  return res.status(200).json({
+    success: true,
+    data: result.rows[0],
+  });
+});
+
+export const createSupplier = asyncHandler(async (req, res) => {
   const { name, contact_person, phone, email, address } = req.body;
 
   if (!name) {
@@ -81,5 +85,80 @@ export const createSupplier = asyncHandler(async (req, res) => {
     success: true,
     message: "Supplier added successfully",
     data: result.rows[0],
+  });
+});
+
+export const updateSupplier = asyncHandler(async (req, res) => {
+  const { name, contact_person, phone, email, address, is_active } = req.body;
+
+  if (name !== undefined && !String(name).trim()) {
+    return res.status(400).json({
+      success: false,
+      message: "Supplier name is required",
+    });
+  }
+
+  const result = await pool.query(
+    `
+      UPDATE suppliers
+      SET
+        name = COALESCE($1, name),
+        contact_person = COALESCE($2, contact_person),
+        phone = COALESCE($3, phone),
+        email = COALESCE($4, email),
+        address = COALESCE($5, address),
+        is_active = COALESCE($6, is_active),
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = $7
+      RETURNING *
+    `,
+    [
+      name !== undefined ? String(name).trim() : null,
+      contact_person ?? null,
+      phone ?? null,
+      email ?? null,
+      address ?? null,
+      is_active,
+      req.params.id,
+    ]
+  );
+
+  if (result.rowCount === 0) {
+    return res.status(404).json({
+      success: false,
+      message: "Supplier not found",
+    });
+  }
+
+  return res.status(200).json({
+    success: true,
+    message: "Supplier updated successfully",
+    data: result.rows[0],
+  });
+});
+
+export const deleteSupplier = asyncHandler(async (req, res) => {
+  const result = await pool.query(
+    `
+      UPDATE suppliers
+      SET is_active = FALSE,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = $1
+        AND is_active = TRUE
+      RETURNING id
+    `,
+    [req.params.id]
+  );
+
+  if (result.rowCount === 0) {
+    return res.status(404).json({
+      success: false,
+      message: "Supplier not found",
+    });
+  }
+
+  return res.status(200).json({
+    success: true,
+    message: "Supplier deleted successfully",
   });
 });

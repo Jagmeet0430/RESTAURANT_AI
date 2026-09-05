@@ -1,0 +1,2142 @@
+--
+-- PostgreSQL database dump
+--
+
+\restrict O6unV5pWvDrhMBYsZ3lEwYUBtrhjC4jTxTy0TrlARkdebHyKDoQ1M1zyGhBMOjb
+
+-- Dumped from database version 18.4
+-- Dumped by pg_dump version 18.4
+
+SET statement_timeout = 0;
+SET lock_timeout = 0;
+SET idle_in_transaction_session_timeout = 0;
+SET transaction_timeout = 0;
+SET client_encoding = 'UTF8';
+SET standard_conforming_strings = on;
+SELECT pg_catalog.set_config('search_path', '', false);
+SET check_function_bodies = false;
+SET xmloption = content;
+SET client_min_messages = warning;
+SET row_security = off;
+
+--
+-- Name: pgcrypto; Type: EXTENSION; Schema: -; Owner: -
+--
+
+CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public;
+
+
+--
+-- Name: EXTENSION pgcrypto; Type: COMMENT; Schema: -; Owner: -
+--
+
+COMMENT ON EXTENSION pgcrypto IS 'cryptographic functions';
+
+
+SET default_tablespace = '';
+
+SET default_table_access_method = heap;
+
+--
+-- Name: admins; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.admins (
+    id integer NOT NULL,
+    name character varying(100) NOT NULL,
+    email character varying(150) NOT NULL,
+    password character varying(255),
+    password_hash character varying(255),
+    role character varying(50) DEFAULT 'admin'::character varying,
+    is_active boolean DEFAULT true,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    last_login timestamp without time zone,
+    phone character varying(20),
+    profile_image text,
+    permissions jsonb DEFAULT '{}'::jsonb,
+    created_by integer,
+    updated_by integer
+);
+
+
+--
+-- Name: admins_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.admins_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: admins_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.admins_id_seq OWNED BY public.admins.id;
+
+
+--
+-- Name: app_settings; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.app_settings (
+    key character varying(80) NOT NULL,
+    value jsonb DEFAULT '{}'::jsonb NOT NULL,
+    updated_by integer,
+    updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
+);
+
+
+--
+-- Name: bills; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.bills (
+    id integer NOT NULL,
+    order_id integer NOT NULL,
+    bill_number character varying(80) NOT NULL,
+    bill_type character varying(30) DEFAULT 'order'::character varying NOT NULL,
+    customer_name character varying(255),
+    customer_phone character varying(30),
+    line_items jsonb DEFAULT '[]'::jsonb NOT NULL,
+    subtotal numeric(12,2) DEFAULT 0 NOT NULL,
+    tax numeric(12,2) DEFAULT 0 NOT NULL,
+    delivery_charge numeric(12,2) DEFAULT 0 NOT NULL,
+    discount numeric(12,2) DEFAULT 0 NOT NULL,
+    total_amount numeric(12,2) DEFAULT 0 NOT NULL,
+    payment_method character varying(80),
+    payment_status character varying(50),
+    created_by integer,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
+);
+
+
+--
+-- Name: bills_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.bills_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: bills_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.bills_id_seq OWNED BY public.bills.id;
+
+
+--
+-- Name: categories; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.categories (
+    id integer NOT NULL,
+    name character varying(100) NOT NULL,
+    description text,
+    image_url character varying(500),
+    display_order integer DEFAULT 0,
+    is_active boolean DEFAULT true,
+    created_by integer,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
+);
+
+
+--
+-- Name: categories_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.categories_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: categories_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.categories_id_seq OWNED BY public.categories.id;
+
+
+--
+-- Name: counter_sale_items; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.counter_sale_items (
+    id integer NOT NULL,
+    sale_id integer NOT NULL,
+    product_id integer NOT NULL,
+    quantity integer NOT NULL,
+    unit_price numeric(12,2) DEFAULT 0 NOT NULL,
+    line_total numeric(12,2) DEFAULT 0 NOT NULL,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+
+--
+-- Name: counter_sale_items_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.counter_sale_items_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: counter_sale_items_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.counter_sale_items_id_seq OWNED BY public.counter_sale_items.id;
+
+
+--
+-- Name: counter_sales; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.counter_sales (
+    id integer NOT NULL,
+    bill_number character varying(100) NOT NULL,
+    customer_name character varying(150),
+    customer_phone character varying(30),
+    payment_method character varying(40) DEFAULT 'Cash'::character varying NOT NULL,
+    subtotal numeric(12,2) DEFAULT 0 NOT NULL,
+    gst_amount numeric(12,2) DEFAULT 0 NOT NULL,
+    total_amount numeric(12,2) DEFAULT 0 NOT NULL,
+    idempotency_key character varying(120),
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+
+--
+-- Name: counter_sales_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.counter_sales_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: counter_sales_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.counter_sales_id_seq OWNED BY public.counter_sales.id;
+
+
+--
+-- Name: coupons; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.coupons (
+    id integer NOT NULL,
+    code character varying(50) NOT NULL,
+    description text,
+    discount_type character varying(50) NOT NULL,
+    discount_value numeric(10,2) NOT NULL,
+    minimum_order_value numeric(10,2),
+    maximum_discount_value numeric(10,2),
+    usage_limit integer,
+    used_count integer DEFAULT 0,
+    usage_per_customer integer DEFAULT 1,
+    start_date timestamp without time zone,
+    expiry_date timestamp without time zone NOT NULL,
+    is_active boolean DEFAULT true,
+    created_by integer,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
+);
+
+
+--
+-- Name: coupons_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.coupons_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: coupons_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.coupons_id_seq OWNED BY public.coupons.id;
+
+
+--
+-- Name: customer_notifications; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.customer_notifications (
+    id integer NOT NULL,
+    customer_id integer NOT NULL,
+    order_id integer,
+    type character varying(50) NOT NULL,
+    title character varying(255) NOT NULL,
+    message text NOT NULL,
+    is_read boolean DEFAULT false,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
+);
+
+
+--
+-- Name: customer_notifications_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.customer_notifications_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: customer_notifications_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.customer_notifications_id_seq OWNED BY public.customer_notifications.id;
+
+
+--
+-- Name: customer_phone_otps; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.customer_phone_otps (
+    id integer NOT NULL,
+    phone character varying(30) NOT NULL,
+    otp_hash text NOT NULL,
+    attempts integer DEFAULT 0 NOT NULL,
+    max_attempts integer DEFAULT 5 NOT NULL,
+    expires_at timestamp without time zone NOT NULL,
+    verified_at timestamp without time zone,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
+);
+
+
+--
+-- Name: customer_phone_otps_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.customer_phone_otps_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: customer_phone_otps_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.customer_phone_otps_id_seq OWNED BY public.customer_phone_otps.id;
+
+
+--
+-- Name: customers; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.customers (
+    id integer NOT NULL,
+    name character varying(255) NOT NULL,
+    email character varying(255),
+    phone character varying(20) NOT NULL,
+    address text,
+    city character varying(100),
+    state character varying(100),
+    postal_code character varying(10),
+    country character varying(100) DEFAULT 'India'::character varying,
+    loyalty_points integer DEFAULT 0,
+    total_orders integer DEFAULT 0,
+    total_spent numeric(12,2) DEFAULT 0.00,
+    is_active boolean DEFAULT true,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
+);
+
+
+--
+-- Name: customers_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.customers_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: customers_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.customers_id_seq OWNED BY public.customers.id;
+
+
+--
+-- Name: digitized_menu_items; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.digitized_menu_items (
+    id integer NOT NULL,
+    restaurant_id integer,
+    category_id integer,
+    name character varying(255) NOT NULL,
+    original_name character varying(255),
+    price numeric(10,2) NOT NULL,
+    source_file character varying(255),
+    x_position numeric(10,2),
+    y_position numeric(10,2),
+    column_no integer,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
+);
+
+
+--
+-- Name: digitized_menu_items_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.digitized_menu_items_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: digitized_menu_items_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.digitized_menu_items_id_seq OWNED BY public.digitized_menu_items.id;
+
+
+--
+-- Name: ingredients; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.ingredients (
+    id integer NOT NULL,
+    name character varying(255) NOT NULL,
+    unit character varying(50),
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
+);
+
+
+--
+-- Name: ingredients_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.ingredients_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: ingredients_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.ingredients_id_seq OWNED BY public.ingredients.id;
+
+
+--
+-- Name: inventory; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.inventory (
+    id integer NOT NULL,
+    ingredient_name character varying(150) NOT NULL,
+    quantity numeric(12,2) DEFAULT 0 NOT NULL,
+    unit character varying(30) NOT NULL,
+    minimum_level numeric(12,2) DEFAULT 0 NOT NULL,
+    cost_per_unit numeric(12,2) DEFAULT 0,
+    expiry_date date,
+    supplier_id integer,
+    is_active boolean DEFAULT true,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    menu_id integer,
+    barcode character varying(100),
+    stock_per_sale numeric(12,2) DEFAULT 1 NOT NULL
+);
+
+
+--
+-- Name: inventory_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.inventory_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: inventory_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.inventory_id_seq OWNED BY public.inventory.id;
+
+
+--
+-- Name: inventory_items; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.inventory_items (
+    id integer NOT NULL,
+    ingredient_id integer,
+    supplier_id integer,
+    stock_quantity integer DEFAULT 0,
+    min_threshold integer DEFAULT 10,
+    expiry_date date,
+    last_updated timestamp without time zone DEFAULT CURRENT_TIMESTAMP
+);
+
+
+--
+-- Name: inventory_items_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.inventory_items_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: inventory_items_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.inventory_items_id_seq OWNED BY public.inventory_items.id;
+
+
+--
+-- Name: inventory_transactions; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.inventory_transactions (
+    id integer NOT NULL,
+    inventory_id integer,
+    transaction_type character varying(20) NOT NULL,
+    quantity numeric(12,2) NOT NULL,
+    reference_type character varying(50),
+    reference_id integer,
+    notes text,
+    created_by integer,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    product_id integer,
+    quantity_before numeric(12,2) DEFAULT 0 NOT NULL,
+    quantity_after numeric(12,2) DEFAULT 0 NOT NULL,
+    reference_number character varying(100),
+    CONSTRAINT inventory_transactions_transaction_type_check CHECK (((transaction_type)::text = ANY ((ARRAY['STOCK_IN'::character varying, 'STOCK_OUT'::character varying, 'SALE'::character varying, 'RETURN'::character varying, 'ADJUSTMENT'::character varying, 'WASTE'::character varying, 'WASTAGE'::character varying])::text[])))
+);
+
+
+--
+-- Name: inventory_transactions_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.inventory_transactions_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: inventory_transactions_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.inventory_transactions_id_seq OWNED BY public.inventory_transactions.id;
+
+
+--
+-- Name: menu; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.menu (
+    id integer NOT NULL,
+    category_id integer NOT NULL,
+    name character varying(255) NOT NULL,
+    description text,
+    price numeric(10,2) NOT NULL,
+    veg_type character varying(50) NOT NULL,
+    image_url text,
+    is_available boolean DEFAULT true,
+    is_featured boolean DEFAULT false,
+    preparation_time integer DEFAULT 20,
+    calories integer,
+    is_spicy boolean DEFAULT false,
+    created_by integer,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    is_eggless boolean DEFAULT false,
+    ingredients text,
+    allergens text,
+    is_today_special boolean DEFAULT false,
+    special_date date,
+    barcode character varying(100)
+);
+
+
+--
+-- Name: menu_categories; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.menu_categories (
+    id integer NOT NULL,
+    name character varying(255) NOT NULL,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
+);
+
+
+--
+-- Name: menu_categories_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.menu_categories_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: menu_categories_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.menu_categories_id_seq OWNED BY public.menu_categories.id;
+
+
+--
+-- Name: menu_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.menu_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: menu_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.menu_id_seq OWNED BY public.menu.id;
+
+
+--
+-- Name: order_items; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.order_items (
+    id integer NOT NULL,
+    order_id integer NOT NULL,
+    menu_id integer NOT NULL,
+    quantity integer NOT NULL,
+    unit_price numeric(10,2) NOT NULL,
+    total_price numeric(10,2) NOT NULL,
+    special_instructions text,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
+);
+
+
+--
+-- Name: order_items_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.order_items_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: order_items_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.order_items_id_seq OWNED BY public.order_items.id;
+
+
+--
+-- Name: order_status_history; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.order_status_history (
+    id integer NOT NULL,
+    order_id integer NOT NULL,
+    previous_status character varying(40),
+    new_status character varying(40) NOT NULL,
+    changed_by integer,
+    cancellation_reason text,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+
+--
+-- Name: order_status_history_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.order_status_history_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: order_status_history_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.order_status_history_id_seq OWNED BY public.order_status_history.id;
+
+
+--
+-- Name: orders; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.orders (
+    id integer NOT NULL,
+    customer_id integer NOT NULL,
+    order_number character varying(50) NOT NULL,
+    status character varying(50) DEFAULT 'Pending'::character varying,
+    payment_status character varying(50) DEFAULT 'Pending'::character varying,
+    payment_method character varying(50) DEFAULT 'Cash'::character varying,
+    subtotal numeric(10,2) NOT NULL,
+    tax numeric(10,2) DEFAULT 0.00,
+    delivery_charge numeric(10,2) DEFAULT 0.00,
+    discount numeric(10,2) DEFAULT 0.00,
+    total_amount numeric(10,2) NOT NULL,
+    special_instructions text,
+    delivery_address text,
+    estimated_delivery_time timestamp without time zone,
+    actual_delivery_time timestamp without time zone,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    transaction_id character varying(100),
+    paid_at timestamp without time zone,
+    customer_name character varying(255),
+    customer_phone character varying(30),
+    phone_verified boolean DEFAULT false NOT NULL,
+    order_type character varying(30) DEFAULT 'pickup'::character varying NOT NULL,
+    tracking_token character varying(96),
+    cancellation_reason text,
+    estimated_ready_at timestamp without time zone,
+    ip_address character varying(80),
+    user_agent text,
+    idempotency_key character varying(120)
+);
+
+
+--
+-- Name: orders_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.orders_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: orders_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.orders_id_seq OWNED BY public.orders.id;
+
+
+--
+-- Name: payment_webhook_events; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.payment_webhook_events (
+    event_id character varying(100) NOT NULL,
+    event_type character varying(100) NOT NULL,
+    gateway character varying(30) DEFAULT 'razorpay'::character varying NOT NULL,
+    processed_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+
+--
+-- Name: payments; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.payments (
+    id bigint NOT NULL,
+    order_id bigint NOT NULL,
+    customer_id bigint,
+    gateway character varying(30) DEFAULT 'razorpay'::character varying NOT NULL,
+    payment_method character varying(30) NOT NULL,
+    gateway_order_id character varying(100),
+    gateway_payment_id character varying(100),
+    gateway_signature text,
+    amount numeric(12,2) NOT NULL,
+    currency character varying(10) DEFAULT 'INR'::character varying NOT NULL,
+    payment_status character varying(30) DEFAULT 'pending'::character varying NOT NULL,
+    failure_reason text,
+    transaction_id character varying(100),
+    paid_at timestamp without time zone,
+    refunded_at timestamp without time zone,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    CONSTRAINT payments_amount_check CHECK ((amount >= (0)::numeric))
+);
+
+
+--
+-- Name: payments_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.payments_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: payments_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.payments_id_seq OWNED BY public.payments.id;
+
+
+--
+-- Name: phone_verifications; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.phone_verifications (
+    id integer NOT NULL,
+    phone_number character varying(20) NOT NULL,
+    otp_hash text NOT NULL,
+    expires_at timestamp without time zone NOT NULL,
+    verified_at timestamp without time zone,
+    failed_attempts integer DEFAULT 0 NOT NULL,
+    request_count integer DEFAULT 1 NOT NULL,
+    blocked_until timestamp without time zone,
+    verification_token_hash text,
+    token_used_at timestamp without time zone,
+    ip_address character varying(80),
+    user_agent text,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+
+--
+-- Name: phone_verifications_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.phone_verifications_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: phone_verifications_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.phone_verifications_id_seq OWNED BY public.phone_verifications.id;
+
+
+--
+-- Name: products; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.products (
+    id integer NOT NULL,
+    barcode character varying(50) NOT NULL,
+    name character varying(150) NOT NULL,
+    category character varying(100),
+    brand character varying(120),
+    description text,
+    unit character varying(30) DEFAULT 'piece'::character varying NOT NULL,
+    purchase_price numeric(12,2) DEFAULT 0 NOT NULL,
+    selling_price numeric(12,2) DEFAULT 0 NOT NULL,
+    quantity numeric(12,2) DEFAULT 0 NOT NULL,
+    minimum_stock numeric(12,2) DEFAULT 5 NOT NULL,
+    supplier_id integer,
+    supplier_name character varying(150),
+    image_url character varying(500),
+    is_active boolean DEFAULT true NOT NULL,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    batch_number character varying(100),
+    expiry_date date
+);
+
+
+--
+-- Name: products_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.products_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: products_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.products_id_seq OWNED BY public.products.id;
+
+
+--
+-- Name: restaurants; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.restaurants (
+    id integer NOT NULL,
+    name character varying(255) NOT NULL,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
+);
+
+
+--
+-- Name: restaurants_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.restaurants_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: restaurants_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.restaurants_id_seq OWNED BY public.restaurants.id;
+
+
+--
+-- Name: schema_migrations; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.schema_migrations (
+    id integer NOT NULL,
+    migration_name character varying(255) NOT NULL,
+    checksum character varying(128),
+    baseline boolean DEFAULT false NOT NULL,
+    applied_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+
+--
+-- Name: schema_migrations_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.schema_migrations_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: schema_migrations_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.schema_migrations_id_seq OWNED BY public.schema_migrations.id;
+
+
+--
+-- Name: suppliers; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.suppliers (
+    id integer NOT NULL,
+    name character varying(255) NOT NULL,
+    contact character varying(255),
+    email character varying(255),
+    phone character varying(50),
+    address text,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    contact_person character varying(120),
+    is_active boolean DEFAULT true,
+    updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
+);
+
+
+--
+-- Name: suppliers_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.suppliers_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: suppliers_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.suppliers_id_seq OWNED BY public.suppliers.id;
+
+
+--
+-- Name: users; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.users (
+    id integer NOT NULL,
+    name character varying(255) NOT NULL,
+    email character varying(255) NOT NULL,
+    password character varying(255) NOT NULL,
+    role character varying(50) DEFAULT 'admin'::character varying,
+    is_active boolean DEFAULT true,
+    last_login timestamp without time zone,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
+);
+
+
+--
+-- Name: users_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.users_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: users_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.users_id_seq OWNED BY public.users.id;
+
+
+--
+-- Name: whatsapp_notifications; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.whatsapp_notifications (
+    id integer NOT NULL,
+    order_id integer,
+    phone_number character varying(20) NOT NULL,
+    notification_type character varying(80) NOT NULL,
+    order_status character varying(40),
+    provider character varying(30) NOT NULL,
+    provider_message_id character varying(180),
+    delivery_status character varying(40) DEFAULT 'queued'::character varying NOT NULL,
+    error_message text,
+    retry_count integer DEFAULT 0 NOT NULL,
+    sent_at timestamp without time zone,
+    delivered_at timestamp without time zone,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+
+--
+-- Name: whatsapp_notifications_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.whatsapp_notifications_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: whatsapp_notifications_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.whatsapp_notifications_id_seq OWNED BY public.whatsapp_notifications.id;
+
+
+--
+-- Name: admins id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.admins ALTER COLUMN id SET DEFAULT nextval('public.admins_id_seq'::regclass);
+
+
+--
+-- Name: bills id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.bills ALTER COLUMN id SET DEFAULT nextval('public.bills_id_seq'::regclass);
+
+
+--
+-- Name: categories id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.categories ALTER COLUMN id SET DEFAULT nextval('public.categories_id_seq'::regclass);
+
+
+--
+-- Name: counter_sale_items id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.counter_sale_items ALTER COLUMN id SET DEFAULT nextval('public.counter_sale_items_id_seq'::regclass);
+
+
+--
+-- Name: counter_sales id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.counter_sales ALTER COLUMN id SET DEFAULT nextval('public.counter_sales_id_seq'::regclass);
+
+
+--
+-- Name: coupons id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.coupons ALTER COLUMN id SET DEFAULT nextval('public.coupons_id_seq'::regclass);
+
+
+--
+-- Name: customer_notifications id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.customer_notifications ALTER COLUMN id SET DEFAULT nextval('public.customer_notifications_id_seq'::regclass);
+
+
+--
+-- Name: customer_phone_otps id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.customer_phone_otps ALTER COLUMN id SET DEFAULT nextval('public.customer_phone_otps_id_seq'::regclass);
+
+
+--
+-- Name: customers id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.customers ALTER COLUMN id SET DEFAULT nextval('public.customers_id_seq'::regclass);
+
+
+--
+-- Name: digitized_menu_items id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.digitized_menu_items ALTER COLUMN id SET DEFAULT nextval('public.digitized_menu_items_id_seq'::regclass);
+
+
+--
+-- Name: ingredients id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ingredients ALTER COLUMN id SET DEFAULT nextval('public.ingredients_id_seq'::regclass);
+
+
+--
+-- Name: inventory id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inventory ALTER COLUMN id SET DEFAULT nextval('public.inventory_id_seq'::regclass);
+
+
+--
+-- Name: inventory_items id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inventory_items ALTER COLUMN id SET DEFAULT nextval('public.inventory_items_id_seq'::regclass);
+
+
+--
+-- Name: inventory_transactions id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inventory_transactions ALTER COLUMN id SET DEFAULT nextval('public.inventory_transactions_id_seq'::regclass);
+
+
+--
+-- Name: menu id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.menu ALTER COLUMN id SET DEFAULT nextval('public.menu_id_seq'::regclass);
+
+
+--
+-- Name: menu_categories id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.menu_categories ALTER COLUMN id SET DEFAULT nextval('public.menu_categories_id_seq'::regclass);
+
+
+--
+-- Name: order_items id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.order_items ALTER COLUMN id SET DEFAULT nextval('public.order_items_id_seq'::regclass);
+
+
+--
+-- Name: order_status_history id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.order_status_history ALTER COLUMN id SET DEFAULT nextval('public.order_status_history_id_seq'::regclass);
+
+
+--
+-- Name: orders id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.orders ALTER COLUMN id SET DEFAULT nextval('public.orders_id_seq'::regclass);
+
+
+--
+-- Name: payments id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.payments ALTER COLUMN id SET DEFAULT nextval('public.payments_id_seq'::regclass);
+
+
+--
+-- Name: phone_verifications id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.phone_verifications ALTER COLUMN id SET DEFAULT nextval('public.phone_verifications_id_seq'::regclass);
+
+
+--
+-- Name: products id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.products ALTER COLUMN id SET DEFAULT nextval('public.products_id_seq'::regclass);
+
+
+--
+-- Name: restaurants id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.restaurants ALTER COLUMN id SET DEFAULT nextval('public.restaurants_id_seq'::regclass);
+
+
+--
+-- Name: schema_migrations id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.schema_migrations ALTER COLUMN id SET DEFAULT nextval('public.schema_migrations_id_seq'::regclass);
+
+
+--
+-- Name: suppliers id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.suppliers ALTER COLUMN id SET DEFAULT nextval('public.suppliers_id_seq'::regclass);
+
+
+--
+-- Name: users id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.users ALTER COLUMN id SET DEFAULT nextval('public.users_id_seq'::regclass);
+
+
+--
+-- Name: whatsapp_notifications id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.whatsapp_notifications ALTER COLUMN id SET DEFAULT nextval('public.whatsapp_notifications_id_seq'::regclass);
+
+
+--
+-- Name: admins admins_email_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.admins
+    ADD CONSTRAINT admins_email_key UNIQUE (email);
+
+
+--
+-- Name: admins admins_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.admins
+    ADD CONSTRAINT admins_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: app_settings app_settings_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.app_settings
+    ADD CONSTRAINT app_settings_pkey PRIMARY KEY (key);
+
+
+--
+-- Name: bills bills_bill_number_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.bills
+    ADD CONSTRAINT bills_bill_number_key UNIQUE (bill_number);
+
+
+--
+-- Name: bills bills_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.bills
+    ADD CONSTRAINT bills_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: categories categories_name_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.categories
+    ADD CONSTRAINT categories_name_key UNIQUE (name);
+
+
+--
+-- Name: categories categories_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.categories
+    ADD CONSTRAINT categories_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: counter_sale_items counter_sale_items_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.counter_sale_items
+    ADD CONSTRAINT counter_sale_items_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: counter_sales counter_sales_bill_number_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.counter_sales
+    ADD CONSTRAINT counter_sales_bill_number_key UNIQUE (bill_number);
+
+
+--
+-- Name: counter_sales counter_sales_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.counter_sales
+    ADD CONSTRAINT counter_sales_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: coupons coupons_code_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.coupons
+    ADD CONSTRAINT coupons_code_key UNIQUE (code);
+
+
+--
+-- Name: coupons coupons_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.coupons
+    ADD CONSTRAINT coupons_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: customer_notifications customer_notifications_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.customer_notifications
+    ADD CONSTRAINT customer_notifications_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: customer_phone_otps customer_phone_otps_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.customer_phone_otps
+    ADD CONSTRAINT customer_phone_otps_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: customers customers_email_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.customers
+    ADD CONSTRAINT customers_email_key UNIQUE (email);
+
+
+--
+-- Name: customers customers_phone_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.customers
+    ADD CONSTRAINT customers_phone_key UNIQUE (phone);
+
+
+--
+-- Name: customers customers_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.customers
+    ADD CONSTRAINT customers_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: digitized_menu_items digitized_menu_items_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.digitized_menu_items
+    ADD CONSTRAINT digitized_menu_items_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: digitized_menu_items digitized_menu_items_restaurant_id_name_price_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.digitized_menu_items
+    ADD CONSTRAINT digitized_menu_items_restaurant_id_name_price_key UNIQUE (restaurant_id, name, price);
+
+
+--
+-- Name: ingredients ingredients_name_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ingredients
+    ADD CONSTRAINT ingredients_name_key UNIQUE (name);
+
+
+--
+-- Name: ingredients ingredients_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ingredients
+    ADD CONSTRAINT ingredients_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: inventory_items inventory_items_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inventory_items
+    ADD CONSTRAINT inventory_items_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: inventory inventory_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inventory
+    ADD CONSTRAINT inventory_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: inventory_transactions inventory_transactions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inventory_transactions
+    ADD CONSTRAINT inventory_transactions_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: menu_categories menu_categories_name_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.menu_categories
+    ADD CONSTRAINT menu_categories_name_key UNIQUE (name);
+
+
+--
+-- Name: menu_categories menu_categories_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.menu_categories
+    ADD CONSTRAINT menu_categories_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: menu menu_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.menu
+    ADD CONSTRAINT menu_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: order_items order_items_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.order_items
+    ADD CONSTRAINT order_items_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: order_status_history order_status_history_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.order_status_history
+    ADD CONSTRAINT order_status_history_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: orders orders_order_number_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.orders
+    ADD CONSTRAINT orders_order_number_key UNIQUE (order_number);
+
+
+--
+-- Name: orders orders_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.orders
+    ADD CONSTRAINT orders_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: payment_webhook_events payment_webhook_events_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.payment_webhook_events
+    ADD CONSTRAINT payment_webhook_events_pkey PRIMARY KEY (event_id);
+
+
+--
+-- Name: payments payments_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.payments
+    ADD CONSTRAINT payments_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: phone_verifications phone_verifications_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.phone_verifications
+    ADD CONSTRAINT phone_verifications_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: products products_barcode_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.products
+    ADD CONSTRAINT products_barcode_key UNIQUE (barcode);
+
+
+--
+-- Name: products products_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.products
+    ADD CONSTRAINT products_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: restaurants restaurants_name_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.restaurants
+    ADD CONSTRAINT restaurants_name_key UNIQUE (name);
+
+
+--
+-- Name: restaurants restaurants_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.restaurants
+    ADD CONSTRAINT restaurants_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: schema_migrations schema_migrations_migration_name_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.schema_migrations
+    ADD CONSTRAINT schema_migrations_migration_name_key UNIQUE (migration_name);
+
+
+--
+-- Name: schema_migrations schema_migrations_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.schema_migrations
+    ADD CONSTRAINT schema_migrations_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: suppliers suppliers_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.suppliers
+    ADD CONSTRAINT suppliers_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: users users_email_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.users
+    ADD CONSTRAINT users_email_key UNIQUE (email);
+
+
+--
+-- Name: users users_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.users
+    ADD CONSTRAINT users_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: whatsapp_notifications whatsapp_notifications_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.whatsapp_notifications
+    ADD CONSTRAINT whatsapp_notifications_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: idx_bills_created_at; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_bills_created_at ON public.bills USING btree (created_at);
+
+
+--
+-- Name: idx_bills_order; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX idx_bills_order ON public.bills USING btree (order_id);
+
+
+--
+-- Name: idx_categories_name; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_categories_name ON public.categories USING btree (name);
+
+
+--
+-- Name: idx_counter_sale_items_product; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_counter_sale_items_product ON public.counter_sale_items USING btree (product_id);
+
+
+--
+-- Name: idx_counter_sale_items_sale; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_counter_sale_items_sale ON public.counter_sale_items USING btree (sale_id);
+
+
+--
+-- Name: idx_coupons_active; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_coupons_active ON public.coupons USING btree (is_active);
+
+
+--
+-- Name: idx_coupons_code; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_coupons_code ON public.coupons USING btree (code);
+
+
+--
+-- Name: idx_coupons_expiry; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_coupons_expiry ON public.coupons USING btree (expiry_date);
+
+
+--
+-- Name: idx_customer_notifications_customer; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_customer_notifications_customer ON public.customer_notifications USING btree (customer_id, created_at DESC);
+
+
+--
+-- Name: idx_customer_notifications_order; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_customer_notifications_order ON public.customer_notifications USING btree (order_id);
+
+
+--
+-- Name: idx_customer_phone_otps_phone_created; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_customer_phone_otps_phone_created ON public.customer_phone_otps USING btree (phone, created_at DESC);
+
+
+--
+-- Name: idx_customers_email_unique; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX idx_customers_email_unique ON public.customers USING btree (email) WHERE (email IS NOT NULL);
+
+
+--
+-- Name: idx_customers_phone; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_customers_phone ON public.customers USING btree (phone);
+
+
+--
+-- Name: idx_customers_phone_unique; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX idx_customers_phone_unique ON public.customers USING btree (phone);
+
+
+--
+-- Name: idx_inventory_barcode; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_inventory_barcode ON public.inventory USING btree (barcode);
+
+
+--
+-- Name: idx_inventory_expiry; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_inventory_expiry ON public.inventory USING btree (expiry_date);
+
+
+--
+-- Name: idx_inventory_menu; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_inventory_menu ON public.inventory USING btree (menu_id);
+
+
+--
+-- Name: idx_inventory_supplier; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_inventory_supplier ON public.inventory USING btree (supplier_id);
+
+
+--
+-- Name: idx_menu_available; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_menu_available ON public.menu USING btree (is_available);
+
+
+--
+-- Name: idx_menu_barcode_unique; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX idx_menu_barcode_unique ON public.menu USING btree (barcode) WHERE ((barcode IS NOT NULL) AND ((barcode)::text <> ''::text));
+
+
+--
+-- Name: idx_menu_category; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_menu_category ON public.menu USING btree (category_id);
+
+
+--
+-- Name: idx_order_items_menu; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_order_items_menu ON public.order_items USING btree (menu_id);
+
+
+--
+-- Name: idx_order_items_order; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_order_items_order ON public.order_items USING btree (order_id);
+
+
+--
+-- Name: idx_order_status_history_order; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_order_status_history_order ON public.order_status_history USING btree (order_id, created_at DESC);
+
+
+--
+-- Name: idx_orders_created_at; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_orders_created_at ON public.orders USING btree (created_at);
+
+
+--
+-- Name: idx_orders_customer; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_orders_customer ON public.orders USING btree (customer_id);
+
+
+--
+-- Name: idx_orders_idempotency_key_unique; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX idx_orders_idempotency_key_unique ON public.orders USING btree (idempotency_key) WHERE ((idempotency_key IS NOT NULL) AND ((idempotency_key)::text <> ''::text));
+
+--
+-- Name: idx_counter_sales_idempotency_key_unique; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX idx_counter_sales_idempotency_key_unique ON public.counter_sales USING btree (idempotency_key) WHERE ((idempotency_key IS NOT NULL) AND ((idempotency_key)::text <> ''::text));
+
+
+--
+-- Name: idx_orders_order_number_unique; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX idx_orders_order_number_unique ON public.orders USING btree (order_number);
+
+
+--
+-- Name: idx_orders_payment_status; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_orders_payment_status ON public.orders USING btree (payment_status);
+
+
+--
+-- Name: idx_orders_status; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_orders_status ON public.orders USING btree (status);
+
+
+--
+-- Name: idx_orders_status_created; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_orders_status_created ON public.orders USING btree (status, created_at DESC);
+
+
+--
+-- Name: idx_orders_tracking_token_unique; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX idx_orders_tracking_token_unique ON public.orders USING btree (tracking_token) WHERE (tracking_token IS NOT NULL);
+
+
+--
+-- Name: idx_payments_gateway_order; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_payments_gateway_order ON public.payments USING btree (gateway_order_id);
+
+
+--
+-- Name: idx_payments_order_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_payments_order_id ON public.payments USING btree (order_id);
+
+
+--
+-- Name: idx_payments_status; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_payments_status ON public.payments USING btree (payment_status);
+
+
+--
+-- Name: idx_phone_verifications_phone_created; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_phone_verifications_phone_created ON public.phone_verifications USING btree (phone_number, created_at DESC);
+
+
+--
+-- Name: idx_phone_verifications_token_hash; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_phone_verifications_token_hash ON public.phone_verifications USING btree (verification_token_hash) WHERE (verification_token_hash IS NOT NULL);
+
+
+--
+-- Name: idx_products_barcode; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_products_barcode ON public.products USING btree (barcode);
+
+
+--
+-- Name: idx_transactions_product; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_transactions_product ON public.inventory_transactions USING btree (product_id);
+
+
+--
+-- Name: idx_whatsapp_notifications_order_status_once; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX idx_whatsapp_notifications_order_status_once ON public.whatsapp_notifications USING btree (order_id, order_status, notification_type) WHERE ((order_id IS NOT NULL) AND (order_status IS NOT NULL));
+
+
+--
+-- Name: unique_gateway_payment; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX unique_gateway_payment ON public.payments USING btree (gateway_payment_id) WHERE (gateway_payment_id IS NOT NULL);
+
+
+--
+-- Name: bills bills_order_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.bills
+    ADD CONSTRAINT bills_order_id_fkey FOREIGN KEY (order_id) REFERENCES public.orders(id) ON DELETE CASCADE;
+
+
+--
+-- Name: categories categories_created_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.categories
+    ADD CONSTRAINT categories_created_by_fkey FOREIGN KEY (created_by) REFERENCES public.users(id);
+
+
+--
+-- Name: counter_sale_items counter_sale_items_product_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.counter_sale_items
+    ADD CONSTRAINT counter_sale_items_product_id_fkey FOREIGN KEY (product_id) REFERENCES public.products(id);
+
+
+--
+-- Name: counter_sale_items counter_sale_items_sale_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.counter_sale_items
+    ADD CONSTRAINT counter_sale_items_sale_id_fkey FOREIGN KEY (sale_id) REFERENCES public.counter_sales(id) ON DELETE CASCADE;
+
+
+--
+-- Name: customer_notifications customer_notifications_customer_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.customer_notifications
+    ADD CONSTRAINT customer_notifications_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES public.customers(id) ON DELETE CASCADE;
+
+
+--
+-- Name: customer_notifications customer_notifications_order_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.customer_notifications
+    ADD CONSTRAINT customer_notifications_order_id_fkey FOREIGN KEY (order_id) REFERENCES public.orders(id) ON DELETE CASCADE;
+
+
+--
+-- Name: digitized_menu_items digitized_menu_items_category_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.digitized_menu_items
+    ADD CONSTRAINT digitized_menu_items_category_id_fkey FOREIGN KEY (category_id) REFERENCES public.menu_categories(id) ON DELETE SET NULL;
+
+
+--
+-- Name: digitized_menu_items digitized_menu_items_restaurant_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.digitized_menu_items
+    ADD CONSTRAINT digitized_menu_items_restaurant_id_fkey FOREIGN KEY (restaurant_id) REFERENCES public.restaurants(id) ON DELETE CASCADE;
+
+
+--
+-- Name: inventory_items inventory_items_ingredient_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inventory_items
+    ADD CONSTRAINT inventory_items_ingredient_id_fkey FOREIGN KEY (ingredient_id) REFERENCES public.ingredients(id) ON DELETE CASCADE;
+
+
+--
+-- Name: inventory_items inventory_items_supplier_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inventory_items
+    ADD CONSTRAINT inventory_items_supplier_id_fkey FOREIGN KEY (supplier_id) REFERENCES public.suppliers(id) ON DELETE SET NULL;
+
+
+--
+-- Name: inventory inventory_supplier_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inventory
+    ADD CONSTRAINT inventory_supplier_id_fkey FOREIGN KEY (supplier_id) REFERENCES public.suppliers(id) ON DELETE SET NULL;
+
+
+--
+-- Name: inventory_transactions inventory_transactions_inventory_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inventory_transactions
+    ADD CONSTRAINT inventory_transactions_inventory_id_fkey FOREIGN KEY (inventory_id) REFERENCES public.inventory(id) ON DELETE CASCADE;
+
+
+--
+-- Name: inventory_transactions inventory_transactions_product_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inventory_transactions
+    ADD CONSTRAINT inventory_transactions_product_id_fkey FOREIGN KEY (product_id) REFERENCES public.products(id) ON DELETE CASCADE;
+
+
+--
+-- Name: menu menu_category_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.menu
+    ADD CONSTRAINT menu_category_id_fkey FOREIGN KEY (category_id) REFERENCES public.categories(id) ON DELETE CASCADE;
+
+
+--
+-- Name: menu menu_created_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.menu
+    ADD CONSTRAINT menu_created_by_fkey FOREIGN KEY (created_by) REFERENCES public.users(id);
+
+
+--
+-- Name: order_items order_items_menu_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.order_items
+    ADD CONSTRAINT order_items_menu_id_fkey FOREIGN KEY (menu_id) REFERENCES public.menu(id);
+
+
+--
+-- Name: order_items order_items_order_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.order_items
+    ADD CONSTRAINT order_items_order_id_fkey FOREIGN KEY (order_id) REFERENCES public.orders(id) ON DELETE CASCADE;
+
+
+--
+-- Name: order_status_history order_status_history_order_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.order_status_history
+    ADD CONSTRAINT order_status_history_order_id_fkey FOREIGN KEY (order_id) REFERENCES public.orders(id) ON DELETE CASCADE;
+
+
+--
+-- Name: orders orders_customer_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.orders
+    ADD CONSTRAINT orders_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES public.customers(id) ON DELETE CASCADE;
+
+
+--
+-- Name: payments payments_order_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.payments
+    ADD CONSTRAINT payments_order_id_fkey FOREIGN KEY (order_id) REFERENCES public.orders(id) ON DELETE CASCADE;
+
+
+--
+-- Name: whatsapp_notifications whatsapp_notifications_order_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.whatsapp_notifications
+    ADD CONSTRAINT whatsapp_notifications_order_id_fkey FOREIGN KEY (order_id) REFERENCES public.orders(id) ON DELETE CASCADE;
+
+
+--
+-- PostgreSQL database dump complete
+--
+
+\unrestrict O6unV5pWvDrhMBYsZ3lEwYUBtrhjC4jTxTy0TrlARkdebHyKDoQ1M1zyGhBMOjb
+
+
+INSERT INTO public.schema_migrations (migration_name, baseline) VALUES ('offline-v1-baseline', TRUE) ON CONFLICT (migration_name) DO NOTHING;

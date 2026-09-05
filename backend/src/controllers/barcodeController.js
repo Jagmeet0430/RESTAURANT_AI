@@ -5,6 +5,64 @@ const GST_RATE = 0.05;
 const MAX_CART_ITEMS = 50;
 const MAX_ITEM_QUANTITY = 50;
 const COUNTER_CUSTOMER_PHONE = "COUNTER-WALK-IN";
+const POS_PAYMENT_METHODS = new Map([
+  ["cash", "Cash"],
+  ["card", "Card"],
+  ["upi", "UPI"],
+]);
+let counterSaleSchemaReady;
+
+async function ensureCounterSaleSchema(client = pool) {
+  if (!counterSaleSchemaReady) {
+    counterSaleSchemaReady = (async () => {
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS counter_sales (
+          id SERIAL PRIMARY KEY,
+          bill_number VARCHAR(100) UNIQUE NOT NULL,
+          customer_name VARCHAR(150),
+          customer_phone VARCHAR(30),
+          payment_method VARCHAR(40) NOT NULL DEFAULT 'Cash',
+          subtotal NUMERIC(12, 2) NOT NULL DEFAULT 0,
+          gst_amount NUMERIC(12, 2) NOT NULL DEFAULT 0,
+          total_amount NUMERIC(12, 2) NOT NULL DEFAULT 0,
+          created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS counter_sale_items (
+          id SERIAL PRIMARY KEY,
+          sale_id INTEGER NOT NULL REFERENCES counter_sales(id) ON DELETE CASCADE,
+          product_id INTEGER NOT NULL REFERENCES products(id),
+          quantity INTEGER NOT NULL,
+          unit_price NUMERIC(12, 2) NOT NULL DEFAULT 0,
+          line_total NUMERIC(12, 2) NOT NULL DEFAULT 0,
+          created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+
+      await client.query("CREATE INDEX IF NOT EXISTS idx_counter_sale_items_sale ON counter_sale_items(sale_id)");
+      await client.query("CREATE INDEX IF NOT EXISTS idx_counter_sale_items_product ON counter_sale_items(product_id)");
+      await client.query("ALTER TABLE IF EXISTS counter_sales ADD COLUMN IF NOT EXISTS idempotency_key VARCHAR(120)");
+      await client.query(`
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_counter_sales_idempotency_key_unique
+        ON counter_sales(idempotency_key)
+        WHERE idempotency_key IS NOT NULL AND idempotency_key <> ''
+      `);
+    })().catch((error) => {
+      counterSaleSchemaReady = undefined;
+      throw error;
+    });
+  }
+
+  return counterSaleSchemaReady;
+}
+
+function cleanIdempotencyKey(req) {
+  return String(req.get("Idempotency-Key") || req.body?.idempotency_key || "")
+    .trim()
+    .slice(0, 120) || null;
+}
 
 function normalizeStockQuantity(value) {
   const quantity = Number(value || 1);
@@ -54,6 +112,19 @@ function normalizeItems(items) {
   return Array.from(merged, ([productId, quantity]) => ({ productId, quantity }));
 }
 
+function normalizePaymentMethod(value) {
+  const normalized = String(value || "Cash").trim().toLowerCase();
+  const paymentMethod = POS_PAYMENT_METHODS.get(normalized);
+
+  if (!paymentMethod) {
+    const error = new Error("Payment method must be Cash, Card, or UPI");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  return paymentMethod;
+}
+
 async function getCounterCustomer(client, payload = {}) {
   const name = String(payload.customerName || payload.customer_name || "Counter Customer").trim() || "Counter Customer";
   const phone = String(payload.customerPhone || payload.customer_phone || COUNTER_CUSTOMER_PHONE).trim() || COUNTER_CUSTOMER_PHONE;
@@ -70,37 +141,6 @@ async function getCounterCustomer(client, payload = {}) {
   );
 
   return result.rows[0];
-}
-
-async function ensureCounterSaleSchema(client) {
-  await client.query(`
-    CREATE TABLE IF NOT EXISTS counter_sales (
-      id SERIAL PRIMARY KEY,
-      bill_number VARCHAR(100) UNIQUE NOT NULL,
-      customer_name VARCHAR(150),
-      customer_phone VARCHAR(30),
-      payment_method VARCHAR(40) NOT NULL DEFAULT 'Cash',
-      subtotal NUMERIC(12, 2) NOT NULL DEFAULT 0,
-      gst_amount NUMERIC(12, 2) NOT NULL DEFAULT 0,
-      total_amount NUMERIC(12, 2) NOT NULL DEFAULT 0,
-      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-
-  await client.query(`
-    CREATE TABLE IF NOT EXISTS counter_sale_items (
-      id SERIAL PRIMARY KEY,
-      sale_id INTEGER NOT NULL REFERENCES counter_sales(id) ON DELETE CASCADE,
-      product_id INTEGER NOT NULL REFERENCES products(id),
-      quantity INTEGER NOT NULL,
-      unit_price NUMERIC(12, 2) NOT NULL DEFAULT 0,
-      line_total NUMERIC(12, 2) NOT NULL DEFAULT 0,
-      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-
-  await client.query("CREATE INDEX IF NOT EXISTS idx_counter_sale_items_sale ON counter_sale_items(sale_id)");
-  await client.query("CREATE INDEX IF NOT EXISTS idx_counter_sale_items_product ON counter_sale_items(product_id)");
 }
 
 async function calculateSale(client, items) {
@@ -245,6 +285,125 @@ export const lookupBarcodeProduct = asyncHandler(async (req, res) => {
   }
 });
 
+function mapCounterSale(row) {
+  return {
+    id: row.id,
+    bill_number: row.bill_number,
+    customer_name: row.customer_name,
+    customer_phone: row.customer_phone,
+    payment_method: row.payment_method,
+    subtotal: Number(row.subtotal || 0),
+    gst_amount: Number(row.gst_amount || 0),
+    total_amount: Number(row.total_amount || 0),
+    idempotency_key: row.idempotency_key || null,
+    created_at: row.created_at,
+  };
+}
+
+function mapCounterSaleItem(row) {
+  return {
+    id: row.id,
+    sale_id: row.sale_id,
+    product_id: row.product_id,
+    barcode: row.barcode,
+    name: row.name,
+    quantity: Number(row.quantity || 0),
+    unit_price: Number(row.unit_price || 0),
+    line_total: Number(row.line_total || 0),
+    created_at: row.created_at,
+  };
+}
+
+export const listCounterSales = asyncHandler(async (req, res) => {
+  await ensureCounterSaleSchema();
+  const requestedLimit = Number(req.query.limit || 50);
+  const limit = Number.isFinite(requestedLimit)
+    ? Math.min(Math.max(Math.trunc(requestedLimit), 1), 100)
+    : 50;
+
+  const result = await pool.query(
+    `SELECT id, bill_number, customer_name, customer_phone, payment_method,
+            subtotal, gst_amount, total_amount, idempotency_key, created_at
+     FROM counter_sales
+     ORDER BY created_at DESC, id DESC
+     LIMIT $1`,
+    [limit]
+  );
+
+  return res.status(200).json({
+    success: true,
+    message: "Counter sales retrieved",
+    data: result.rows.map(mapCounterSale),
+  });
+});
+
+export const getCounterSale = asyncHandler(async (req, res) => {
+  await ensureCounterSaleSchema();
+  const rawId = String(req.params.id || "").trim();
+  const saleLookup = Number(rawId);
+  const lookupById = Number.isInteger(saleLookup) && saleLookup > 0;
+
+  const saleResult = await pool.query(
+    `SELECT id, bill_number, customer_name, customer_phone, payment_method,
+            subtotal, gst_amount, total_amount, idempotency_key, created_at
+     FROM counter_sales
+     WHERE ${lookupById ? "id = $1" : "bill_number = $1"}
+     LIMIT 1`,
+    [lookupById ? saleLookup : rawId]
+  );
+
+  if (saleResult.rowCount === 0) {
+    return res.status(404).json({
+      success: false,
+      message: "Counter sale not found",
+    });
+  }
+
+  const sale = mapCounterSale(saleResult.rows[0]);
+  const itemsResult = await pool.query(
+    `SELECT csi.id, csi.sale_id, csi.product_id, p.barcode, p.name,
+            csi.quantity, csi.unit_price, csi.line_total, csi.created_at
+     FROM counter_sale_items csi
+     JOIN products p ON p.id = csi.product_id
+     WHERE csi.sale_id = $1
+     ORDER BY csi.id ASC`,
+    [sale.id]
+  );
+
+  const lineItems = itemsResult.rows.map(mapCounterSaleItem);
+  const bill = {
+    bill_number: sale.bill_number,
+    created_at: sale.created_at,
+    payment_method: sale.payment_method,
+    payment_status: "Paid",
+    customer_name: sale.customer_name,
+    customer_phone: sale.customer_phone,
+    line_items: lineItems.map((item) => ({
+      product_id: item.product_id,
+      barcode: item.barcode,
+      name: item.name,
+      quantity: item.quantity,
+      unit_price: item.unit_price,
+      total_price: item.line_total,
+    })),
+    subtotal: sale.subtotal,
+    tax: sale.gst_amount,
+    discount: 0,
+    delivery_charge: 0,
+    total_amount: sale.total_amount,
+  };
+
+  return res.status(200).json({
+    success: true,
+    message: "Counter sale retrieved",
+    data: {
+      sale,
+      items: lineItems,
+      bill,
+    },
+  });
+});
+
 export const createCounterSale = asyncHandler(async (req, res) => {
   const client = await pool.connect();
 
@@ -252,9 +411,40 @@ export const createCounterSale = asyncHandler(async (req, res) => {
     await client.query("BEGIN");
     await ensureCounterSaleSchema(client);
 
+    const idempotencyKey = cleanIdempotencyKey(req);
+    if (idempotencyKey) {
+      const existingSale = await client.query(
+        `SELECT id, bill_number, customer_name, customer_phone, payment_method,
+                subtotal, gst_amount, total_amount, idempotency_key, created_at
+         FROM counter_sales
+         WHERE idempotency_key = $1
+         LIMIT 1`,
+        [idempotencyKey]
+      );
+
+      if (existingSale.rowCount > 0) {
+        await client.query("COMMIT");
+        return res.status(200).json({
+          success: true,
+          message: "Duplicate counter sale request ignored",
+          data: {
+            sale: mapCounterSale(existingSale.rows[0]),
+            bill: {
+              bill_number: existingSale.rows[0].bill_number,
+              total_amount: Number(existingSale.rows[0].total_amount || 0),
+            },
+          },
+          billNumber: existingSale.rows[0].bill_number,
+          subtotal: Number(existingSale.rows[0].subtotal || 0),
+          gstAmount: Number(existingSale.rows[0].gst_amount || 0),
+          totalAmount: Number(existingSale.rows[0].total_amount || 0),
+        });
+      }
+    }
+
+    const paymentMethod = normalizePaymentMethod(req.body.paymentMethod || req.body.payment_method);
     const customer = await getCounterCustomer(client, req.body);
     const sale = await calculateSale(client, req.body.items);
-    const paymentMethod = String(req.body.paymentMethod || req.body.payment_method || "Cash").trim() || "Cash";
     const billNumber = `POS-${Date.now()}`;
     const createdAt = new Date().toISOString();
 
@@ -267,9 +457,10 @@ export const createCounterSale = asyncHandler(async (req, res) => {
           payment_method,
           subtotal,
           gst_amount,
-          total_amount
+          total_amount,
+          idempotency_key
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         RETURNING id, bill_number, created_at
       `,
       [
@@ -280,6 +471,7 @@ export const createCounterSale = asyncHandler(async (req, res) => {
         sale.subtotal,
         sale.tax,
         sale.total,
+        idempotencyKey,
       ]
     );
 

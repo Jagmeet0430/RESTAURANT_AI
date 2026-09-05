@@ -1,12 +1,13 @@
 // Order Routes
 
 import express from "express";
-import { authMiddleware } from "../middleware/index.js";
+import { authMiddleware, authorizeRoles } from "../middleware/index.js";
 import { getAllOrders, getOrderById, createOrder, updateOrderStatus, deleteOrder, getOrdersByStatus, getRecentPublicOrders } from "../controllers/ordersController.js";
 import { getTrackedOrder, streamTrackedOrder } from "../controllers/orderTrackingController.js";
 import { createRateLimiter } from "../middleware/rateLimiter.js";
 
 const router = express.Router();
+const orderRoles = authorizeRoles(["admin", "staff", "kitchen_staff"]);
 const trackingLimiter = createRateLimiter({
   windowMs: 60_000,
   max: 60,
@@ -15,8 +16,8 @@ const trackingLimiter = createRateLimiter({
 });
 
 // Admin routes (requires authentication)
-router.get("/", authMiddleware, getAllOrders);
-router.get("/status/:status", authMiddleware, getOrdersByStatus);
+router.get("/", authMiddleware, orderRoles, getAllOrders);
+router.get("/status/:status", authMiddleware, orderRoles, getOrdersByStatus);
 
 // Public route to create order (customers)
 router.get("/recent/public", getRecentPublicOrders);
@@ -24,10 +25,10 @@ router.get("/track/:trackingToken", trackingLimiter, getTrackedOrder);
 router.get("/track/:trackingToken/events", trackingLimiter, streamTrackedOrder);
 router.post("/", createOrder);
 
-router.get("/:id", authMiddleware, getOrderById);
+router.get("/:id", authMiddleware, orderRoles, getOrderById);
 
 // Update order status (admin/kitchen)
-router.put("/:id", authMiddleware, updateOrderStatus);
-router.delete("/:id", authMiddleware, deleteOrder);
+router.put("/:id", authMiddleware, orderRoles, updateOrderStatus);
+router.delete("/:id", authMiddleware, orderRoles, deleteOrder);
 
 export default router;

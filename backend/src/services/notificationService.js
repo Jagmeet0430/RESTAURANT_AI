@@ -1,7 +1,6 @@
 import { pool } from "../config/database.js";
 import { maskPhoneNumber } from "../utils/phoneNumber.js";
 import { normalizeOrderStatus } from "./orderStatusService.js";
-import { ensureOrderSecuritySchema } from "./orderSchemaService.js";
 import { sendWhatsAppMessage } from "./whatsappService.js";
 
 function frontendUrl() {
@@ -78,7 +77,6 @@ async function createNotificationRecord({ order, body, retryOf = null }) {
 }
 
 export async function sendOrderStatusNotification(order) {
-  await ensureOrderSecuritySchema();
   if (!order.customer_phone || !order.tracking_token) return null;
 
   const body = messageForOrderStatus(order);
@@ -112,7 +110,6 @@ export async function sendOrderStatusNotification(order) {
 }
 
 export async function retryWhatsAppNotification(orderId) {
-  await ensureOrderSecuritySchema();
   const failed = await pool.query(
     `SELECT *
      FROM whatsapp_notifications

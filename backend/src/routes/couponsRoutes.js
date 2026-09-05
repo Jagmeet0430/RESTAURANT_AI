@@ -1,12 +1,13 @@
 import express from "express";
-import { authMiddleware } from "../middleware/index.js";
+import { authMiddleware, authorizeRoles } from "../middleware/index.js";
 import { createCoupon, deleteCoupon, getAllCoupons, updateCoupon } from "../controllers/couponsController.js";
 
 const router = express.Router();
+const adminOnly = authorizeRoles(["admin"]);
 
-router.get("/", authMiddleware, getAllCoupons);
-router.post("/", authMiddleware, createCoupon);
-router.put("/:id", authMiddleware, updateCoupon);
-router.delete("/:id", authMiddleware, deleteCoupon);
+router.get("/", authMiddleware, adminOnly, getAllCoupons);
+router.post("/", authMiddleware, adminOnly, createCoupon);
+router.put("/:id", authMiddleware, adminOnly, updateCoupon);
+router.delete("/:id", authMiddleware, adminOnly, deleteCoupon);
 
 export default router;

@@ -1,8 +1,10 @@
 import express from "express";
+import { authMiddleware, authorizeRoles } from "../middleware/index.js";
 
 import {
   createInventoryItem,
   deleteInventoryItem,
+  getInventoryItemById,
   getProductByBarcode,
   getInventoryItems,
   getInventorySummary,
@@ -15,6 +17,9 @@ import {
 import { createSupplier, getSuppliers } from "../controllers/supplierController.js";
 
 const router = express.Router();
+const operatorRoles = authorizeRoles(["admin", "staff"]);
+
+router.use(authMiddleware, operatorRoles);
 
 router.get("/summary", getInventorySummary);
 router.get("/transactions", getInventoryTransactions);
@@ -26,6 +31,7 @@ router.get("/suppliers", getSuppliers);
 router.post("/suppliers", createSupplier);
 router.get("/", getInventoryItems);
 router.post("/", createInventoryItem);
+router.get("/:id", getInventoryItemById);
 router.put("/:id", updateInventoryItem);
 router.delete("/:id", deleteInventoryItem);
 router.post("/:id/transactions", recordInventoryTransaction);

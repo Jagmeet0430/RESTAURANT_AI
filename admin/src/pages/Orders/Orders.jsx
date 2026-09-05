@@ -129,7 +129,7 @@ function Orders() {
       const message =
         error?.response?.data?.message ||
         (!error?.response
-          ? "Backend API is not reachable at http://localhost:5001. Start the backend server, then click Refresh."
+          ? "Backend API is not reachable. Check VITE_API_URL or the LAN backend address, then click Refresh."
           : "Live orders could not be loaded from the backend.");
       setOrders([]);
       setUsingFallback(true);

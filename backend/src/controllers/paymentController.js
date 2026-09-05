@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 
 import { getRazorpayClient } from "../config/razorpay.js";
 import { pool } from "../config/database.js";
-import { authMiddleware } from "../middleware/index.js";
+import { authMiddleware, authorizeRoles } from "../middleware/index.js";
 import { createBillForOrder } from "../services/billingService.js";
 import { deductInventoryForOrder } from "../services/inventoryStockService.js";
 import { createCustomerNotification, ensureNotificationTable } from "../services/orderLifecycleService.js";
@@ -647,6 +647,7 @@ export const createCashOrder = async (req, res) => {
 
 export const markOrderPaid = [
   authMiddleware,
+  authorizeRoles(["admin", "staff"]),
   async (req, res) => {
     const client = await pool.connect();
 

@@ -13,7 +13,7 @@
     "pg": "^8.22.0"
   },
   "name": "restaurantai",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Project structure for the RestaurantAI application.",
   "main": "index.js",
   "directories": {

@@ -9,10 +9,12 @@ import {
   getDigitizedItems,
   getDigitizedCategories,
 } from "../controllers/ocrController.js";
+import { fileConfig } from "../config/index.js";
+import { authMiddleware, authorizeRoles } from "../middleware/index.js";
 
 const router = express.Router();
 
-const uploadDir = "uploads/ocr";
+const uploadDir = path.resolve(fileConfig.uploadDir, "ocr");
 
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
@@ -23,7 +25,13 @@ const storage = multer.diskStorage({
     cb(null, uploadDir);
   },
   filename: (req, file, cb) => {
-    const uniqueName = `${Date.now()}-${file.originalname}`;
+    const ext = path.extname(file.originalname).toLowerCase();
+    const base = path
+      .basename(file.originalname, ext)
+      .replace(/[^a-z0-9_-]+/gi, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 80) || "upload";
+    const uniqueName = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}-${base}${ext}`;
     cb(null, uniqueName);
   },
 });
@@ -46,6 +54,8 @@ const upload = multer({
     fileSize: 10 * 1024 * 1024,
   },
 });
+
+router.use(authMiddleware, authorizeRoles(["admin", "staff"]));
 
 router.get("/health", checkOcrHealth);
 router.post("/upload", upload.single("file"), uploadMenuForOcr);

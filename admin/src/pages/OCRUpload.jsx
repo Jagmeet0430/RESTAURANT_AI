@@ -18,10 +18,9 @@ import AddIcon from "@mui/icons-material/Add";
 import DoneIcon from "@mui/icons-material/Done";
 import RestaurantMenuIcon from "@mui/icons-material/RestaurantMenu";
 import { PageHeader, StatCard, StatGrid } from "../components/common/PageKit";
+import { API_BASE_URL } from "../services/api";
 import { menuService, categoriesService } from "../services/menu";
 import { publishMenuUpdated } from "../utils/menuEvents";
-
-const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:5001/api";
 
 const uploadMenu = (formData, onUploadProgress) => {
   const token = localStorage.getItem("authToken");

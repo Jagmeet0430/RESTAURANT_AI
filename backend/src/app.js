@@ -1,4 +1,5 @@
 import dotenv from "dotenv";
+import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 
@@ -9,7 +10,10 @@ import { fileURLToPath } from "url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const envPath = path.resolve(__dirname, "../.env");
+const envPath =
+  process.env.RESTAURANTAI_ENV_FILE ||
+  process.env.RESTAURANTAI_ENV_PATH ||
+  path.resolve(__dirname, "../.env");
 
 dotenv.config({
   path: envPath,
@@ -23,6 +27,10 @@ import express from "express";
 import cors from "cors";
 
 import { pool } from "./config/database.js";
+import { appConfig, corsConfig } from "./config/index.js";
+import { getDiagnostics, getReadiness } from "./services/diagnosticsService.js";
+import { logger, requestMeta } from "./utils/logger.js";
+import { authMiddleware, authorizeRoles } from "./middleware/index.js";
 
 // Routes
 import authRoutes from "./routes/authRoutes.js";
@@ -68,24 +76,13 @@ const defaultAllowedOrigins = [
   "http://127.0.0.1:5501",
   "http://127.0.0.1:5173",
   "http://127.0.0.1:5174",
-  "http://192.168.1.4:5173",
-  "http://192.168.1.4:5174",
-  "http://192.168.1.14:5173",
-  "http://192.168.1.14:5174",
 ];
-
-const environmentOrigins = process.env.CORS_ORIGIN
-  ? process.env.CORS_ORIGIN
-      .split(",")
-      .map((origin) => origin.trim())
-      .filter(Boolean)
-  : [];
 
 const allowedOrigins = [
   ...new Set(
     [
       ...defaultAllowedOrigins,
-      ...environmentOrigins,
+      ...corsConfig.origins,
       process.env.FRONTEND_URL,
       process.env.ADMIN_URL,
     ].filter(Boolean)
@@ -94,38 +91,42 @@ const allowedOrigins = [
 
 const isDevelopment = process.env.NODE_ENV !== "production";
 
-const isAllowedDevelopmentOrigin = (origin) => {
-  if (!isDevelopment) {
-    return false;
+const isPrivateLanHostname = (hostname) =>
+  hostname.startsWith("192.168.") ||
+  hostname.startsWith("10.") ||
+  /^172\.(1[6-9]|2\d|3[0-1])\./.test(hostname);
+
+const isExpectedClientOrigin = (origin, { allowPrivateLan = false } = {}) => {
+  if (origin === "null") {
+    return isDevelopment;
   }
 
   try {
     const { hostname, port, protocol } = new URL(origin);
     const isHttp = protocol === "http:" || protocol === "https:";
-    const isLocalFrontendPort = ["5173", "5174", "5175", "5500", "5501"].includes(port);
+    const isExpectedPort = corsConfig.lanClientPorts.includes(port);
     const isLocalHost = hostname === "localhost" || hostname === "127.0.0.1";
-    const isPrivateLan =
-      hostname.startsWith("192.168.") ||
-      hostname.startsWith("10.") ||
-      /^172\.(1[6-9]|2\d|3[0-1])\./.test(hostname);
+    const isPrivateLan = isPrivateLanHostname(hostname);
 
-    return isHttp && isLocalFrontendPort && (isLocalHost || isPrivateLan);
+    return isHttp && isExpectedPort && (isLocalHost || (allowPrivateLan && isPrivateLan));
   } catch {
     return false;
   }
 };
 
+const isAllowedLocalRuntimeOrigin = (origin) =>
+  (isDevelopment || appConfig.mode === "local") &&
+  isExpectedClientOrigin(origin, {
+    allowPrivateLan: corsConfig.allowLanOrigins,
+  });
+
 const corsOptions = {
   origin(origin, callback) {
-    if (origin === "null" && isDevelopment) {
+    if (!origin || allowedOrigins.includes(origin) || isAllowedLocalRuntimeOrigin(origin)) {
       return callback(null, true);
     }
 
-    if (!origin || allowedOrigins.includes(origin) || isAllowedDevelopmentOrigin(origin)) {
-      return callback(null, true);
-    }
-
-    console.error("Blocked CORS origin:", origin);
+    logger.warn("Blocked CORS origin", { origin });
     return callback(new Error(`CORS blocked origin: ${origin}`));
   },
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
@@ -200,10 +201,38 @@ app.use("/chat", aiAssistantRoutes);
 // ======================================================
 
 const frontendPath = path.resolve(__dirname, "../../frontend");
+const adminDistPath = path.resolve(__dirname, "../../admin/dist");
+const hasHiddenPathSegment = (requestPath) =>
+  requestPath
+    .split("/")
+    .filter(Boolean)
+    .some((segment) => segment.startsWith("."));
 
-app.use("/customer", express.static(frontendPath));
+if (fs.existsSync(path.join(adminDistPath, "index.html"))) {
+  app.use("/admin", express.static(adminDistPath, {
+    dotfiles: "deny",
+    index: false,
+  }));
 
-app.get("/customer/*", (req, res) => {
+  app.get(["/admin", "/admin/*"], (req, res) => {
+    if (hasHiddenPathSegment(req.path)) {
+      return res.status(404).json({ success: false, message: "Route Not Found" });
+    }
+
+    res.sendFile(path.join(adminDistPath, "index.html"));
+  });
+}
+
+app.use("/customer", express.static(frontendPath, {
+  dotfiles: "deny",
+  index: false,
+}));
+
+app.get(["/customer", "/customer/*"], (req, res) => {
+  if (hasHiddenPathSegment(req.path)) {
+    return res.status(404).json({ success: false, message: "Route Not Found" });
+  }
+
   res.sendFile(path.join(frontendPath, "index.html"));
 });
 
@@ -211,13 +240,47 @@ app.get("/customer/*", (req, res) => {
 // Health check
 // ======================================================
 
-app.get("/api/health", (req, res) => {
+app.get("/api/health", async (req, res) => {
+  let database = "disconnected";
+
+  try {
+    await pool.query("SELECT 1");
+    database = "connected";
+  } catch (error) {
+    logger.warn("Health database check failed", { error });
+  }
+
   res.status(200).json({
     success: true,
-    message: "RestaurantAI backend is running",
+    status: "ok",
+    mode: appConfig.mode,
+    database,
     timestamp: new Date().toISOString(),
   });
 });
+
+app.get("/api/ready", async (req, res) => {
+  const readiness = await getReadiness();
+  return res.status(readiness.ready ? 200 : 503).json({
+    success: readiness.ready,
+    status: readiness.ready ? "ready" : "not_ready",
+    checks: readiness.checks,
+    timestamp: readiness.timestamp,
+  });
+});
+
+app.get(
+  "/api/diagnostics",
+  authMiddleware,
+  authorizeRoles(["admin"]),
+  async (req, res, next) => {
+    try {
+      return res.status(200).json(await getDiagnostics());
+    } catch (error) {
+      return next(error);
+    }
+  }
+);
 
 // Root route
 app.get("/", (req, res) => {
@@ -246,7 +309,7 @@ app.use((req, res) => {
 // ======================================================
 
 app.use((err, req, res, next) => {
-  console.error("Backend error:", err);
+  logger.error("Backend request error", { error: err, request: requestMeta(req) });
 
   if (
     err.message?.includes("Origin not allowed by CORS") ||

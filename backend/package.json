@@ -1,11 +1,14 @@
 {
   "name": "restaurantai-backend",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "RestaurantAI Backend - Express.js API Server",
   "main": "src/server.js",
   "type": "module",
   "scripts": {
     "start": "node src/server.js",
+    "backup": "node scripts/backupDatabase.js",
+    "restore": "node scripts/restoreDatabase.js",
+    "diagnostics:data": "node scripts/checkDataIntegrity.js",
     "predev": "node scripts/freePort.js",
     "dev": "nodemon --watch src --watch package.json --watch .env --delay 1 src/server.js",
     "seed:mahesh-menu": "node scripts/seedMaheshMenu.js",

@@ -25,8 +25,10 @@ import ProductRegistration from "../pages/ProductRegistration";
 import Layout from "../layouts/AdminLayout";
 
 function AppRoutes() {
+  const basename = import.meta.env.BASE_URL.replace(/\/$/, "");
+
   return (
-    <BrowserRouter>
+    <BrowserRouter basename={basename}>
       <AuthProvider>
         <Routes>
           {/* Public Routes */}

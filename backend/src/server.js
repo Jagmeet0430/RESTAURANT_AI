@@ -1,4 +1,5 @@
 import dotenv from "dotenv";
+import os from "os";
 import path from "path";
 import { fileURLToPath } from "url";
 
@@ -7,59 +8,83 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Load .env BEFORE importing other files
+const envPath =
+  process.env.RESTAURANTAI_ENV_FILE ||
+  process.env.RESTAURANTAI_ENV_PATH ||
+  path.resolve(__dirname, "../.env");
+
 dotenv.config({
-  path: path.resolve(__dirname, "../.env"),
+  path: envPath,
 });
 
-console.log("Loaded .env from:", path.resolve(__dirname, "../.env"));
-
 import app from "./app.js";
-import { testConnection } from "./config/database.js";
+import { appConfig } from "./config/index.js";
+import { pool, testConnection } from "./config/database.js";
 import { startOrderLifecycleWorker } from "./services/orderLifecycleService.js";
+import { logger } from "./utils/logger.js";
 
-const PORT = process.env.PORT || 5000;
+const PORT = appConfig.port;
+const HOST = appConfig.host;
 const sockets = new Set();
 let isShuttingDown = false;
 let orderLifecycleWorker = null;
 
+const isPrivateIpv4 = (address) =>
+  address.startsWith("10.") ||
+  address.startsWith("192.168.") ||
+  /^172\.(1[6-9]|2\d|3[0-1])\./.test(address);
+
+const getPrivateIpv4Addresses = () =>
+  Object.values(os.networkInterfaces())
+    .flat()
+    .filter((network) => network && network.family === "IPv4" && !network.internal)
+    .map((network) => network.address)
+    .filter(isPrivateIpv4);
+
+const isLanHost = HOST === "0.0.0.0" || HOST === "::";
+
+logger.info("Loaded environment file", { path: envPath });
+
 // Start server
-const server = app.listen(PORT, async () => {
-  console.log(`
-╔════════════════════════════════════════╗
-║   🍽️  RestaurantAI Backend Server     ║
-║                                        ║
-║  Server: http://localhost:${PORT}      ║
-║  Environment: ${process.env.NODE_ENV || "development"}      ║
-║  Status: ✅ Running                    ║
-╚════════════════════════════════════════╝
-`);
+const server = app.listen(PORT, HOST, async () => {
+  logger.info("RestaurantAI backend listening", {
+    mode: appConfig.mode,
+    host: HOST,
+    port: PORT,
+    localUrl: `http://127.0.0.1:${PORT}`,
+    lanAccess: isLanHost ? "enabled" : "disabled",
+    environment: appConfig.nodeEnv,
+  });
 
-  console.log("DB_HOST:", process.env.DB_HOST);
-  console.log("DB_PORT:", process.env.DB_PORT);
-  console.log("DB_NAME:", process.env.DB_NAME);
-  console.log("DB_USER:", process.env.DB_USER);
-  console.log("DB_PASSWORD:", process.env.DB_PASSWORD ? "[set]" : "[missing]");
+  if (isLanHost) {
+    const lanAddresses = getPrivateIpv4Addresses();
 
-  console.log("\n📡 Testing Database Connection...");
+    if (lanAddresses.length === 0) {
+      logger.warn("LAN enabled but no private IPv4 address detected");
+    } else {
+      for (const address of lanAddresses) {
+        logger.info("LAN URL available", {
+          url: `http://${address}:${PORT}`,
+          health: `http://${address}:${PORT}/api/health`,
+          ready: `http://${address}:${PORT}/api/ready`,
+        });
+      }
+    }
+  }
 
   const connected = await testConnection();
 
   if (connected) {
     orderLifecycleWorker = startOrderLifecycleWorker();
-  }
-
-  if (connected) {
-    console.log("✅ All systems operational!\n");
+    logger.info("RestaurantAI backend ready");
   } else {
-    console.log("⚠️ Warning: Database connection failed. Some features may not work.\n");
+    logger.warn("RestaurantAI backend is listening but not ready because database connection failed");
   }
 });
 
 server.on("error", (error) => {
   if (error.code === "EADDRINUSE") {
-    console.error(
-      `Port ${PORT} is already in use. Stop the existing backend process, then restart npm run dev.`
-    );
+    logger.fatal("Backend port already in use", { host: HOST, port: PORT, error });
     process.exit(1);
   }
 
@@ -75,10 +100,27 @@ const closeServer = (signal, onClosed = () => process.exit(0)) => {
   if (orderLifecycleWorker) {
     clearInterval(orderLifecycleWorker);
   }
-  console.log(`${signal} signal received: closing HTTP server`);
+  logger.info("Shutdown signal received", { signal });
+  let finished = false;
+
+  const finish = async () => {
+    if (finished) {
+      return;
+    }
+
+    finished = true;
+    try {
+      await pool.end();
+      logger.info("PostgreSQL pool closed");
+    } catch (error) {
+      logger.error("PostgreSQL pool close failed", { error });
+    } finally {
+      onClosed();
+    }
+  };
 
   const forceCloseTimeout = setTimeout(() => {
-    console.log("Forcing HTTP server shutdown");
+    logger.warn("Forcing HTTP server shutdown");
 
     for (const socket of sockets) {
       socket.destroy();
@@ -88,13 +130,13 @@ const closeServer = (signal, onClosed = () => process.exit(0)) => {
       server.closeAllConnections();
     }
 
-    onClosed();
+    finish();
   }, 1000);
 
   server.close(() => {
     clearTimeout(forceCloseTimeout);
-    console.log("HTTP server closed");
-    onClosed();
+    logger.info("HTTP server closed");
+    finish();
   });
 
   if (typeof server.closeIdleConnections === "function") {
@@ -118,4 +160,14 @@ process.once("SIGUSR2", () => {
   closeServer("SIGUSR2", () => {
     process.kill(process.pid, "SIGUSR2");
   });
+});
+
+process.on("uncaughtException", (error) => {
+  logger.fatal("Uncaught exception", { error });
+  closeServer("uncaughtException", () => process.exit(1));
+});
+
+process.on("unhandledRejection", (reason) => {
+  logger.fatal("Unhandled promise rejection", { error: reason });
+  closeServer("unhandledRejection", () => process.exit(1));
 });

@@ -9,6 +9,9 @@ import {
 } from "../utils/index.js";
 import { jwtConfig } from "../config/index.js";
 
+const getBearerToken = (authHeader = "") =>
+  authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : null;
+
 // Register Admin
 export const register = asyncHandler(async (req, res) => {
   const { name, email, password, role = "admin" } = req.body;
@@ -21,9 +24,19 @@ export const register = asyncHandler(async (req, res) => {
     );
   }
 
+  const adminCount = await pool.query("SELECT COUNT(*)::int AS count FROM admins");
+  if (Number(adminCount.rows[0]?.count || 0) > 0) {
+    return errorResponse(res, "Admin registration is only available during initial setup", 403);
+  }
+
+  const normalizedRole = String(role || "admin").trim();
+  if (!["admin", "staff", "kitchen_staff"].includes(normalizedRole)) {
+    return errorResponse(res, "Invalid role", 400);
+  }
+
   const existingAdmin = await pool.query(
     "SELECT * FROM admins WHERE email = $1",
-    [email]
+    [String(email).trim().toLowerCase()]
   );
 
   if (existingAdmin.rows.length > 0) {
@@ -37,7 +50,7 @@ export const register = asyncHandler(async (req, res) => {
     (name,email,password,role,is_active)
     VALUES ($1,$2,$3,$4,true)
     RETURNING id,name,email,role`,
-    [name, email, hashedPassword, role]
+    [String(name).trim(), String(email).trim().toLowerCase(), hashedPassword, normalizedRole]
   );
 
   const admin = result.rows[0];
@@ -79,7 +92,7 @@ export const login = asyncHandler(async (req, res) => {
 
   const result = await pool.query(
     "SELECT * FROM admins WHERE email = $1",
-    [email]
+    [String(email).trim().toLowerCase()]
   );
 
   if (result.rows.length === 0) {
@@ -169,7 +182,7 @@ export const logout = asyncHandler(async (req, res) => {
 
 // Verify Token
 export const verifyToken = asyncHandler(async (req, res) => {
-  const token = req.headers.authorization?.split(" ")[1];
+  const token = getBearerToken(req.headers.authorization || "");
 
   if (!token) {
     return errorResponse(res, "No token provided", 401);
@@ -194,7 +207,7 @@ export const verifyToken = asyncHandler(async (req, res) => {
 
 // Refresh Token
 export const refreshToken = asyncHandler(async (req, res) => {
-  const token = req.headers.authorization?.split(" ")[1];
+  const token = getBearerToken(req.headers.authorization || "");
 
   if (!token) {
     return errorResponse(res, "No token provided", 401);

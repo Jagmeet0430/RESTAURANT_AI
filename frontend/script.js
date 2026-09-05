@@ -201,7 +201,11 @@ const elements = {
 const LOCAL_API_BASE_URL = "http://localhost:5001/api";
 const PRODUCTION_API_BASE_URL = "https://restaurantai-api.vercel.app/api";
 const storedApiBaseUrl = localStorage.getItem("restaurantApiBaseUrl");
-const configuredApiBaseUrl = window.RESTAURANT_API_BASE_URL || "";
+const configuredApiBaseUrl =
+  window.RESTAURANTAI_API_BASE_URL ||
+  window.RESTAURANT_API_BASE_URL ||
+  window.RESTAURANTAI_CONFIG?.apiBaseUrl ||
+  "";
 const isLocalApiHost =
   window.location.hostname === "localhost" ||
   window.location.hostname === "127.0.0.1" ||
@@ -209,12 +213,18 @@ const isLocalApiHost =
   window.location.hostname.startsWith("192.168.") ||
   window.location.hostname.startsWith("10.") ||
   /^172\.(1[6-9]|2\d|3[0-1])\./.test(window.location.hostname);
-const environmentApiBaseUrl = isLocalApiHost ? LOCAL_API_BASE_URL : PRODUCTION_API_BASE_URL;
+const sameHostApiBaseUrl =
+  window.location.hostname && isLocalApiHost
+    ? `${window.location.protocol}//${window.location.hostname}:5001/api`
+    : "";
+const environmentApiBaseUrl = isLocalApiHost
+  ? sameHostApiBaseUrl || LOCAL_API_BASE_URL
+  : PRODUCTION_API_BASE_URL;
 const API_BASE_URLS = [
   configuredApiBaseUrl,
-  LOCAL_API_BASE_URL,
   environmentApiBaseUrl,
   storedApiBaseUrl,
+  LOCAL_API_BASE_URL,
   PRODUCTION_API_BASE_URL,
 ]
   .filter(Boolean)
@@ -257,7 +267,7 @@ async function fetchApi(path, options = {}) {
 
 function friendlyNetworkError(error) {
   if (/failed to fetch|networkerror|load failed/i.test(error?.message || "")) {
-    return "Backend server is not running at port 5001. Start the backend, then try again.";
+    return "Backend server is not reachable. Start the backend or check the LAN API address, then try again.";
   }
   return error?.message || "Please try again.";
 }

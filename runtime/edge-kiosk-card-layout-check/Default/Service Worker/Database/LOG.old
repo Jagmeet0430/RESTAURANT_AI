@@ -1,4 +1,0 @@
-2026/09/09-07:52:22.949 82e8 Reusing MANIFEST C:\Users\Gopesh\Desktop\RestaurantAI\runtime\edge-kiosk-card-layout-check\Default\Service Worker\Database/MANIFEST-000001
-2026/09/09-07:52:22.949 82e8 Recovering log #3
-2026/09/09-07:52:22.950 82e8 (ignoring error) C:\Users\Gopesh\Desktop\RestaurantAI\runtime\edge-kiosk-card-layout-check\Default\Service Worker\Database/000003.log: dropping 1588 bytes; Corruption: checksum mismatch
-2026/09/09-07:52:22.950 82e8 Reusing old log C:\Users\Gopesh\Desktop\RestaurantAI\runtime\edge-kiosk-card-layout-check\Default\Service Worker\Database/000003.log 

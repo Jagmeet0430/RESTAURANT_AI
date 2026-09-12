@@ -17,6 +17,10 @@ import AdminLogin from "../pages/Login/AdminLogin";
 import Unauthorized from "../pages/Unauthorized";
 import Prediction from "../pages/AI/Prediction";
 import Inventory from "../pages/Inventory/Inventory";
+import Tables from "../pages/Tables/Tables";
+import Bills from "../pages/Bills/Bills";
+import EndOfDay from "../pages/Bills/EndOfDay";
+import Receipt from "../pages/Bills/Receipt";
 import OCRUpload from "../pages/OCRUpload";
 import BarcodePOS from "../pages/BarcodePOS/BarcodePOS";
 import ProductRegistration from "../pages/ProductRegistration";
@@ -68,6 +72,10 @@ function AppRoutes() {
             <Route path="/settings" element={<Settings />} />
             <Route path="/analytics" element={<Analytics />} />
             <Route path="/inventory" element={<Inventory />} />
+            <Route path="/tables" element={<Tables />} />
+            <Route path="/bills" element={<Bills />} />
+            <Route path="/end-of-day" element={<EndOfDay />} />
+            <Route path="/receipt/:source/:id" element={<Receipt />} />
             <Route path="/barcode-pos" element={<BarcodePOS />} />
             <Route path="/products/register" element={<ProductRegistration />} />
             <Route path="/ai" element={<Prediction />} />

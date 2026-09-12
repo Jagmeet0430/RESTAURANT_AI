@@ -18,8 +18,15 @@ import {
   updateOrderStatusWithHistory,
 } from "../services/orderStatusService.js";
 import { sendOrderStatusNotification } from "../services/notificationService.js";
+import {
+  appendOrderContextInstructions,
+  ensureTableQrSchema,
+  generateDailyTokenNumber,
+  normalizeOrderSource,
+  resolveTableForOrder,
+} from "../services/tableQrService.js";
 import { generateTrackingToken } from "../utils/trackingToken.js";
-import { normalizePhoneNumber } from "../utils/phoneNumber.js";
+import { normalizePhoneNumber, phoneLookupCandidates } from "../utils/phoneNumber.js";
 
 const MAX_ITEM_QUANTITY = 20;
 const MAX_CART_ITEMS = 50;
@@ -56,6 +63,7 @@ const generateOrderNumber = async () => {
 // Get all orders
 export const getAllOrders = asyncHandler(async (req, res) => {
   await ensureOrderSecuritySchema();
+  await ensureTableQrSchema();
   await cancelExpiredPendingOrders();
 
   const { status, payment_status, customer_id, date } = req.query;
@@ -68,6 +76,7 @@ export const getAllOrders = asyncHandler(async (req, res) => {
            o.transaction_id, o.paid_at,
            o.subtotal, o.tax, o.delivery_charge, o.discount, o.total_amount,
            o.phone_verified, o.order_type, o.tracking_token, o.cancellation_reason, o.estimated_ready_at,
+           o.table_id, o.table_number, o.order_source, o.token_number, o.token_date,
            wn.delivery_status AS whatsapp_status, wn.error_message AS whatsapp_error,
            o.created_at, o.updated_at, o.estimated_delivery_time, o.actual_delivery_time,
            COALESCE(o.customer_name, c.name) as customer_name,
@@ -123,12 +132,16 @@ export const getAllOrders = asyncHandler(async (req, res) => {
 
 // Public recent orders endpoint for customer/order confirmation screens
 export const getRecentPublicOrders = asyncHandler(async (req, res) => {
+  await ensureTableQrSchema();
   await cancelExpiredPendingOrders();
 
   const result = await pool.query(
     `SELECT
        o.id,
        o.order_number,
+       o.token_number,
+       o.table_number,
+       o.order_source,
        o.status,
        o.total_amount,
        o.created_at,
@@ -162,11 +175,13 @@ export const getRecentPublicOrders = asyncHandler(async (req, res) => {
 // Get order by ID with items
 export const getOrderById = asyncHandler(async (req, res) => {
   const { id } = req.params;
+  await ensureTableQrSchema();
 
   const orderResult = await pool.query(
     `SELECT o.id, o.order_number, o.status, o.payment_status, o.payment_method,
             o.transaction_id, o.paid_at,
             o.subtotal, o.tax, o.delivery_charge, o.discount, o.total_amount,
+            o.table_id, o.table_number, o.order_source, o.token_number, o.token_date,
             o.special_instructions, o.delivery_address, o.created_at,
             o.estimated_delivery_time, o.actual_delivery_time,
             c.id as customer_id, c.name as customer_name, c.phone as customer_phone, c.email
@@ -208,6 +223,8 @@ export const createOrder = asyncHandler(async (req, res) => {
     verificationToken,
     order_type,
     orderType,
+    table_token,
+    order_source,
   } = req.body;
   let resolvedCustomerId = customer_id;
 
@@ -235,7 +252,10 @@ export const createOrder = asyncHandler(async (req, res) => {
 
   if (!resolvedCustomerId) {
     const normalizedPhone = normalizePhoneNumber(phone);
-    const existingCustomer = await pool.query("SELECT id FROM customers WHERE phone = $1 LIMIT 1", [normalizedPhone]);
+    const existingCustomer = await pool.query(
+      "SELECT id FROM customers WHERE phone = ANY($1::text[]) ORDER BY phone = $2 DESC, id DESC LIMIT 1",
+      [phoneLookupCandidates(phone), normalizedPhone]
+    );
     if (existingCustomer.rowCount > 0) {
       resolvedCustomerId = existingCustomer.rows[0].id;
     } else {
@@ -267,6 +287,7 @@ export const createOrder = asyncHandler(async (req, res) => {
     try {
       await client.query("BEGIN");
       await ensureOrderSecuritySchema(client);
+      await ensureTableQrSchema(client);
 
       const idempotencyKey = String(req.get("Idempotency-Key") || req.body.idempotency_key || "").trim().slice(0, 120) || null;
       if (idempotencyKey) {
@@ -276,6 +297,14 @@ export const createOrder = asyncHandler(async (req, res) => {
           return successResponse(res, existingOrder.rows[0], "Duplicate order request ignored");
         }
       }
+
+      const table = await resolveTableForOrder(client, table_token);
+      const normalizedOrderSource = normalizeOrderSource(order_source, table ? "table_qr" : "customer_web");
+      const normalizedOrderType = table ? "dine_in" : normalizeOrderType(order_type || orderType);
+      const contextualInstructions = appendOrderContextInstructions(special_instructions, {
+        orderSource: normalizedOrderSource,
+        table,
+      });
 
       // Calculate totals
       let subtotal = 0;
@@ -320,6 +349,7 @@ export const createOrder = asyncHandler(async (req, res) => {
 
       // Generate order number
       const orderNumber = await generateOrderNumber();
+      const dailyToken = await generateDailyTokenNumber(client);
 
       // Insert order
       const trackingToken = generateTrackingToken();
@@ -328,10 +358,11 @@ export const createOrder = asyncHandler(async (req, res) => {
            customer_id, order_number, status, payment_status, payment_method,
            subtotal, tax, delivery_charge, total_amount, special_instructions, delivery_address,
            customer_name, customer_phone, phone_verified, order_type, tracking_token,
-           ip_address, user_agent, idempotency_key
+           ip_address, user_agent, idempotency_key, table_id, table_number, order_source,
+           token_number, token_date
          )
          VALUES ($1, $2, 'Confirmed', 'Pending', $3, $4, $5, $6, $7, $8, $9,
-                 $10, $11, $12, $13, $14, $15, $16, $17)
+                 $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
          RETURNING *`,
         [
           resolvedCustomerId,
@@ -341,16 +372,21 @@ export const createOrder = asyncHandler(async (req, res) => {
           tax,
           deliveryCharge,
           totalAmount,
-          special_instructions,
+          contextualInstructions,
           delivery_address,
           customer.rows[0].name,
           normalizedPhone,
           phoneVerified,
-          normalizeOrderType(order_type || orderType),
+          normalizedOrderType,
           trackingToken,
           clientIp(req),
           String(req.headers["user-agent"] || "").slice(0, 500),
           idempotencyKey,
+          table?.id || null,
+          table?.table_number || null,
+          normalizedOrderSource,
+          dailyToken.token_number,
+          dailyToken.token_date,
         ]
       );
 
@@ -594,9 +630,11 @@ export const getOrdersByStatus = asyncHandler(async (req, res) => {
   }
 
   const storageStatus = statusForStorage(status);
+  await ensureTableQrSchema();
 
   const result = await pool.query(
-    `SELECT o.id, o.order_number, o.status, COUNT(oi.id) as item_count,
+    `SELECT o.id, o.order_number, o.token_number, o.status, o.table_id, o.table_number, o.order_source,
+            COUNT(oi.id) as item_count,
             array_agg(m.name) as items, o.created_at, c.name as customer_name
      FROM orders o
      LEFT JOIN order_items oi ON o.id = oi.order_id
@@ -607,7 +645,11 @@ export const getOrdersByStatus = asyncHandler(async (req, res) => {
          o.payment_status <> 'Paid'
          AND (
            o.payment_method LIKE 'Razorpay%'
-           OR o.payment_method = 'Pay at Counter'
+           OR (
+             o.payment_method = 'Pay at Counter'
+             AND COALESCE(o.order_source, '') <> 'table_qr'
+             AND COALESCE(o.special_instructions, '') NOT LIKE '%Source: Kiosk%'
+           )
          )
        )
      GROUP BY o.id, c.name

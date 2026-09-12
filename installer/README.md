@@ -19,7 +19,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\build-installer.
 The script rebuilds the portable package, locates `ISCC.exe`, and writes the installer to:
 
 ```text
-dist\installer\RestaurantAI-Setup-1.0.0.exe
+dist\installer\RestaurantAI-Setup-<version>.exe
 ```
 
 If Inno Setup is not installed, the script leaves the installer sources ready and reports the missing compiler.
@@ -28,7 +28,7 @@ If Inno Setup is not installed, the script leaves the installer sources ready an
 
 - AppName: RestaurantAI
 - Publisher: RestaurantAI
-- Version: derived from the root `package.json` during build script validation; currently `1.0.0`.
+- Version: keep `RestaurantAI.iss` aligned with the root `package.json` before building.
 - AppId: stored in `RestaurantAI.iss`. Do not change it after release, or upgrades will install as a separate product.
 
 ## Layout

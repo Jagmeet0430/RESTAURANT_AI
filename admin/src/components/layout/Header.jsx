@@ -22,6 +22,14 @@ const pageCopy = {
     title: "Order Command Center",
     subtitle: "Track every order from request to kitchen to completion.",
   },
+  "/bills": {
+    title: "Bills & Payments",
+    subtitle: "Settle orders, print receipts, and review collections.",
+  },
+  "/end-of-day": {
+    title: "End of Day",
+    subtitle: "Close drawer cash, store settlement snapshots, and review daily totals.",
+  },
   "/customers": {
     title: "Customer Records",
     subtitle: "Profiles, contact details, order history, and loyalty signals.",

@@ -45,6 +45,10 @@ function isPayAtCounterPending(order) {
   );
 }
 
+function orderTokenLabel(order) {
+  return order.token_number ? `#${order.token_number}` : `#${order.order_number || order.id}`;
+}
+
 function OrderDetails({ open, order, onClose, onStatusUpdate, onMarkPaid, onRetryWhatsApp }) {
   if (!order) return null;
 
@@ -67,10 +71,10 @@ function OrderDetails({ open, order, onClose, onStatusUpdate, onMarkPaid, onRetr
         <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" spacing={1}>
           <Box>
             <Typography variant="h6" sx={{ fontWeight: 900 }}>
-              Order #{order.order_number || order.id}
+              Order {orderTokenLabel(order)}
             </Typography>
             <Typography variant="body2" color="text.secondary">
-              Created {formatDate(order.created_at)}
+              {order.order_number ? `${order.order_number} - ` : ""}Created {formatDate(order.created_at)}
             </Typography>
           </Box>
           <Stack direction="row" spacing={1} alignItems="center">

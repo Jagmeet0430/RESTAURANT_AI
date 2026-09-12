@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   Alert,
   Box,
@@ -17,6 +18,7 @@ import {
 import AccessTimeIcon from "@mui/icons-material/AccessTime";
 import AlternateEmailIcon from "@mui/icons-material/AlternateEmail";
 import LinkIcon from "@mui/icons-material/Link";
+import LocalPrintshopIcon from "@mui/icons-material/LocalPrintshop";
 import LockIcon from "@mui/icons-material/Lock";
 import PaletteIcon from "@mui/icons-material/Palette";
 import PhoneIcon from "@mui/icons-material/Phone";
@@ -34,11 +36,15 @@ const defaultSettings = {
   address: "Jaja Chowk, Opp. State Bank of India, Tanda, Punjab-144024, India",
   phone: "",
   email: "",
+  footerText: "Thank You",
+  receiptWidth: "80",
+  autoOpenReceiptAfterPayment: "false",
   openingTime: "10:00",
   closingTime: "22:00",
   logo: "",
   password: "",
   theme: "light",
+  kioskDisplayMode: "auto",
 };
 
 const placeholderValues = {
@@ -51,6 +57,19 @@ const placeholderValues = {
 
 function cleanSettingValue(field, value) {
   const text = String(value ?? "").trim();
+  if (field === "kioskDisplayMode") {
+    const normalized = text.toLowerCase();
+    return ["auto", "landscape", "portrait"].includes(normalized) ? normalized : defaultSettings.kioskDisplayMode;
+  }
+
+  if (field === "receiptWidth") {
+    return ["58", "80"].includes(text) ? text : defaultSettings.receiptWidth;
+  }
+
+  if (field === "autoOpenReceiptAfterPayment") {
+    return text.toLowerCase() === "true" ? "true" : "false";
+  }
+
   const isPlaceholder = placeholderValues[field]?.some(
     (placeholder) => text.toLowerCase() === placeholder.toLowerCase()
   );
@@ -94,6 +113,29 @@ const themeOptions = [
     label: "Dark",
     helper: "Lower brightness for evening use",
   },
+];
+
+const kioskDisplayModes = [
+  {
+    value: "auto",
+    label: "Auto",
+    helper: "Adapts to current screen dimensions",
+  },
+  {
+    value: "landscape",
+    label: "Landscape",
+    helper: "Optimized for wide restaurant screens",
+  },
+  {
+    value: "portrait",
+    label: "Portrait",
+    helper: "Optimized for vertical kiosk screens",
+  },
+];
+
+const receiptWidthOptions = [
+  { value: "80", label: "80mm", helper: "Primary thermal receipt layout" },
+  { value: "58", label: "58mm", helper: "Compact printer layout" },
 ];
 
 function loadSavedSettings() {
@@ -142,6 +184,7 @@ function saveStatusLabel(status, lastSavedAt) {
 }
 
 function Settings() {
+  const navigate = useNavigate();
   const [formData, setFormData] = useState(loadSavedSettings);
   const [saveStatus, setSaveStatus] = useState("idle");
   const [lastSavedAt, setLastSavedAt] = useState(null);
@@ -205,6 +248,27 @@ function Settings() {
     setHasUnsavedChanges(true);
     setSaveStatus("pending");
     setFormData((prev) => ({ ...prev, theme }));
+  };
+
+  const handleKioskDisplayModeChange = (kioskDisplayMode) => {
+    setError("");
+    setHasUnsavedChanges(true);
+    setSaveStatus("pending");
+    setFormData((prev) => ({ ...prev, kioskDisplayMode }));
+  };
+
+  const handleReceiptWidthChange = (receiptWidth) => {
+    setError("");
+    setHasUnsavedChanges(true);
+    setSaveStatus("pending");
+    setFormData((prev) => ({ ...prev, receiptWidth }));
+  };
+
+  const handleAutoOpenReceiptChange = (autoOpenReceiptAfterPayment) => {
+    setError("");
+    setHasUnsavedChanges(true);
+    setSaveStatus("pending");
+    setFormData((prev) => ({ ...prev, autoOpenReceiptAfterPayment }));
   };
 
   const saveSettings = useCallback(
@@ -330,7 +394,7 @@ function Settings() {
         <StatCard
           label="Billing identity"
           value={formData.gst ? "GST added" : "GST missing"}
-          helper="Used for invoices and records"
+          helper={`${formData.receiptWidth}mm receipt layout`}
           icon={<VerifiedUserIcon />}
           accent="#059669"
         />
@@ -340,6 +404,13 @@ function Settings() {
           helper="Applies immediately and auto-saves"
           icon={<SettingsIcon />}
           accent="#7c3aed"
+        />
+        <StatCard
+          label="Kiosk display"
+          value={kioskDisplayModes.find((item) => item.value === formData.kioskDisplayMode)?.label || "Auto"}
+          helper="Used only by customer kiosk mode"
+          icon={<StorefrontIcon />}
+          accent="#c81f25"
         />
       </StatGrid>
 
@@ -409,6 +480,47 @@ function Settings() {
                       rows={3}
                       helperText="Use a complete address customers and delivery partners can understand."
                     />
+                  </Grid>
+                  <Grid size={{ xs: 12 }}>
+                    <TextField
+                      fullWidth
+                      label="Receipt footer"
+                      name="footerText"
+                      value={formData.footerText}
+                      onChange={handleChange}
+                      helperText="Printed at the bottom of thermal bills and receipts."
+                    />
+                  </Grid>
+                  <Grid size={{ xs: 12, md: 6 }}>
+                    <TextField
+                      fullWidth
+                      select
+                      label="Receipt width"
+                      name="receiptWidth"
+                      value={formData.receiptWidth}
+                      onChange={handleChange}
+                      helperText="Default width for browser and thermal printer receipts."
+                    >
+                      {receiptWidthOptions.map((option) => (
+                        <MenuItem key={option.value} value={option.value}>
+                          {option.label} - {option.helper}
+                        </MenuItem>
+                      ))}
+                    </TextField>
+                  </Grid>
+                  <Grid size={{ xs: 12, md: 6 }}>
+                    <TextField
+                      fullWidth
+                      select
+                      label="After payment"
+                      name="autoOpenReceiptAfterPayment"
+                      value={formData.autoOpenReceiptAfterPayment}
+                      onChange={handleChange}
+                      helperText="Controls whether settlement opens the receipt page automatically."
+                    >
+                      <MenuItem value="false">Do not auto-open receipt</MenuItem>
+                      <MenuItem value="true">Open receipt automatically</MenuItem>
+                    </TextField>
                   </Grid>
                   <Grid size={{ xs: 12, md: 6 }}>
                     <TextField
@@ -521,6 +633,104 @@ function Settings() {
 
         <Grid size={{ xs: 12, lg: 4 }}>
           <Stack spacing={3}>
+            <Card>
+              <CardContent>
+                <Typography variant="h6" sx={{ mb: 0.5, fontWeight: 900 }}>
+                  Receipt Printing
+                </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                  Configure browser printing for standard Windows thermal printer drivers.
+                </Typography>
+
+                <Stack direction={{ xs: "column", sm: "row", lg: "column" }} spacing={1} sx={{ mb: 2 }}>
+                  {receiptWidthOptions.map((option) => (
+                    <Button
+                      key={option.value}
+                      variant={formData.receiptWidth === option.value ? "contained" : "outlined"}
+                      onClick={() => handleReceiptWidthChange(option.value)}
+                      startIcon={<LocalPrintshopIcon />}
+                      sx={{ justifyContent: "flex-start", py: 1.2 }}
+                    >
+                      {option.label}
+                    </Button>
+                  ))}
+                </Stack>
+
+                <Stack direction={{ xs: "column", sm: "row", lg: "column" }} spacing={1} sx={{ mb: 2 }}>
+                  <Button
+                    variant={formData.autoOpenReceiptAfterPayment === "true" ? "contained" : "outlined"}
+                    onClick={() => handleAutoOpenReceiptChange("true")}
+                    sx={{ justifyContent: "flex-start", py: 1.2 }}
+                  >
+                    Open receipt after payment
+                  </Button>
+                  <Button
+                    variant={formData.autoOpenReceiptAfterPayment === "false" ? "contained" : "outlined"}
+                    onClick={() => handleAutoOpenReceiptChange("false")}
+                    sx={{ justifyContent: "flex-start", py: 1.2 }}
+                  >
+                    Keep operator on bills
+                  </Button>
+                </Stack>
+
+                <Button
+                  fullWidth
+                  variant="outlined"
+                  startIcon={<LocalPrintshopIcon />}
+                  onClick={() => navigate("/receipt/test/preview?print=1")}
+                >
+                  Print Test Receipt
+                </Button>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardContent>
+                <Typography variant="h6" sx={{ mb: 0.5, fontWeight: 900 }}>
+                  Kiosk
+                </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                  Control how the self-ordering screen arranges itself. This does not rotate the Windows display.
+                </Typography>
+
+                <Stack direction={{ xs: "column", sm: "row", lg: "column" }} spacing={1} sx={{ mb: 2 }}>
+                  {kioskDisplayModes.map((mode) => (
+                    <Button
+                      key={mode.value}
+                      variant={formData.kioskDisplayMode === mode.value ? "contained" : "outlined"}
+                      onClick={() => handleKioskDisplayModeChange(mode.value)}
+                      sx={{ justifyContent: "flex-start", py: 1.2 }}
+                    >
+                      {mode.label}
+                    </Button>
+                  ))}
+                </Stack>
+
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                  {kioskDisplayModes.find((item) => item.value === formData.kioskDisplayMode)?.helper}
+                </Typography>
+
+                <Stack spacing={1}>
+                  <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 2 }}>
+                    <Typography sx={{ fontWeight: 900 }}>Landscape preview</Typography>
+                    <Stack direction="row" spacing={0.75} sx={{ mt: 1, height: 46 }}>
+                      <Box sx={{ width: "22%", bgcolor: "#fff3cd", borderRadius: 1 }} />
+                      <Box sx={{ flex: 1, bgcolor: "#fee2e2", borderRadius: 1 }} />
+                      <Box sx={{ width: "28%", bgcolor: "#dcfce7", borderRadius: 1 }} />
+                    </Stack>
+                  </Paper>
+                  <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 2 }}>
+                    <Typography sx={{ fontWeight: 900 }}>Portrait preview</Typography>
+                    <Stack spacing={0.75} sx={{ mt: 1 }}>
+                      <Box sx={{ height: 12, bgcolor: "#fff3cd", borderRadius: 1 }} />
+                      <Box sx={{ height: 34, bgcolor: "#fee2e2", borderRadius: 1 }} />
+                      <Box sx={{ height: 18, bgcolor: "#dcfce7", borderRadius: 1 }} />
+                    </Stack>
+                  </Paper>
+                </Stack>
+              </CardContent>
+            </Card>
+
             <Card>
               <CardContent>
                 <Typography variant="h6" sx={{ mb: 0.5, fontWeight: 900 }}>

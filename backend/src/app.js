@@ -54,10 +54,13 @@ import ocrRoutes from "./routes/ocrRoutes.js";
 import notificationsRoutes from "./routes/notificationsRoutes.js";
 import paymentRoutes from "./routes/paymentRoutes.js";
 import settingsRoutes from "./routes/settingsRoutes.js";
+import tablesRoutes from "./routes/tablesRoutes.js";
+import billsRoutes from "./routes/billsRoutes.js";
 import barcodeRoutes from "./routes/barcodeRoutes.js";
 import counterSaleRoutes from "./routes/counterSaleRoutes.js";
 import adminOrderRoutes from "./routes/adminOrderRoutes.js";
 import whatsappWebhookRoutes from "./routes/whatsappWebhookRoutes.js";
+import receiptPrinterRoutes from "./routes/receiptPrinterRoutes.js";
 import { handleWebhook } from "./controllers/paymentController.js";
 
 const app = express();
@@ -96,6 +99,10 @@ const isPrivateLanHostname = (hostname) =>
   hostname.startsWith("10.") ||
   /^172\.(1[6-9]|2\d|3[0-1])\./.test(hostname);
 
+const expectedRuntimePorts = [
+  ...new Set([...corsConfig.lanClientPorts, String(appConfig.port)].filter(Boolean)),
+];
+
 const isExpectedClientOrigin = (origin, { allowPrivateLan = false } = {}) => {
   if (origin === "null") {
     return isDevelopment;
@@ -104,7 +111,7 @@ const isExpectedClientOrigin = (origin, { allowPrivateLan = false } = {}) => {
   try {
     const { hostname, port, protocol } = new URL(origin);
     const isHttp = protocol === "http:" || protocol === "https:";
-    const isExpectedPort = corsConfig.lanClientPorts.includes(port);
+    const isExpectedPort = expectedRuntimePorts.includes(port);
     const isLocalHost = hostname === "localhost" || hostname === "127.0.0.1";
     const isPrivateLan = isPrivateLanHostname(hostname);
 
@@ -184,10 +191,13 @@ app.use("/api/ocr", ocrRoutes);
 app.use("/api/notifications", notificationsRoutes);
 app.use("/api/payments", paymentRoutes);
 app.use("/api/settings", settingsRoutes);
+app.use("/api/tables", tablesRoutes);
+app.use("/api/bills", billsRoutes);
 app.use("/api/barcodes", barcodeRoutes);
 app.use("/api/counter-sales", counterSaleRoutes);
 app.use("/api/admin/orders", adminOrderRoutes);
 app.use("/api/webhooks/whatsapp", whatsappWebhookRoutes);
+app.use("/api/receipt-printer", receiptPrinterRoutes);
 
 /*
  * Keep these aliases only if your frontend is already calling them.
@@ -207,21 +217,39 @@ const hasHiddenPathSegment = (requestPath) =>
     .split("/")
     .filter(Boolean)
     .some((segment) => segment.startsWith("."));
+const routeNotFound = (res) =>
+  res.status(404).json({ success: false, message: "Route Not Found" });
 
 if (fs.existsSync(path.join(adminDistPath, "index.html"))) {
+  app.use("/admin", (req, res, next) => {
+    if (hasHiddenPathSegment(req.path)) {
+      return routeNotFound(res);
+    }
+
+    return next();
+  });
+
   app.use("/admin", express.static(adminDistPath, {
     dotfiles: "deny",
     index: false,
   }));
 
   app.get(["/admin", "/admin/*"], (req, res) => {
-    if (hasHiddenPathSegment(req.path)) {
-      return res.status(404).json({ success: false, message: "Route Not Found" });
+    if (req.path.startsWith("/admin/assets/")) {
+      return routeNotFound(res);
     }
 
     res.sendFile(path.join(adminDistPath, "index.html"));
   });
 }
+
+app.use("/customer", (req, res, next) => {
+  if (hasHiddenPathSegment(req.path)) {
+    return routeNotFound(res);
+  }
+
+  return next();
+});
 
 app.use("/customer", express.static(frontendPath, {
   dotfiles: "deny",
@@ -229,10 +257,6 @@ app.use("/customer", express.static(frontendPath, {
 }));
 
 app.get(["/customer", "/customer/*"], (req, res) => {
-  if (hasHiddenPathSegment(req.path)) {
-    return res.status(404).json({ success: false, message: "Route Not Found" });
-  }
-
   res.sendFile(path.join(frontendPath, "index.html"));
 });
 

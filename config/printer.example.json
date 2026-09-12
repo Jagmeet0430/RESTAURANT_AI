@@ -1,0 +1,7 @@
+{
+  "enabled": false,
+  "printerName": "PASTE_WINDOWS_PRINTER_NAME_HERE",
+  "paperWidth": "80mm",
+  "copies": 1,
+  "autoPrintKioskOrders": true
+}

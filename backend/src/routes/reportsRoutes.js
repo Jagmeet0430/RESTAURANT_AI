@@ -2,6 +2,7 @@ import express from "express";
 import { pool } from "../config/database.js";
 import { successResponse, errorResponse, asyncHandler } from "../utils/index.js";
 import { authMiddleware, authorizeRoles } from "../middleware/index.js";
+import { getEndOfDaySummary } from "../services/billingService.js";
 
 const router = express.Router();
 const reportRoles = authorizeRoles(["admin", "staff"]);
@@ -652,6 +653,11 @@ router.get("/payments", authMiddleware, reportRoles, asyncHandler(async (req, re
     summary: numberFields(summary.rows[0] || {}, ["paid_total", "failed_total", "payment_count"]),
     payments: payments.rows.map((row) => numberFields(row, ["amount"])),
   });
+}));
+
+router.get("/end-of-day", authMiddleware, reportRoles, asyncHandler(async (req, res) => {
+  const summary = await getEndOfDaySummary(pool);
+  return successResponse(res, summary, "End-of-day payment summary retrieved successfully");
 }));
 
 router.get("/coupons", authMiddleware, adminOnly, asyncHandler(async (req, res) => {

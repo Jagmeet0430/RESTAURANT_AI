@@ -1,0 +1,16 @@
+﻿{
+    "pid":  32588,
+    "process_start_time_utc":  "2026-09-09T11:44:16.2476673Z",
+    "started_at":  "2026-09-09T17:14:17.6972541+05:30",
+    "url":  "http://127.0.0.1:5001/customer?kiosk=1",
+    "edge_path":  "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
+    "profile_path":  "C:\\Users\\Gopesh\\Desktop\\RestaurantAI\\runtime\\edge-kiosk-profile",
+    "monitor":  {
+                    "device_name":  "\\\\.\\DISPLAY1",
+                    "primary":  true,
+                    "x":  0,
+                    "y":  0,
+                    "width":  1920,
+                    "height":  1080
+                }
+}

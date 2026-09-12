@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Box,
@@ -16,11 +16,15 @@ import LocalFireDepartmentIcon from "@mui/icons-material/LocalFireDepartment";
 import PaidOutlinedIcon from "@mui/icons-material/PaidOutlined";
 import RefreshIcon from "@mui/icons-material/Refresh";
 import RoomServiceIcon from "@mui/icons-material/RoomService";
+import { useSearchParams } from "react-router-dom";
 import OrdersTable from "../../components/orders/OrdersTable";
 import OrderFilters from "../../components/orders/OrderFilters";
 import OrderDetails from "../../components/orders/OrderDetails";
 import OrderBoard from "../../components/orders/OrderBoard";
 import { ordersService } from "../../services/order";
+
+const LIVE_POLL_INTERVAL_MS = 3000;
+const HIDDEN_POLL_INTERVAL_MS = 15000;
 
 function formatCurrency(value) {
   const amount = Number(value || 0);
@@ -89,6 +93,10 @@ function matchesSearch(order, query) {
 }
 
 function Orders() {
+  const [searchParams] = useSearchParams();
+  const initialSearch = searchParams.get("table")
+    ? `table ${searchParams.get("table")}`
+    : searchParams.get("search") || "";
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(false);
   const [usingFallback, setUsingFallback] = useState(false);
@@ -97,16 +105,26 @@ function Orders() {
     status: "",
     payment_status: "",
     date: "",
-    search: "",
+    search: initialSearch,
   });
   const [viewMode, setViewMode] = useState("board");
   const [orderScope, setOrderScope] = useState("live");
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [snackbar, setSnackbar] = useState({ open: false, message: "", severity: "success" });
+  const [lastSyncedAt, setLastSyncedAt] = useState(null);
+  const requestInFlightRef = useRef(false);
+  const pollTimerRef = useRef(null);
+  const seenOrderIdsRef = useRef(new Set());
+  const hasLoadedOnceRef = useRef(false);
 
-  const loadOrders = useCallback(async () => {
-    setLoading(true);
+  const loadOrders = useCallback(async ({ silent = false } = {}) => {
+    if (requestInFlightRef.current) {
+      return;
+    }
+
+    requestInFlightRef.current = true;
+    if (!silent) setLoading(true);
     try {
       const response = await ordersService.getAllOrders({
         status: filters.status,
@@ -115,42 +133,88 @@ function Orders() {
         include_expired: orderScope === "history",
       });
       if (response.success) {
-        setOrders(response.data || []);
+        const nextOrders = response.data || [];
+        const nextIds = new Set(nextOrders.map((order) => String(order.id)));
+        const newOrderCount = nextOrders.filter((order) => !seenOrderIdsRef.current.has(String(order.id))).length;
+
+        setOrders(nextOrders);
+        setSelectedOrder((current) => {
+          if (!current) return current;
+          return nextOrders.find((order) => Number(order.id) === Number(current.id)) || current;
+        });
+        if (hasLoadedOnceRef.current && newOrderCount > 0 && orderScope === "live") {
+          setSnackbar({
+            open: true,
+            message: `${newOrderCount} new order${newOrderCount === 1 ? "" : "s"} received.`,
+            severity: "info",
+          });
+        }
+        seenOrderIdsRef.current = nextIds;
+        hasLoadedOnceRef.current = true;
         setUsingFallback(false);
         setOrdersError("");
+        setLastSyncedAt(new Date());
       } else {
         const message = response.message || "Live orders API did not return a successful response.";
-        setOrders([]);
         setUsingFallback(true);
         setOrdersError(message);
-        setSnackbar({ open: true, message, severity: "warning" });
+        if (!silent) setSnackbar({ open: true, message, severity: "warning" });
       }
     } catch (error) {
       const message =
         error?.response?.data?.message ||
         (!error?.response
-          ? "Backend API is not reachable. Check VITE_API_URL or the LAN backend address, then click Refresh."
+          ? "Restaurant server unavailable. Reconnecting..."
           : "Live orders could not be loaded from the backend.");
-      setOrders([]);
       setUsingFallback(true);
       setOrdersError(message);
-      setSnackbar({
-        open: true,
-        message,
-        severity: "warning",
-      });
+      if (!silent) {
+        setSnackbar({
+          open: true,
+          message,
+          severity: "warning",
+        });
+      }
     } finally {
-      setLoading(false);
+      requestInFlightRef.current = false;
+      if (!silent) setLoading(false);
     }
   }, [filters.status, filters.payment_status, filters.date, orderScope]);
 
   useEffect(() => {
+    seenOrderIdsRef.current = new Set();
+    hasLoadedOnceRef.current = false;
     loadOrders();
   }, [loadOrders]);
 
   useEffect(() => {
-    const intervalId = window.setInterval(loadOrders, 60000);
-    return () => window.clearInterval(intervalId);
+    let stopped = false;
+
+    const scheduleNextPoll = () => {
+      if (stopped) return;
+      const interval = document.hidden ? HIDDEN_POLL_INTERVAL_MS : LIVE_POLL_INTERVAL_MS;
+      pollTimerRef.current = window.setTimeout(runPoll, interval);
+    };
+
+    const runPoll = async () => {
+      await loadOrders({ silent: true });
+      scheduleNextPoll();
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) return;
+      window.clearTimeout(pollTimerRef.current);
+      runPoll();
+    };
+
+    pollTimerRef.current = window.setTimeout(runPoll, LIVE_POLL_INTERVAL_MS);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      stopped = true;
+      window.clearTimeout(pollTimerRef.current);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
   }, [loadOrders]);
 
   const filteredOrders = useMemo(() => {
@@ -238,6 +302,14 @@ function Orders() {
   };
 
   const handleMarkPaid = async (orderId) => {
+    const orderForPayment = orders.find((order) => Number(order.id) === Number(orderId)) || selectedOrder;
+    const expectedTotal = Number(orderForPayment?.total_amount || 0);
+    const confirmed = window.confirm(
+      `Mark ${orderForPayment?.order_number || `order #${orderId}`} paid after collecting ${formatCurrency(expectedTotal)}?`
+    );
+
+    if (!confirmed) return;
+
     if (usingFallback) {
       setOrders((prev) =>
         prev.map((order) =>
@@ -251,7 +323,10 @@ function Orders() {
     }
 
     try {
-      const response = await ordersService.markPaymentPaid(orderId);
+      const response = await ordersService.markPaymentPaid(orderId, {
+        payment_method: "cash",
+        expected_total: expectedTotal,
+      });
 
       if (response.success) {
         setOrders((prev) => prev.map((order) => (order.id === orderId ? { ...order, ...response.data } : order)));
@@ -352,7 +427,13 @@ function Orders() {
             </Button>
           }
         >
-          Live orders could not load. {ordersError}
+          {ordersError || "Restaurant server unavailable. Reconnecting..."}
+        </Alert>
+      )}
+
+      {!usingFallback && lastSyncedAt && (
+        <Alert severity="success" sx={{ mb: 2 }}>
+          Live sync active. Last update {lastSyncedAt.toLocaleTimeString()}.
         </Alert>
       )}
 

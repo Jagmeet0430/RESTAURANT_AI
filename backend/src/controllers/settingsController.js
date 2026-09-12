@@ -10,10 +10,14 @@ const defaultSettings = {
   address: "Jaja Chowk, Opp. State Bank of India, Tanda, Punjab-144024, India",
   phone: "",
   email: "",
+  footerText: "Thank You",
+  receiptWidth: "80",
+  autoOpenReceiptAfterPayment: "false",
   openingTime: "10:00",
   closingTime: "22:00",
   logo: "",
   theme: "light",
+  kioskDisplayMode: "auto",
 };
 
 const editableFields = Object.keys(defaultSettings);
@@ -26,6 +30,7 @@ const publicFields = [
   "openingTime",
   "closingTime",
   "logo",
+  "kioskDisplayMode",
 ];
 
 const placeholderValues = {
@@ -38,6 +43,19 @@ const placeholderValues = {
 
 function cleanSettingValue(field, value) {
   const text = String(value ?? "").trim();
+  if (field === "kioskDisplayMode") {
+    const normalized = text.toLowerCase();
+    return ["auto", "landscape", "portrait"].includes(normalized) ? normalized : defaultSettings.kioskDisplayMode;
+  }
+
+  if (field === "receiptWidth") {
+    return ["58", "80"].includes(text) ? text : defaultSettings.receiptWidth;
+  }
+
+  if (field === "autoOpenReceiptAfterPayment") {
+    return text.toLowerCase() === "true" ? "true" : "false";
+  }
+
   const isPlaceholder = placeholderValues[field]?.some(
     (placeholder) => text.toLowerCase() === placeholder.toLowerCase()
   );

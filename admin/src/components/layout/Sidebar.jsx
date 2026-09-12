@@ -13,6 +13,9 @@ import Inventory2Icon from "@mui/icons-material/Inventory2";
 import AnalyticsIcon from "@mui/icons-material/Analytics";
 import SoupKitchenIcon from "@mui/icons-material/SoupKitchen";
 import PointOfSaleIcon from "@mui/icons-material/PointOfSale";
+import TableRestaurantIcon from "@mui/icons-material/TableRestaurant";
+import PaymentsIcon from "@mui/icons-material/Payments";
+import EventAvailableIcon from "@mui/icons-material/EventAvailable";
 
 const navGroups = [
   {
@@ -22,6 +25,8 @@ const navGroups = [
       { label: "Menu", helper: "Items & prices", to: "/menu", icon: RestaurantMenuIcon },
       { label: "Categories", helper: "Menu sections", to: "/categories", icon: CategoryIcon },
       { label: "Orders", helper: "Live workflow", to: "/orders", icon: ReceiptLongIcon },
+      { label: "Bills", helper: "Payments", to: "/bills", icon: PaymentsIcon },
+      { label: "End of Day", helper: "Close & totals", to: "/end-of-day", icon: EventAvailableIcon },
       { label: "Customers", helper: "Profiles & loyalty", to: "/customers", icon: PeopleAltIcon },
     ],
   },
@@ -40,6 +45,7 @@ const navGroups = [
       { label: "OCR Upload", helper: "Digitize menus", to: "/ocr-upload", icon: DocumentScannerIcon },
       { label: "Barcode Scanner", helper: "Stock & sales", to: "/barcode-pos", icon: PointOfSaleIcon },
       { label: "Inventory", helper: "Stock & suppliers", to: "/inventory", icon: Inventory2Icon },
+      { label: "Tables", helper: "QR ordering", to: "/tables", icon: TableRestaurantIcon },
       { label: "Kitchen", helper: "Prep screen", to: "/kitchen", icon: SoupKitchenIcon },
       { label: "Settings", helper: "Restaurant setup", to: "/settings", icon: SettingsIcon },
     ],

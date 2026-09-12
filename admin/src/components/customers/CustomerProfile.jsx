@@ -33,6 +33,8 @@ export default function CustomerProfile({ open, onClose, customer }) {
       <DialogContent>
         <Typography variant="subtitle1">Contact: {customer.phone} / {customer.email || '-'}</Typography>
         <Typography variant="subtitle2">Loyalty Points: {details?.loyalty_points ?? customer.loyalty_points ?? 0}</Typography>
+        <Typography variant="subtitle2">Orders: {details?.total_orders ?? customer.total_orders ?? 0}</Typography>
+        <Typography variant="subtitle2">Total Spend: Rs. {Number(details?.total_spent ?? customer.total_spent ?? 0).toFixed(2)}</Typography>
 
         <Typography variant="h6" sx={{ mt: 2 }}>Recent Orders</Typography>
         <List>

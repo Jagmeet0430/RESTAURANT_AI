@@ -70,6 +70,10 @@ function customerLabel(order) {
   return order.customer_name || "Walk-in customer";
 }
 
+function orderTokenLabel(order) {
+  return order.token_number ? `#${order.token_number}` : `#${order.order_number || order.id}`;
+}
+
 function isPayAtCounterPending(order) {
   return (
     String(order.payment_method || "").toLowerCase() === "pay at counter" &&
@@ -92,8 +96,11 @@ function OrderCard({ order, lane, onViewDetails, onStatusChange, onMarkPaid }) {
       <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={1}>
         <Box sx={{ minWidth: 0 }}>
           <Typography sx={{ fontWeight: 900, color: "#111827" }}>
-            #{order.order_number || order.id}
+            {orderTokenLabel(order)}
           </Typography>
+          {order.token_number && (
+            <Typography sx={{ fontSize: 11, color: "#6b7280" }}>{order.order_number}</Typography>
+          )}
           <Typography sx={{ fontSize: 13, color: "#6b7280" }}>{customerLabel(order)}</Typography>
         </Box>
         <OrderStatusChip status={order.status} />

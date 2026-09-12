@@ -680,22 +680,6 @@ function BarcodePOS() {
       const completedBill = response.data?.bill || null;
       setBill(completedBill);
       setBillOpen(true);
-      printReceipt(
-        normalizeReceiptFromBill(completedBill, {
-          billNumber: response.billNumber,
-          customerName: checkoutCustomerName,
-          customerPhone: checkoutCustomerPhone,
-          paymentMethod,
-          items: checkoutCart.map((item) => ({
-            name: item.name,
-            quantity: item.quantity,
-            price: item.unit_price,
-          })),
-          subtotal: response.subtotal,
-          gstAmount: response.gstAmount,
-          totalAmount: response.totalAmount,
-        })
-      );
       setCart([]);
       setBarcode("");
       setCustomerName("");
@@ -714,6 +698,13 @@ function BarcodePOS() {
 
   const printBill = () => {
     if (!bill) return;
+    const source = bill.source_type || "counter_sale";
+    const sourceId = bill.source_id || bill.sale_id || bill.id;
+    if (sourceId) {
+      navigate(`/receipt/${source}/${sourceId}?print=1`);
+      return;
+    }
+
     printReceipt(normalizeReceiptFromBill(bill));
   };
 

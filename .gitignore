@@ -27,3 +27,5 @@ vector_store/
 *.keras
 
 .vercel/
+
+runtime/edge-kiosk-profile/

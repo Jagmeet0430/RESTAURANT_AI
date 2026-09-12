@@ -146,10 +146,31 @@ const fallbackMenuItems = [
 
 let menuItems = [];
 
+const kioskSearchParams = new URLSearchParams(window.location.search);
+const KIOSK_MODE_ENABLED =
+  kioskSearchParams.get("kiosk") === "1" ||
+  window.location.pathname.replace(/\/+$/, "").endsWith("/customer/kiosk");
+const TABLE_QR_TOKEN = kioskSearchParams.get("table") || "";
+const TABLE_QR_MODE_ENABLED = !KIOSK_MODE_ENABLED && Boolean(TABLE_QR_TOKEN.trim());
+const kioskConfig = window.RESTAURANTAI_CONFIG?.kiosk || {};
+
+function kioskSecondsParam(queryKey, configKey, fallback, minimum) {
+  const rawValue = kioskSearchParams.get(queryKey) || kioskConfig[configKey] || fallback;
+  const value = Number(rawValue);
+  return Number.isFinite(value) ? Math.max(minimum, value) : fallback;
+}
+
+const KIOSK_IDLE_TIMEOUT_MS = kioskSecondsParam("kioskIdleSeconds", "idleTimeoutSeconds", 120, 30) * 1000;
+const KIOSK_IDLE_GRACE_MS = kioskSecondsParam("kioskIdleGraceSeconds", "idleGraceSeconds", 15, 5) * 1000;
+const KIOSK_CONFIRMATION_RESET_SECONDS = kioskSecondsParam("kioskResetSeconds", "confirmationResetSeconds", 25, 5);
+const KIOSK_NAME_MAX_LENGTH = 40;
+const KIOSK_PHONE_MAX_LENGTH = 15;
+
 const state = {
   selectedCategory: "All",
   cart: [],
   cartFeedback: null,
+  confirmation: null,
   orderSuccess: null,
   checkoutStep: "cart",
   paymentMethod: "pay_at_counter",
@@ -162,8 +183,43 @@ const state = {
   isListening: false,
   lastRecommendedItems: [],
   chatSending: false,
+  isSubmittingOrder: false,
   orderIdempotencyKey: "",
   restaurantSettings: null,
+  tableQr: {
+    enabled: TABLE_QR_MODE_ENABLED,
+    token: TABLE_QR_TOKEN.trim(),
+    status: TABLE_QR_MODE_ENABLED ? "loading" : "idle",
+    table: null,
+    error: "",
+  },
+  kiosk: {
+    enabled: KIOSK_MODE_ENABLED,
+    screen: "welcome",
+    orderType: "",
+    paymentMethod: "pay_at_counter",
+    searchQuery: "",
+    customerName: "",
+    customerPhone: "",
+    submissionError: "",
+    idleWarning: false,
+    idleTimer: null,
+    idleGraceTimer: null,
+    resetTimer: null,
+    resetInterval: null,
+    resetRemaining: 0,
+    clearConfirm: false,
+    initialized: false,
+    eventsBound: false,
+    menuRefreshTimer: null,
+    settingsRefreshTimer: null,
+    keyboard: {
+      activeField: "",
+      nameCaps: true,
+    },
+    printedReceiptOrderIds: new Set(),
+    printingReceiptOrderIds: new Set(),
+  },
 };
 
 const elements = {
@@ -235,7 +291,9 @@ const CART_STORAGE_KEY = "restaurantai_cart";
 const CUSTOMER_PHONE_STORAGE_KEY = "restaurantai_customer_phone";
 const CUSTOMER_NOTIFICATION_SEEN_KEY = "restaurantai_seen_notifications";
 const PUBLIC_SETTINGS_STORAGE_KEY = "restaurantai_public_settings";
+const KIOSK_PRINTED_RECEIPTS_STORAGE_KEY = "restaurantai_kiosk_printed_receipts";
 const DEFAULT_LOGO_PATH = "assets/mahesh-logo.svg";
+const MENU_IMAGE_FALLBACK_SRC = "assets/hero-food.png";
 const GST_RATE = 0.05;
 const PACKING_CHARGE = 10;
 const MAX_MESSAGE_LENGTH = 500;
@@ -281,10 +339,16 @@ const defaultRestaurantSettings = {
   openingTime: "10:00",
   closingTime: "22:00",
   logo: "",
+  kioskDisplayMode: "auto",
 };
 
 function cleanPublicSetting(field, value) {
   const text = String(value || "").trim();
+  if (field === "kioskDisplayMode") {
+    const normalized = text.toLowerCase();
+    return ["auto", "landscape", "portrait"].includes(normalized) ? normalized : defaultRestaurantSettings.kioskDisplayMode;
+  }
+
   const placeholders = {
     restaurantName: ["Restaurant AI", "RestaurantAI", "RESTAURANT NAME"],
     address: ["123 Main Street, Bengaluru", "123 Main St", "123 Main St, Apt 4B"],
@@ -313,6 +377,7 @@ function sanitizedPublicSettings(settings = {}) {
     phone: cleanPublicSetting("phone", merged.phone),
     email: cleanPublicSetting("email", merged.email),
     logo: String(merged.logo || "").trim(),
+    kioskDisplayMode: cleanPublicSetting("kioskDisplayMode", merged.kioskDisplayMode),
   };
 }
 
@@ -346,8 +411,15 @@ function loadCachedPublicSettings() {
   }
 }
 
+function publicSettingsEqual(left, right) {
+  return JSON.stringify(sanitizedPublicSettings(left || {})) === JSON.stringify(sanitizedPublicSettings(right || {}));
+}
+
 function applyPublicSettings(settings) {
   const nextSettings = sanitizedPublicSettings(settings);
+  const settingsChanged = !state.restaurantSettings || !publicSettingsEqual(state.restaurantSettings, nextSettings);
+  if (!settingsChanged) return false;
+
   state.restaurantSettings = nextSettings;
   cachePublicSettings(nextSettings);
 
@@ -451,6 +523,12 @@ function applyPublicSettings(settings) {
 
   const hoursElement = document.querySelector(".contact-hours");
   if (hoursElement) hoursElement.textContent = hours;
+
+  if (state.kiosk.enabled) {
+    renderKioskPreservingMenuView();
+  }
+
+  return true;
 }
 
 async function loadPublicSettings() {
@@ -482,14 +560,31 @@ function formatPrice(value) {
 }
 
 function saveCart() {
+  if (state.kiosk.enabled || state.tableQr.enabled) return;
   localStorage.setItem(CART_STORAGE_KEY, JSON.stringify(state.cart));
 }
 
 function saveCustomerPhone(phone) {
+  if (state.kiosk.enabled || state.tableQr.enabled) return;
   const normalizedPhone = phone.trim();
   if (normalizedPhone) {
     localStorage.setItem(CUSTOMER_PHONE_STORAGE_KEY, normalizedPhone);
   }
+}
+
+function tableQrOrderingBlocked() {
+  return state.tableQr.enabled && state.tableQr.status !== "valid";
+}
+
+function tableQrDisplayLabel() {
+  const table = state.tableQr.table;
+  return table?.display_name || (table?.table_number ? `Table ${table.table_number}` : "Table QR");
+}
+
+function tableQrOrderSource() {
+  if (state.kiosk.enabled) return "kiosk";
+  if (state.tableQr.status === "valid") return "table_qr";
+  return "customer_web";
 }
 
 function normalizePhone(phone = "") {
@@ -499,6 +594,9 @@ function normalizePhone(phone = "") {
 }
 
 function selectedPaymentMethod() {
+  if (state.kiosk.enabled || state.tableQr.enabled) {
+    return "pay_at_counter";
+  }
   const checked = elements.paymentMethods?.querySelector("input[name='paymentMethod']:checked");
   return checked?.value || state.paymentMethod || "cash_on_delivery";
 }
@@ -521,6 +619,7 @@ function paymentMethodLabel(method = selectedPaymentMethod()) {
 }
 
 function updatePlaceOrderButtonText() {
+  if (!elements.placeOrder) return;
   if (!state.cart.length || state.checkoutStep !== "payment") {
     elements.placeOrder.textContent = "Proceed to payment";
     return;
@@ -548,14 +647,117 @@ function applyPaymentAvailability() {
     const input = label.querySelector("input[name='paymentMethod']");
     if (!input) return;
 
-    const disabled = isOnlinePayment(input.value) && !state.onlinePaymentsEnabled;
+    const disabled =
+      (state.tableQr.enabled && input.value !== "pay_at_counter") ||
+      (isOnlinePayment(input.value) && !state.onlinePaymentsEnabled);
     input.disabled = disabled;
     label.classList.toggle("is-disabled", disabled);
+    label.classList.toggle("is-table-locked", state.tableQr.enabled && disabled);
   });
+
+  if (state.tableQr.enabled) {
+    selectPaymentMethod("pay_at_counter");
+    return;
+  }
 
   if (isOnlinePayment(selectedPaymentMethod()) && !state.onlinePaymentsEnabled) {
     selectPaymentMethod("cash_on_delivery");
   }
+}
+
+function renderTableQrContext() {
+  const menuHeading = document.querySelector("#menu .section-heading");
+  if (!menuHeading || state.kiosk.enabled) return;
+
+  let banner = document.querySelector("#tableQrBanner");
+  if (!state.tableQr.enabled) {
+    banner?.remove();
+    return;
+  }
+
+  if (!banner) {
+    banner = document.createElement("div");
+    banner.id = "tableQrBanner";
+    banner.className = "table-qr-banner";
+    menuHeading.appendChild(banner);
+  }
+
+  banner.className = `table-qr-banner is-${state.tableQr.status}`;
+  if (state.tableQr.status === "valid") {
+    banner.innerHTML = `
+      <strong>Ordering for: ${escapeHtml(tableQrDisplayLabel())}</strong>
+      <span>Dine-in and Pay at Counter are selected for this table.</span>
+    `;
+    return;
+  }
+
+  if (state.tableQr.status === "loading") {
+    banner.innerHTML = `
+      <strong>Checking table QR...</strong>
+      <span>Please wait while we confirm this table.</span>
+    `;
+    return;
+  }
+
+  banner.innerHTML = `
+    <strong>This table QR is not available.</strong>
+    <span>${escapeHtml(state.tableQr.error || "This table QR is no longer active. Please ask restaurant staff.")}</span>
+  `;
+}
+
+function applyTableQrControls() {
+  if (!state.tableQr.enabled || state.kiosk.enabled) return;
+
+  document.body.classList.add("table-qr-mode");
+  if (elements.orderType) {
+    elements.orderType.value = "Dine-in";
+    elements.orderType.disabled = true;
+  }
+
+  state.paymentMethod = "pay_at_counter";
+  selectPaymentMethod("pay_at_counter");
+  applyPaymentAvailability();
+
+  if (tableQrOrderingBlocked() && elements.placeOrder) {
+    elements.placeOrder.disabled = true;
+    elements.placeOrder.textContent = state.tableQr.status === "loading" ? "Checking table..." : "Ordering unavailable";
+    if (elements.cartHint) {
+      elements.cartHint.textContent =
+        state.tableQr.status === "loading"
+          ? "Checking this table QR before ordering."
+          : state.tableQr.error || "This table QR is no longer active. Please ask restaurant staff.";
+    }
+  } else {
+    updatePlaceOrderButtonText();
+  }
+}
+
+async function resolveTableQrContext() {
+  if (!state.tableQr.enabled || state.kiosk.enabled) return;
+
+  state.tableQr.status = "loading";
+  state.tableQr.error = "";
+  state.tableQr.table = null;
+  renderTableQrContext();
+  applyTableQrControls();
+  renderMenu();
+  renderCart();
+
+  try {
+    const table = await requestJson(`/tables/public/${encodeURIComponent(state.tableQr.token)}`);
+    state.tableQr.status = "valid";
+    state.tableQr.table = table.table || table;
+    state.tableQr.error = "";
+  } catch (error) {
+    state.tableQr.status = "invalid";
+    state.tableQr.table = null;
+    state.tableQr.error = error.message || "This table QR is no longer active. Please ask restaurant staff.";
+  }
+
+  renderTableQrContext();
+  applyTableQrControls();
+  renderMenu();
+  renderCart();
 }
 
 async function loadPaymentMethods() {
@@ -608,6 +810,11 @@ function saveSeenNotificationIds(ids) {
 }
 
 function restoreCart() {
+  if (state.kiosk.enabled || state.tableQr.enabled) {
+    state.cart = [];
+    return;
+  }
+
   try {
     const savedCart = JSON.parse(localStorage.getItem(CART_STORAGE_KEY) || "[]");
     if (Array.isArray(savedCart)) {
@@ -656,6 +863,14 @@ function categoryIcon(category) {
 }
 
 function normalizeApiMenuItem(item, index) {
+  const stockStatus = String(item.stock_status || item.availability_status || "").toLowerCase();
+  const isUnavailable =
+    item.is_available === false ||
+    item.available === false ||
+    item.out_of_stock === true ||
+    stockStatus.includes("out") ||
+    stockStatus.includes("unavailable");
+
   return {
     id: Number(item.id || item.menu_id || index + 1),
     name: item.name || item.item_name || item.menu_name || `Menu Item ${index + 1}`,
@@ -663,7 +878,57 @@ function normalizeApiMenuItem(item, index) {
     price: Number(item.price || 0),
     image: item.image || item.image_url || "",
     description: item.description || "",
+    isAvailable: !isUnavailable,
   };
+}
+
+function menuItemsEqual(leftItems, rightItems) {
+  if (leftItems.length !== rightItems.length) return false;
+
+  return leftItems.every((left, index) => {
+    const right = rightItems[index];
+    return (
+      left.id === right.id &&
+      left.name === right.name &&
+      left.category === right.category &&
+      left.price === right.price &&
+      left.image === right.image &&
+      left.description === right.description &&
+      left.isAvailable === right.isAvailable
+    );
+  });
+}
+
+function captureKioskMenuView() {
+  if (!state.kiosk.enabled || state.kiosk.screen !== "menu") return null;
+
+  const categoriesElement = document.querySelector(".kiosk-categories");
+  const menuGridElement = document.querySelector(".kiosk-menu-grid");
+  return {
+    categoryScrollTop: categoriesElement?.scrollTop || 0,
+    categoryScrollLeft: categoriesElement?.scrollLeft || 0,
+    menuScrollTop: menuGridElement?.scrollTop || 0,
+    menuScrollLeft: menuGridElement?.scrollLeft || 0,
+  };
+}
+
+function renderKioskPreservingMenuView() {
+  const view = captureKioskMenuView();
+  renderKiosk();
+  if (!view) return;
+
+  window.requestAnimationFrame(() => {
+    const categoriesElement = document.querySelector(".kiosk-categories");
+    const menuGridElement = document.querySelector(".kiosk-menu-grid");
+    if (categoriesElement) {
+      categoriesElement.scrollTop = view.categoryScrollTop;
+      categoriesElement.scrollLeft = view.categoryScrollLeft;
+    }
+    if (menuGridElement) {
+      menuGridElement.scrollTop = view.menuScrollTop;
+      menuGridElement.scrollLeft = view.menuScrollLeft;
+    }
+  });
 }
 
 function updateMenuStats() {
@@ -672,11 +937,18 @@ function updateMenuStats() {
   if (trustStats[1]) trustStats[1].textContent = `${Math.max(categories().length - 1, 0)} categories`;
 }
 
-async function loadLiveMenu() {
-  state.menuStatus = "loading";
-  state.menuError = "";
-  renderFilters();
-  renderMenu();
+async function loadLiveMenu({ background = false } = {}) {
+  const hasLastKnownMenu = state.menuStatus === "ready" || state.menuStatus === "empty";
+  if (!background || !hasLastKnownMenu) {
+    state.menuStatus = "loading";
+    state.menuError = "";
+    if (state.kiosk.enabled) {
+      renderKiosk();
+    } else {
+      renderFilters();
+      renderMenu();
+    }
+  }
 
   try {
     const response = await fetchApi("/menu?available=true", {
@@ -695,12 +967,32 @@ async function loadLiveMenu() {
       .map(normalizeApiMenuItem)
       .filter((item) => item.name && Number.isFinite(item.price));
 
+    const hadMenuError = Boolean(state.menuError);
+    const menuChanged = !menuItemsEqual(menuItems, availableItems);
+    state.menuError = "";
+    if (!menuChanged) {
+      state.menuStatus = availableItems.length ? "ready" : "empty";
+      if (hadMenuError) {
+        if (state.kiosk.enabled) {
+          renderKioskPreservingMenuView();
+        } else {
+          renderFilters();
+          renderMenu();
+        }
+      }
+      return;
+    }
+
     if (!availableItems.length) {
       menuItems = [];
       state.menuStatus = "empty";
       updateMenuStats();
-      renderFilters();
-      renderMenu();
+      if (state.kiosk.enabled) {
+        renderKioskPreservingMenuView();
+      } else {
+        renderFilters();
+        renderMenu();
+      }
       return;
     }
 
@@ -717,10 +1009,18 @@ async function loadLiveMenu() {
     saveCart();
 
     updateMenuStats();
-    renderFilters();
-    renderMenu();
-    renderCart();
+    if (state.kiosk.enabled) {
+      renderKioskPreservingMenuView();
+    } else {
+      renderFilters();
+      renderMenu();
+      renderCart();
+    }
   } catch (error) {
+    if (background && hasLastKnownMenu) {
+      return;
+    }
+
     menuItems = fallbackMenuItems.map(normalizeApiMenuItem);
     state.menuStatus = "ready";
     state.menuError = error.message || "Live menu unavailable. Using saved customer menu.";
@@ -728,8 +1028,12 @@ async function loadLiveMenu() {
       setChatStatus("Saved menu ready");
     }
     updateMenuStats();
-    renderFilters();
-    renderMenu();
+    if (state.kiosk.enabled) {
+      renderKiosk();
+    } else {
+      renderFilters();
+      renderMenu();
+    }
   }
 }
 
@@ -767,6 +1071,10 @@ function filteredItems() {
 
 function cartQuantityForItem(itemId) {
   return state.cart.find((cartItem) => cartItem.id === itemId)?.qty || 0;
+}
+
+function itemAvailable(item) {
+  return item?.isAvailable !== false;
 }
 
 function slugifyMenuItemName(name) {
@@ -1037,23 +1345,30 @@ function renderMenu() {
     .map((item) => {
       const photo = photoForItem(item);
       const cartQty = cartQuantityForItem(item.id);
+      const isAvailable = itemAvailable(item);
+      const isBlocked = tableQrOrderingBlocked();
       return `
-        <article class="menu-card">
+        <article class="menu-card ${isAvailable ? "" : "is-unavailable"}">
           <div class="item-photo">
             <img
               src="${escapeHtml(photo.src)}"
               alt="${escapeHtml(photo.alt)}"
               loading="lazy"
-              onerror="this.onerror=null;this.src='assets/hero-food.png';"
+              onerror="this.onerror=null;this.src='${escapeHtml(MENU_IMAGE_FALLBACK_SRC)}';"
             />
           </div>
           <div class="menu-card-body">
             <span class="category-label">${escapeHtml(item.category)}</span>
             <h3>${escapeHtml(item.name)}</h3>
+            <span class="availability-pill ${isAvailable ? "is-available" : "is-unavailable"}">
+              ${isAvailable ? "Available" : "Unavailable"}
+            </span>
             <div class="menu-meta">
               <span class="price">${formatPrice(item.price)}</span>
               ${
-                cartQty
+                !isAvailable || isBlocked
+                  ? `<button class="add-btn" type="button" disabled>Unavailable</button>`
+                  : cartQty
                   ? `<div class="card-qty-control" aria-label="${escapeHtml(item.name)} quantity in cart">
                       <button class="card-qty-btn" data-menu-id="${item.id}" data-menu-delta="-1" type="button" aria-label="Decrease ${escapeHtml(item.name)}">-</button>
                       <span>${cartQty}</span>
@@ -1070,8 +1385,17 @@ function renderMenu() {
 }
 
 function addToCart(itemId, button) {
+  if (tableQrOrderingBlocked()) {
+    showToast("Table QR unavailable", state.tableQr.error || "Please ask restaurant staff for a fresh QR code.", "warning");
+    return;
+  }
+
   const item = menuItems.find((menuItem) => menuItem.id === itemId);
   if (!item) return;
+  if (!itemAvailable(item)) {
+    showToast("Item unavailable", `${item.name} is not available right now.`, "warning");
+    return;
+  }
 
   addItemToCart(item, 1);
   triggerClass(button, "is-added", 240);
@@ -1079,8 +1403,19 @@ function addToCart(itemId, button) {
 }
 
 function addItemToCart(item, quantity = 1) {
+  if (tableQrOrderingBlocked()) {
+    showToast("Table QR unavailable", state.tableQr.error || "Please ask restaurant staff for a fresh QR code.", "warning");
+    return;
+  }
+
+  if (!itemAvailable(item)) {
+    showToast("Item unavailable", `${item.name} is not available right now.`, "warning");
+    return;
+  }
+
   const safeQuantity = Math.max(1, Math.min(MAX_ITEM_QUANTITY, Number(quantity) || 1));
   state.orderSuccess = null;
+  state.confirmation = null;
   state.checkoutStep = "cart";
   const existing = state.cart.find((cartItem) => cartItem.id === item.id);
   if (existing) {
@@ -1097,6 +1432,7 @@ function addItemToCart(item, quantity = 1) {
   saveCart();
   renderCart();
   renderMenu();
+  renderKiosk();
 }
 
 function changeQty(itemId, delta) {
@@ -1116,6 +1452,7 @@ function changeQty(itemId, delta) {
   saveCart();
   renderCart();
   renderMenu();
+  renderKiosk();
   showToast("Quantity updated", `${existing.name} is now ${existing.qty + delta}`, "info");
 }
 
@@ -1133,6 +1470,7 @@ function removeCartItem(itemId) {
     saveCart();
     renderCart();
     renderMenu();
+    renderKiosk();
     showToast("Item removed", existing.name, "warning");
   }, line ? 180 : 0);
 }
@@ -1145,11 +1483,28 @@ function cartTotals() {
   return { count, subtotal, tax, packing, total: subtotal + tax + packing };
 }
 
+function currentOrderTypeLabel() {
+  if (state.kiosk.enabled) {
+    return state.kiosk.orderType === "dine_in" ? "Dine-in" : "Takeaway";
+  }
+  if (state.tableQr.status === "valid") {
+    return "Dine-in";
+  }
+  return elements.orderType?.value || "Pickup";
+}
+
+function orderTypePayloadValue() {
+  const orderType = currentOrderTypeLabel().toLowerCase();
+  if (orderType.includes("dine")) return "dine_in";
+  if (orderType.includes("delivery")) return "delivery";
+  return "pickup";
+}
+
 function orderMessage() {
   const { subtotal, tax, packing, total } = cartTotals();
-  const name = elements.customerName.value.trim() || "Customer";
-  const phone = elements.customerPhone.value.trim() || "Not provided";
-  const orderType = elements.orderType.value;
+  const name = state.kiosk.enabled ? state.kiosk.customerName || "Customer" : elements.customerName.value.trim() || "Customer";
+  const phone = state.kiosk.enabled ? state.kiosk.customerPhone || "Not provided" : elements.customerPhone.value.trim() || "Not provided";
+  const orderType = currentOrderTypeLabel();
 
   return [
     "Hello MAHESH, I want to place an order.",
@@ -1178,7 +1533,8 @@ function orderSuccessDetails(message) {
 }
 
 function renderCart() {
-  const { count, subtotal, tax, packing, total } = cartTotals();
+  const snapshot = !state.cart.length && state.confirmation ? state.confirmation : null;
+  const { count, subtotal, tax, packing, total } = snapshot?.totals || cartTotals();
   elements.cartCount.innerHTML = `<span aria-hidden="true">🛒</span><strong>${count}</strong>`;
   elements.cartCount.setAttribute("aria-label", `${count} ${count === 1 ? "item" : "items"} in cart`);
   elements.cartSubtotal.textContent = formatPrice(subtotal);
@@ -1216,21 +1572,55 @@ function renderCart() {
           <span>Add delicious food 🍕</span>
         </div>`;
     if (state.orderSuccess) {
-      elements.cartItems.innerHTML = `<div class="order-success-card">
+      const successItems = snapshot?.items?.length
+        ? `<div class="success-receipt-lines">
+            ${snapshot.items
+              .map(
+                (item) =>
+                  `<span><b>${Number(item.qty || 0)} x ${escapeHtml(item.name)}</b>${formatPrice(item.lineTotal)}</span>`
+              )
+              .join("")}
+          </div>
+          <div class="success-receipt-total">
+            <span>${escapeHtml(snapshot.paymentMethod || "Payment")} total</span>
+            <strong>${formatPrice(total)}</strong>
+          </div>`
+        : "";
+      const tableReceipt =
+        snapshot?.orderSource === "table_qr"
+          ? `<div class="success-table-receipt" aria-label="Confirmed table order receipt">
+              <span><b>Order</b><strong>${escapeHtml(snapshot.orderTokenLabel || snapshot.orderLabel || "")}</strong></span>
+              <span><b>Table</b><strong>${escapeHtml(snapshot.tableLabel || "")}</strong></span>
+              <span><b>Order type</b><strong>${escapeHtml(snapshot.orderType || "Dine-in")}</strong></span>
+              <span><b>Payment</b><strong>${escapeHtml(snapshot.paymentMethod || "Pay at Restaurant Counter")}</strong></span>
+              <span><b>Subtotal</b><strong>${formatPrice(subtotal)}</strong></span>
+              <span><b>GST</b><strong>${formatPrice(tax)}</strong></span>
+              <span><b>Packing</b><strong>${formatPrice(packing)}</strong></span>
+              <span class="success-table-total"><b>Grand total</b><strong>${formatPrice(total)}</strong></span>
+            </div>`
+          : "";
+
+      elements.cartItems.innerHTML = `<div class="order-success-card ${snapshot?.orderSource === "table_qr" ? "is-table-order" : ""}">
         <span class="success-orbit" aria-hidden="true">
           <svg class="success-check" viewBox="0 0 52 52" focusable="false">
             <circle class="success-check-circle" cx="26" cy="26" r="22"></circle>
             <path class="success-check-mark" d="M16 27.5 23 34 37 18"></path>
           </svg>
         </span>
-        <span class="success-eyebrow">Order confirmed</span>
-        <strong>Thank you. We received your order.</strong>
+        <span class="success-eyebrow">ORDER CONFIRMED</span>
+        <strong>${
+          snapshot?.orderSource === "table_qr"
+            ? `Order ${escapeHtml(snapshot.orderTokenLabel || snapshot.orderLabel || "")} was sent to the kitchen.`
+            : "Thank you. We received your order."
+        }</strong>
         ${
           success.orderNumber
             ? `<span class="success-order-id">Order ID <b>${escapeHtml(success.orderNumber)}</b></span>`
             : ""
         }
         <span class="success-message">${escapeHtml(success.message)}</span>
+        ${successItems}
+        ${tableReceipt}
         <span class="success-next-step">The restaurant team will review it shortly.</span>
       </div>`;
     }
@@ -1239,6 +1629,7 @@ function renderCart() {
       ? "Your order is saved in PostgreSQL and ready for the restaurant team."
       : "Add at least one item before sending an order request.";
     updatePlaceOrderButtonText();
+    if (state.tableQr.enabled) applyTableQrControls();
     return;
   }
 
@@ -1272,11 +1663,22 @@ function renderCart() {
       ? "Choose a payment method, then confirm your order."
       : "Check your name and phone, then proceed to choose a payment method.";
   updatePlaceOrderButtonText();
+  if (state.tableQr.enabled) applyTableQrControls();
 }
 
 function clearCart() {
   if (!state.cart.length) {
     showToast("Cart is already empty", "Add items from the menu to start an order.", "info");
+    return;
+  }
+
+  if (state.kiosk.enabled) {
+    state.kiosk.clearConfirm = "cart";
+    renderKiosk();
+    return;
+  }
+
+  if (!window.confirm(state.tableQr.enabled ? "Clear this order?" : "Clear your order?")) {
     return;
   }
 
@@ -1287,6 +1689,7 @@ function clearCart() {
   window.setTimeout(() => {
     state.cart = [];
     state.orderSuccess = null;
+    state.confirmation = null;
     state.checkoutStep = "cart";
     saveCart();
     renderCart();
@@ -1337,17 +1740,35 @@ async function findOrCreateCustomer({ name, phone }) {
 }
 
 function buildPaymentPayload(customer) {
-  return {
+  const orderTypeLabel = currentOrderTypeLabel();
+  const instructionLines = [`Order type: ${orderTypeLabel}`];
+  if (state.kiosk.enabled) {
+    instructionLines.push("Source: Kiosk");
+  } else if (state.tableQr.status === "valid") {
+    instructionLines.push("Source: table_qr");
+    if (state.tableQr.table?.table_number) {
+      instructionLines.push(`Table: ${state.tableQr.table.table_number}`);
+    }
+  }
+
+  const payload = {
     customer_id: customer.id,
     payment_method: selectedPaymentMethod(),
-    order_type: String(elements.orderType.value || "Pickup").toLowerCase().replace(/\s+/g, "_"),
+    order_type: orderTypePayloadValue(),
     idempotency_key: ensureOrderIdempotencyKey(),
-    special_instructions: `Order type: ${elements.orderType.value}`,
+    special_instructions: instructionLines.filter(Boolean).join("\n"),
+    order_source: tableQrOrderSource(),
     items: state.cart.map((item) => ({
       menu_id: item.id,
       quantity: item.qty,
     })),
   };
+
+  if (state.tableQr.status === "valid") {
+    payload.table_token = state.tableQr.token;
+  }
+
+  return payload;
 }
 
 function ensureOrderIdempotencyKey() {
@@ -1358,9 +1779,48 @@ function ensureOrderIdempotencyKey() {
   return state.orderIdempotencyKey;
 }
 
-function completeOrderSuccess({ order, paymentData, message }) {
+function buildConfirmationSnapshot({ order, paymentData, customer, message }) {
+  const orderLabel = order?.order_number || paymentData?.order_number || paymentData?.order_id || order?.id || "";
+  const tokenNumber = order?.token_number || paymentData?.token_number || "";
+  const trackingUrl = order?.tracking_url || paymentData?.tracking_url || "";
+  const totals = cartTotals();
+  const tableNumber = order?.table_number || paymentData?.table_number || state.tableQr.table?.table_number || "";
+  const orderSource = order?.order_source || paymentData?.order_source || tableQrOrderSource();
+  const orderTokenLabel = tokenNumber ? `#${tokenNumber}` : orderLabel;
+
+  return {
+    orderLabel,
+    orderTokenLabel,
+    tokenNumber,
+    trackingUrl,
+    message:
+      orderLabel
+        ? `Order ${orderLabel} was sent to the restaurant.${trackingUrl ? ` Track it here: ${trackingUrl}` : ""}`
+        : message || "Your order was sent to the restaurant.",
+    orderType: currentOrderTypeLabel(),
+    paymentMethod: paymentMethodLabel(selectedPaymentMethod()),
+    tableNumber,
+    tableLabel: tableNumber ? `Table ${tableNumber}` : tableQrDisplayLabel(),
+    orderSource,
+    customerName: customer?.name || state.kiosk.customerName || elements.customerName?.value?.trim() || "Customer",
+    customerPhone: customer?.phone || state.kiosk.customerPhone || elements.customerPhone?.value?.trim() || "",
+    totals,
+    items: state.cart.map((item) => ({
+      id: item.id,
+      name: item.name,
+      qty: item.qty,
+      price: item.price,
+      lineTotal: item.price * item.qty,
+    })),
+    createdAt: new Date().toISOString(),
+  };
+}
+
+function completeOrderSuccess({ order, paymentData, message, customer }) {
+  const snapshot = buildConfirmationSnapshot({ order, paymentData, customer, message });
   const orderLabel = order?.order_number || paymentData?.order_number || paymentData?.order_id || order?.id || "";
   const trackingUrl = order?.tracking_url || paymentData?.tracking_url || "";
+  state.confirmation = snapshot;
   state.cart = [];
   state.orderSuccess = orderLabel
     ? `Order ${orderLabel} was sent to the restaurant.${trackingUrl ? ` Track it here: ${trackingUrl}` : ""}`
@@ -1369,6 +1829,7 @@ function completeOrderSuccess({ order, paymentData, message }) {
   saveCart();
   renderCart();
   renderMenu();
+  renderKiosk();
 }
 
 async function handleOnlinePayment(customer) {
@@ -1444,6 +1905,94 @@ async function handleOfflinePayment(customer) {
   });
 }
 
+function rememberKioskReceiptPrint(orderId) {
+  if (!state.kiosk.enabled || !orderId) return;
+  state.kiosk.printedReceiptOrderIds.add(String(orderId));
+
+  try {
+    sessionStorage.setItem(
+      KIOSK_PRINTED_RECEIPTS_STORAGE_KEY,
+      JSON.stringify([...state.kiosk.printedReceiptOrderIds].slice(-100))
+    );
+  } catch {
+    // Session storage is only an extra browser-side duplicate guard.
+  }
+}
+
+function loadKioskReceiptPrintMemory() {
+  if (!state.kiosk.enabled) return;
+
+  try {
+    const stored = JSON.parse(sessionStorage.getItem(KIOSK_PRINTED_RECEIPTS_STORAGE_KEY) || "[]");
+    state.kiosk.printedReceiptOrderIds = new Set((Array.isArray(stored) ? stored : []).map(String));
+  } catch {
+    state.kiosk.printedReceiptOrderIds = new Set();
+  }
+}
+
+async function requestKioskReceiptPrint(order) {
+  if (!state.kiosk.enabled || state.tableQr.enabled) return;
+
+  const orderId = Number(order?.id || order?.restaurant_order_id || order?.order_id);
+  if (!Number.isInteger(orderId) || orderId < 1) {
+    console.warn("[KIOSK_PRINT] missing database order ID", {
+      hasId: Boolean(order?.id),
+      hasRestaurantOrderId: Boolean(order?.restaurant_order_id),
+      hasOrderId: Boolean(order?.order_id),
+    });
+    return;
+  }
+
+  const orderKey = String(orderId);
+  if (
+    state.kiosk.printedReceiptOrderIds.has(orderKey) ||
+    state.kiosk.printingReceiptOrderIds.has(orderKey)
+  ) {
+    return;
+  }
+
+  state.kiosk.printingReceiptOrderIds.add(orderKey);
+  const endpoint = `/receipt-printer/kiosk/orders/${encodeURIComponent(orderId)}/receipt`;
+  console.info("[KIOSK_PRINT] calling print endpoint", { orderId, endpoint });
+
+  try {
+    const response = await fetchApi(endpoint, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ source: "customer-kiosk" }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    const result = payload.data || payload;
+
+    console.info("[KIOSK_PRINT] response status", {
+      orderId,
+      status: response.status,
+      ok: response.ok,
+      printed: Boolean(result?.printed),
+      skipped: Boolean(result?.skipped),
+      reason: result?.reason || "",
+    });
+
+    if (!response.ok) {
+      throw new Error(payload.message || "Receipt print request failed");
+    }
+
+    if (result?.printed || result?.reason === "already_printed") {
+      rememberKioskReceiptPrint(orderId);
+    }
+  } catch (error) {
+    console.warn("[KIOSK_PRINT] print request failed", {
+      orderId,
+      message: error?.message || "Unknown print error",
+    });
+  } finally {
+    state.kiosk.printingReceiptOrderIds.delete(orderKey);
+  }
+}
+
 async function loadCustomerNotifications({ announce = false } = {}) {
   const phone = elements.customerPhone.value.trim() || localStorage.getItem(CUSTOMER_PHONE_STORAGE_KEY) || "";
   if (!phone) return;
@@ -1474,6 +2023,8 @@ async function loadCustomerNotifications({ announce = false } = {}) {
 }
 
 function startCustomerNotificationPolling() {
+  if (state.kiosk.enabled || state.tableQr.enabled) return;
+
   const savedPhone = localStorage.getItem(CUSTOMER_PHONE_STORAGE_KEY);
   if (savedPhone && !elements.customerPhone.value.trim()) {
     elements.customerPhone.value = savedPhone;
@@ -1486,6 +2037,15 @@ function startCustomerNotificationPolling() {
 }
 
 async function placeOrder() {
+  if (state.isSubmittingOrder) return;
+
+  if (tableQrOrderingBlocked()) {
+    showToast("Table QR unavailable", state.tableQr.error || "Please ask restaurant staff for a fresh QR code.", "warning");
+    renderTableQrContext();
+    applyTableQrControls();
+    return;
+  }
+
   if (!state.cart.length) {
     document.querySelector("#menu").scrollIntoView({ behavior: "smooth" });
     showToast("Please add at least one item first", "", "warning");
@@ -1517,7 +2077,8 @@ async function placeOrder() {
   }
 
   elements.placeOrder.disabled = true;
-  elements.placeOrder.textContent = "Sending...";
+  elements.placeOrder.textContent = state.tableQr.enabled ? "Placing order..." : "Sending...";
+  state.isSubmittingOrder = true;
 
   try {
     saveCustomerPhone(phone);
@@ -1527,6 +2088,7 @@ async function placeOrder() {
       completeOrderSuccess({
         paymentData: result.paymentData,
         order: { order_number: result.orderData.order_number, id: result.orderData.restaurant_order_id },
+        customer,
       });
       showToast("Payment confirmed", state.orderSuccess, "success");
     } else {
@@ -1534,6 +2096,7 @@ async function placeOrder() {
       completeOrderSuccess({
         order: order.order,
         message: "Your order was sent to the restaurant.",
+        customer,
       });
       showToast(order.notification?.title || "Order saved", order.notification?.message || state.orderSuccess, "success");
     }
@@ -1549,6 +2112,7 @@ async function placeOrder() {
       showToast("Unable to place order", message, "warning");
     }
   } finally {
+    state.isSubmittingOrder = false;
     elements.placeOrder.disabled = false;
     updatePlaceOrderButtonText();
   }
@@ -2480,6 +3044,962 @@ function setupVoiceSystem() {
   });
 }
 
+function kioskRestaurantName() {
+  return state.restaurantSettings?.restaurantName || defaultRestaurantSettings.restaurantName;
+}
+
+function kioskLogoSrc() {
+  return state.restaurantSettings?.logo || DEFAULT_LOGO_PATH;
+}
+
+function kioskConfiguredDisplayMode() {
+  const configured = String(state.restaurantSettings?.kioskDisplayMode || defaultRestaurantSettings.kioskDisplayMode).toLowerCase();
+  return ["auto", "landscape", "portrait"].includes(configured) ? configured : "auto";
+}
+
+function kioskResolvedDisplayMode() {
+  const configured = kioskConfiguredDisplayMode();
+  if (configured !== "auto") return configured;
+  return window.innerHeight > window.innerWidth ? "portrait" : "landscape";
+}
+
+function applyKioskDisplayMode() {
+  if (!state.kiosk.enabled) return;
+
+  const configured = kioskConfiguredDisplayMode();
+  const resolved = kioskResolvedDisplayMode();
+  document.body.dataset.kioskDisplayMode = configured;
+  document.body.dataset.kioskResolvedLayout = resolved;
+  document.body.classList.toggle("kiosk-layout-landscape", resolved === "landscape");
+  document.body.classList.toggle("kiosk-layout-portrait", resolved === "portrait");
+}
+
+function kioskActiveOrderScreen() {
+  return ["order_type", "menu", "details", "payment", "review"].includes(state.kiosk.screen);
+}
+
+function handleKioskContextMenu(event) {
+  if (!state.kiosk.enabled) return;
+  event.preventDefault();
+}
+
+function handleKioskMouseDown(event) {
+  if (!state.kiosk.enabled || event.button !== 2) return;
+  event.preventDefault();
+}
+
+function handleKioskDragStart(event) {
+  if (!state.kiosk.enabled) return;
+  event.preventDefault();
+}
+
+function handleKioskOrientationChange() {
+  if (!state.kiosk.enabled || kioskConfiguredDisplayMode() !== "auto") return;
+  applyKioskDisplayMode();
+  renderKiosk();
+}
+
+function clearKioskIdleTimers() {
+  window.clearTimeout(state.kiosk.idleTimer);
+  window.clearTimeout(state.kiosk.idleGraceTimer);
+  state.kiosk.idleTimer = null;
+  state.kiosk.idleGraceTimer = null;
+  updateKioskTimerDebug();
+}
+
+function clearKioskConfirmationTimers() {
+  window.clearTimeout(state.kiosk.resetTimer);
+  window.clearInterval(state.kiosk.resetInterval);
+  state.kiosk.resetTimer = null;
+  state.kiosk.resetInterval = null;
+  state.kiosk.resetRemaining = 0;
+  updateKioskTimerDebug();
+}
+
+function scheduleKioskIdleTimer() {
+  if (!state.kiosk.enabled || !kioskActiveOrderScreen()) return;
+
+  clearKioskIdleTimers();
+  state.kiosk.idleTimer = window.setTimeout(() => {
+    state.kiosk.idleWarning = true;
+    renderKiosk();
+    state.kiosk.idleGraceTimer = window.setTimeout(resetKioskSession, KIOSK_IDLE_GRACE_MS);
+    updateKioskTimerDebug();
+  }, KIOSK_IDLE_TIMEOUT_MS);
+  updateKioskTimerDebug();
+}
+
+function resetKioskActivity() {
+  if (!state.kiosk.enabled || !kioskActiveOrderScreen() || state.kiosk.idleWarning) return;
+  scheduleKioskIdleTimer();
+}
+
+function continueKioskSession() {
+  state.kiosk.idleWarning = false;
+  scheduleKioskIdleTimer();
+  renderKiosk();
+}
+
+function startKioskConfirmationTimer() {
+  clearKioskIdleTimers();
+  clearKioskConfirmationTimers();
+  state.kiosk.resetRemaining = KIOSK_CONFIRMATION_RESET_SECONDS;
+  renderKiosk();
+
+  state.kiosk.resetInterval = window.setInterval(() => {
+    state.kiosk.resetRemaining = Math.max(0, state.kiosk.resetRemaining - 1);
+    const countdown = document.querySelector("#kioskCountdown");
+    if (countdown) {
+      countdown.textContent = `${state.kiosk.resetRemaining}s`;
+    }
+  }, 1000);
+
+  state.kiosk.resetTimer = window.setTimeout(resetKioskSession, KIOSK_CONFIRMATION_RESET_SECONDS * 1000);
+  updateKioskTimerDebug();
+}
+
+function resetKioskSession() {
+  clearKioskIdleTimers();
+  clearKioskConfirmationTimers();
+  state.cart = [];
+  state.cartFeedback = null;
+  state.confirmation = null;
+  state.orderSuccess = null;
+  state.checkoutStep = "cart";
+  state.paymentMethod = "pay_at_counter";
+  state.orderIdempotencyKey = "";
+  state.isSubmittingOrder = false;
+  state.selectedCategory = "All";
+  state.kiosk.screen = "welcome";
+  state.kiosk.orderType = "";
+  state.kiosk.paymentMethod = "pay_at_counter";
+  state.kiosk.searchQuery = "";
+  state.kiosk.customerName = "";
+  state.kiosk.customerPhone = "";
+  state.kiosk.submissionError = "";
+  state.kiosk.idleWarning = false;
+  state.kiosk.clearConfirm = false;
+  state.kiosk.keyboard.activeField = "";
+  state.kiosk.keyboard.nameCaps = true;
+  saveCart();
+  renderKiosk();
+}
+
+function setKioskScreen(screen) {
+  state.kiosk.screen = screen;
+  state.kiosk.submissionError = "";
+  state.kiosk.clearConfirm = false;
+  state.kiosk.idleWarning = false;
+  if (screen !== "details") {
+    state.kiosk.keyboard.activeField = "";
+  }
+  clearKioskIdleTimers();
+  clearKioskConfirmationTimers();
+  scheduleKioskIdleTimer();
+  renderKiosk();
+}
+
+function kioskCartLineItems({ controls = true } = {}) {
+  return state.cart
+    .map(
+      (item) => `
+        <div class="kiosk-cart-line ${controls ? "has-controls" : "is-readonly"}">
+          <div class="kiosk-cart-item-copy">
+            <strong>${escapeHtml(item.name)}</strong>
+            <span>${escapeHtml(item.category || "Menu")} - ${formatPrice(item.price)} each</span>
+          </div>
+          <div class="kiosk-cart-item-numbers">
+            <span>Qty ${item.qty}</span>
+            <strong>${formatPrice(item.price * item.qty)}</strong>
+          </div>
+          ${
+            controls
+              ? `<div class="kiosk-qty-control" aria-label="${escapeHtml(item.name)} quantity">
+                  <button type="button" data-kiosk-qty="${item.id}" data-delta="-1" aria-label="Decrease ${escapeHtml(item.name)}">-</button>
+                  <span>${item.qty}</span>
+                  <button type="button" data-kiosk-qty="${item.id}" data-delta="1" aria-label="Increase ${escapeHtml(item.name)}">+</button>
+                </div>`
+              : ""
+          }
+        </div>
+      `
+    )
+    .join("");
+}
+
+function kioskReceiptItemsMarkup(items = []) {
+  return items
+    .map(
+      (item) => `
+        <div class="kiosk-receipt-item">
+          <span>${Number(item.qty || 0)} x ${escapeHtml(item.name)}</span>
+          <small>${formatPrice(item.price)} each</small>
+          <strong>${formatPrice(item.lineTotal)}</strong>
+        </div>
+      `
+    )
+    .join("");
+}
+
+function kioskTotalsMarkup(totals = cartTotals()) {
+  return `
+    <div class="kiosk-total-row"><span>Subtotal</span><strong>${formatPrice(totals.subtotal)}</strong></div>
+    <div class="kiosk-total-row"><span>GST</span><strong>${formatPrice(totals.tax)}</strong></div>
+    <div class="kiosk-total-row"><span>Packing</span><strong>${formatPrice(totals.packing)}</strong></div>
+    <div class="kiosk-total-row kiosk-total-grand"><span>Total</span><strong>${formatPrice(totals.total)}</strong></div>
+  `;
+}
+
+function kioskFilteredItems() {
+  const search = state.kiosk.searchQuery.trim().toLowerCase();
+  return menuItems.filter((item) => {
+    const matchesCategory = state.selectedCategory === "All" || item.category === state.selectedCategory;
+    const matchesSearch = !search || `${item.name} ${item.category}`.toLowerCase().includes(search);
+    return matchesCategory && matchesSearch;
+  });
+}
+
+function renderKioskHeader() {
+  const orderStepLabels = {
+    welcome: "Welcome",
+    order_type: "Order type",
+    menu: "Menu",
+    details: "Details",
+    payment: "Payment",
+    review: "Review",
+    confirmation: "Done",
+  };
+
+  return `
+    <header class="kiosk-header">
+      <div class="kiosk-brand">
+        <img src="${escapeHtml(kioskLogoSrc())}" alt="${escapeHtml(kioskRestaurantName())} logo" draggable="false" />
+        <div>
+          <strong>${escapeHtml(kioskRestaurantName())}</strong>
+          <span>${escapeHtml(orderStepLabels[state.kiosk.screen] || "Kiosk")}</span>
+        </div>
+      </div>
+      ${
+        state.kiosk.screen !== "welcome" && state.kiosk.screen !== "confirmation"
+          ? `<button class="kiosk-ghost-btn" type="button" data-kiosk-action="start-over">Start over</button>`
+          : ""
+      }
+    </header>
+  `;
+}
+
+function renderKioskWelcome() {
+  return `
+    <section class="kiosk-welcome">
+      <div class="kiosk-welcome-copy">
+        <span class="kiosk-eyebrow">Self-order kiosk</span>
+        <h1>${escapeHtml(kioskRestaurantName())}</h1>
+        <p>Browse the live menu, place your order, and pay at the restaurant counter.</p>
+        <button class="kiosk-primary-btn" type="button" data-kiosk-action="start">Start order</button>
+      </div>
+    </section>
+  `;
+}
+
+function renderKioskOrderType() {
+  return `
+    <section class="kiosk-centered">
+      <span class="kiosk-eyebrow">Step 1</span>
+      <h1>How would you like your order?</h1>
+      <div class="kiosk-choice-grid">
+        <button type="button" data-kiosk-order-type="dine_in">
+          <strong>Dine-in</strong>
+          <span>Eat at the restaurant.</span>
+        </button>
+        <button type="button" data-kiosk-order-type="takeaway">
+          <strong>Takeaway</strong>
+          <span>Pick up from the counter.</span>
+        </button>
+      </div>
+    </section>
+  `;
+}
+
+function renderKioskMenuScreen() {
+  const items = kioskFilteredItems();
+  const totals = cartTotals();
+  const menuBody =
+    state.menuStatus === "loading"
+      ? `<div class="kiosk-empty-state"><strong>Loading menu...</strong><span>Connecting to the restaurant system.</span></div>`
+      : state.menuStatus === "empty"
+      ? `<div class="kiosk-empty-state"><strong>No menu items available</strong><span>Please ask the counter team for help.</span></div>`
+      : items.length
+      ? items
+          .map((item) => {
+            const photo = photoForItem(item);
+            const cartQty = cartQuantityForItem(item.id);
+            const isAvailable = itemAvailable(item);
+            return `
+              <article class="kiosk-menu-item ${isAvailable ? "" : "is-unavailable"}">
+                <div class="kiosk-item-photo">
+                  <img
+                    src="${escapeHtml(photo.src)}"
+                    alt="${escapeHtml(photo.alt)}"
+                    loading="lazy"
+                    draggable="false"
+                    onerror="this.onerror=null;this.src='${escapeHtml(MENU_IMAGE_FALLBACK_SRC)}';"
+                  />
+                </div>
+                <div class="kiosk-item-content">
+                  <span class="kiosk-item-category">${escapeHtml(item.category)}</span>
+                  <h3>${escapeHtml(item.name)}</h3>
+                  <strong class="kiosk-item-price">${formatPrice(item.price)}</strong>
+                </div>
+                <div class="kiosk-item-action">
+                  ${
+                    !isAvailable
+                      ? `<button type="button" disabled>UNAVAILABLE</button>`
+                      : cartQty
+                      ? `<div class="kiosk-qty-control kiosk-card-qty">
+                          <button type="button" data-kiosk-qty="${item.id}" data-delta="-1" aria-label="Decrease ${escapeHtml(item.name)}">-</button>
+                          <span>${cartQty}</span>
+                          <button type="button" data-kiosk-qty="${item.id}" data-delta="1" aria-label="Increase ${escapeHtml(item.name)}">+</button>
+                        </div>`
+                      : `<button type="button" data-kiosk-add="${item.id}">Add</button>`
+                  }
+                </div>
+              </article>
+            `;
+          })
+          .join("")
+      : `<div class="kiosk-empty-state"><strong>No matching items</strong><span>Try another category or search.</span></div>`;
+
+  return `
+    <section class="kiosk-menu-layout">
+      <aside class="kiosk-categories" aria-label="Menu categories">
+        ${categories()
+          .map(
+            (category) => `
+              <button class="${category === state.selectedCategory ? "is-active" : ""}" type="button" data-kiosk-category="${escapeHtml(category)}">
+                ${escapeHtml(category)}
+              </button>
+            `
+          )
+          .join("")}
+      </aside>
+      <section class="kiosk-menu-panel">
+        <div class="kiosk-panel-title">
+          <div>
+            <span class="kiosk-eyebrow">${escapeHtml(currentOrderTypeLabel())}</span>
+            <h1>Choose items</h1>
+          </div>
+          <input id="kioskSearchInput" type="search" placeholder="Search menu" value="${escapeHtml(state.kiosk.searchQuery)}" autocomplete="off" />
+        </div>
+        ${state.menuError ? `<div class="kiosk-warning">${escapeHtml(friendlyNetworkError({ message: state.menuError }))}</div>` : ""}
+        <div class="kiosk-menu-grid">${menuBody}</div>
+      </section>
+      <aside class="kiosk-cart-panel" aria-label="Current order">
+        <div>
+          <span class="kiosk-eyebrow">Your order</span>
+          <h2>${totals.count} ${totals.count === 1 ? "item" : "items"}</h2>
+        </div>
+        <div class="kiosk-cart-lines">
+          ${state.cart.length ? kioskCartLineItems() : `<div class="kiosk-empty-cart">Add items from the menu.</div>`}
+        </div>
+        <div class="kiosk-totals">${kioskTotalsMarkup(totals)}</div>
+        <div class="kiosk-cart-actions">
+          <button class="kiosk-secondary-btn" type="button" data-kiosk-action="clear-cart" ${state.cart.length ? "" : "disabled"}>Clear</button>
+          <button class="kiosk-primary-btn kiosk-review-order-btn" type="button" data-kiosk-action="details" ${state.cart.length ? "" : "disabled"}>REVIEW ORDER</button>
+        </div>
+      </aside>
+    </section>
+  `;
+}
+
+function sanitizeKioskName(value = "") {
+  return String(value)
+    .replace(/[^a-zA-Z\s]/g, "")
+    .replace(/\s+/g, " ")
+    .slice(0, KIOSK_NAME_MAX_LENGTH);
+}
+
+function sanitizeKioskPhone(value = "") {
+  const text = String(value).replace(/[^\d+]/g, "");
+  const normalized = text.startsWith("+")
+    ? `+${text.slice(1).replace(/\+/g, "")}`
+    : text.replace(/\+/g, "");
+  return normalized.slice(0, KIOSK_PHONE_MAX_LENGTH);
+}
+
+function kioskKeyboardValue(field) {
+  return field === "phone" ? state.kiosk.customerPhone : state.kiosk.customerName;
+}
+
+function setKioskKeyboardValue(field, value) {
+  if (field === "phone") {
+    state.kiosk.customerPhone = sanitizeKioskPhone(value);
+    return;
+  }
+
+  state.kiosk.customerName = sanitizeKioskName(value);
+}
+
+function activateKioskKeyboard(field) {
+  if (!state.kiosk.enabled || state.kiosk.screen !== "details") return;
+  if (state.kiosk.keyboard.activeField === field) {
+    resetKioskActivity();
+    return;
+  }
+  state.kiosk.keyboard.activeField = field;
+  state.kiosk.submissionError = "";
+  resetKioskActivity();
+  renderKiosk();
+}
+
+function closeKioskKeyboard() {
+  state.kiosk.keyboard.activeField = "";
+  resetKioskActivity();
+  renderKiosk();
+}
+
+function handleKioskKeyboardAction(action, key = "") {
+  const field = state.kiosk.keyboard.activeField;
+  if (!field) return;
+
+  if (action === "done") {
+    closeKioskKeyboard();
+    return;
+  }
+
+  if (action === "caps") {
+    state.kiosk.keyboard.nameCaps = !state.kiosk.keyboard.nameCaps;
+    resetKioskActivity();
+    renderKiosk();
+    return;
+  }
+
+  const current = kioskKeyboardValue(field);
+
+  if (action === "backspace") {
+    setKioskKeyboardValue(field, current.slice(0, -1));
+  } else if (action === "clear") {
+    setKioskKeyboardValue(field, "");
+  } else if (action === "space" && field === "name") {
+    setKioskKeyboardValue(field, `${current} `);
+  } else if (action === "key") {
+    setKioskKeyboardValue(field, `${current}${key}`);
+  }
+
+  resetKioskActivity();
+  renderKiosk();
+}
+
+function renderKioskKeyButton(label, attributes = "", extraClass = "") {
+  return `<button class="${extraClass}" type="button" ${attributes}>${escapeHtml(label)}</button>`;
+}
+
+function renderKioskNameKeyboard() {
+  const caps = state.kiosk.keyboard.nameCaps;
+  const rows = ["QWERTYUIOP", "ASDFGHJKL", "ZXCVBNM"];
+  return `
+    <div class="kiosk-keyboard-keys kiosk-name-keyboard" aria-label="Name keyboard">
+      ${rows
+        .map(
+          (row) => `
+            <div class="kiosk-keyboard-row">
+              ${row
+                .split("")
+                .map((letter) => {
+                  const value = caps ? letter : letter.toLowerCase();
+                  return renderKioskKeyButton(value, `data-kiosk-key-action="key" data-kiosk-key="${escapeHtml(value)}" aria-label="${escapeHtml(value)}"`);
+                })
+                .join("")}
+            </div>
+          `
+        )
+        .join("")}
+      <div class="kiosk-keyboard-row kiosk-keyboard-actions">
+        ${renderKioskKeyButton(caps ? "SHIFT" : "shift", 'data-kiosk-key-action="caps" aria-label="Toggle caps"')}
+        ${renderKioskKeyButton("SPACE", 'data-kiosk-key-action="space" aria-label="Insert space"', "is-wide")}
+        ${renderKioskKeyButton("BACKSPACE", 'data-kiosk-key-action="backspace" aria-label="Backspace"', "is-wide")}
+        ${renderKioskKeyButton("CLEAR", 'data-kiosk-key-action="clear" aria-label="Clear name"')}
+        ${renderKioskKeyButton("DONE", 'data-kiosk-key-action="done" aria-label="Close keyboard"', "is-done")}
+      </div>
+    </div>
+  `;
+}
+
+function renderKioskPhoneKeyboard() {
+  const rows = [
+    ["1", "2", "3"],
+    ["4", "5", "6"],
+    ["7", "8", "9"],
+    ["CLEAR", "0", "BACKSPACE", "DONE"],
+  ];
+
+  return `
+    <div class="kiosk-keyboard-keys kiosk-phone-keyboard" aria-label="Phone keypad">
+      ${rows
+        .map(
+          (row) => `
+            <div class="kiosk-keyboard-row">
+              ${row
+                .map((key) => {
+                  if (key === "BACKSPACE") {
+                    return renderKioskKeyButton("BACKSPACE", 'data-kiosk-key-action="backspace" aria-label="Backspace"');
+                  }
+                  if (key === "CLEAR") {
+                    return renderKioskKeyButton("CLEAR", 'data-kiosk-key-action="clear" aria-label="Clear phone"');
+                  }
+                  if (key === "DONE") {
+                    return renderKioskKeyButton("DONE", 'data-kiosk-key-action="done" aria-label="Close keypad"', "is-done");
+                  }
+                  return renderKioskKeyButton(key, `data-kiosk-key-action="key" data-kiosk-key="${escapeHtml(key)}" aria-label="${key === "+" ? "Plus" : `Digit ${key}`}"`);
+                })
+                .join("")}
+            </div>
+          `
+        )
+        .join("")}
+    </div>
+  `;
+}
+
+function renderKioskKeyboard() {
+  const activeField = state.kiosk.keyboard.activeField;
+  if (!activeField || state.kiosk.screen !== "details") return "";
+
+  const isPhone = activeField === "phone";
+  return `
+    <div class="kiosk-keyboard-panel" aria-live="polite">
+      <div class="kiosk-keyboard-title">
+        <span>${isPhone ? "Phone keypad" : "Name keyboard"}</span>
+        <strong>${escapeHtml(isPhone ? state.kiosk.customerPhone || "Enter phone" : state.kiosk.customerName || "Enter name")}</strong>
+      </div>
+      ${isPhone ? renderKioskPhoneKeyboard() : renderKioskNameKeyboard()}
+    </div>
+  `;
+}
+
+function renderKioskDetails() {
+  const activeField = state.kiosk.keyboard.activeField;
+  return `
+    <section class="kiosk-form-screen kiosk-details-screen ${activeField ? "has-keyboard" : ""}">
+      <span class="kiosk-eyebrow">Step 3</span>
+      <h1>Customer details</h1>
+      <div class="kiosk-form-grid">
+        <label class="${activeField === "name" ? "is-active" : ""}">
+          <span>Name</span>
+          <input id="kioskCustomerName" type="text" value="${escapeHtml(state.kiosk.customerName)}" autocomplete="off" inputmode="none" maxlength="${KIOSK_NAME_MAX_LENGTH}" data-kiosk-field="name" aria-label="Customer name" />
+        </label>
+        <label class="${activeField === "phone" ? "is-active" : ""}">
+          <span>Phone</span>
+          <input id="kioskCustomerPhone" type="text" value="${escapeHtml(state.kiosk.customerPhone)}" autocomplete="off" inputmode="none" maxlength="${KIOSK_PHONE_MAX_LENGTH}" data-kiosk-field="phone" aria-label="Customer phone number" />
+        </label>
+      </div>
+      ${state.kiosk.submissionError ? `<div class="kiosk-error">${escapeHtml(state.kiosk.submissionError)}</div>` : ""}
+      <div class="kiosk-step-actions">
+        <button class="kiosk-secondary-btn" type="button" data-kiosk-action="menu">Back</button>
+        <button class="kiosk-primary-btn" type="button" data-kiosk-action="payment">Continue</button>
+      </div>
+      ${renderKioskKeyboard()}
+    </section>
+  `;
+}
+
+function renderKioskPayment() {
+  state.kiosk.paymentMethod = "pay_at_counter";
+  state.paymentMethod = "pay_at_counter";
+
+  return `
+    <section class="kiosk-form-screen">
+      <span class="kiosk-eyebrow">Step 4</span>
+      <h1>Payment</h1>
+      <div class="kiosk-payment-card is-selected">
+        <span class="kiosk-payment-label">PAY AT COUNTER</span>
+        <strong>Pay at restaurant counter</strong>
+        <span>Your order will be saved now. The counter team will collect payment at the counter.</span>
+      </div>
+      <div class="kiosk-step-actions">
+        <button class="kiosk-secondary-btn" type="button" data-kiosk-action="details">Back</button>
+        <button class="kiosk-primary-btn" type="button" data-kiosk-action="review">Review order</button>
+      </div>
+    </section>
+  `;
+}
+
+function renderKioskReview() {
+  const totals = cartTotals();
+  return `
+    <section class="kiosk-review-screen">
+      <div class="kiosk-review-main">
+        <span class="kiosk-eyebrow">Step 5</span>
+        <h1>Review order</h1>
+        <div class="kiosk-review-meta">
+          <span>Order type: ${escapeHtml(currentOrderTypeLabel())}</span>
+          <span>${escapeHtml(state.kiosk.customerName)}</span>
+          <span>${escapeHtml(state.kiosk.customerPhone)}</span>
+          <span>Payment: PAY AT COUNTER</span>
+        </div>
+        <div class="kiosk-review-items">${kioskCartLineItems({ controls: false })}</div>
+      </div>
+      <aside class="kiosk-review-total">
+        ${kioskTotalsMarkup(totals)}
+        ${state.kiosk.submissionError ? `<div class="kiosk-error">${escapeHtml(state.kiosk.submissionError)}</div>` : ""}
+        <button class="kiosk-primary-btn" type="button" data-kiosk-action="place-order" ${state.isSubmittingOrder ? "disabled" : ""}>
+          ${state.isSubmittingOrder ? "Placing order..." : "Place Order"}
+        </button>
+        <button class="kiosk-secondary-btn" type="button" data-kiosk-action="payment" ${state.isSubmittingOrder ? "disabled" : ""}>Back</button>
+      </aside>
+    </section>
+  `;
+}
+
+function renderKioskConfirmation() {
+  const snapshot = state.confirmation || {};
+  const totals = snapshot.totals || cartTotals();
+  return `
+    <section class="kiosk-confirmation">
+      <div class="kiosk-success-mark" aria-hidden="true">OK</div>
+      <span class="kiosk-eyebrow">ORDER CONFIRMED</span>
+      <h1>${snapshot.orderLabel ? `Order ID ${escapeHtml(snapshot.orderLabel)}` : "Order ID pending"}</h1>
+      <p>Please pay at the restaurant counter. The team has received your order.</p>
+      <div class="kiosk-receipt">
+        <div><span>Order type</span><strong>${escapeHtml(snapshot.orderType || currentOrderTypeLabel())}</strong></div>
+        <div><span>Payment method</span><strong>${escapeHtml(snapshot.paymentMethod || "Pay at Restaurant Counter")}</strong></div>
+        <div><span>Name</span><strong>${escapeHtml(snapshot.customerName || "")}</strong></div>
+        <div class="kiosk-receipt-items">${kioskReceiptItemsMarkup(snapshot.items || [])}</div>
+        <div><span>Subtotal</span><strong>${formatPrice(totals.subtotal)}</strong></div>
+        <div><span>GST</span><strong>${formatPrice(totals.tax)}</strong></div>
+        <div><span>Packing</span><strong>${formatPrice(totals.packing)}</strong></div>
+        <div class="kiosk-receipt-total"><span>Grand total</span><strong>${formatPrice(totals.total)}</strong></div>
+      </div>
+      <button class="kiosk-primary-btn" type="button" data-kiosk-action="new-order">START NEW ORDER</button>
+      <span class="kiosk-countdown">Resetting in <b id="kioskCountdown">${state.kiosk.resetRemaining || KIOSK_CONFIRMATION_RESET_SECONDS}s</b></span>
+    </section>
+  `;
+}
+
+function renderKioskOverlay() {
+  if (state.kiosk.clearConfirm) {
+    return `
+      <div class="kiosk-modal-backdrop">
+        <div class="kiosk-modal">
+          <h2>Clear this order?</h2>
+          <p>${state.kiosk.clearConfirm === "session" ? "This will remove all current customer details and cart items." : "This will remove every item from the current order."}</p>
+          <div>
+            <button class="kiosk-secondary-btn" type="button" data-kiosk-action="cancel-clear">No</button>
+            <button class="kiosk-primary-btn" type="button" data-kiosk-action="confirm-clear">Yes</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  if (state.kiosk.idleWarning) {
+    return `
+      <div class="kiosk-modal-backdrop">
+        <div class="kiosk-modal kiosk-idle-dialog">
+          <h2>Are you still there?</h2>
+          <p>This kiosk will reset soon to protect your order details.</p>
+          <div>
+            <button class="kiosk-primary-btn" type="button" data-kiosk-action="continue-session">Continue</button>
+            <button class="kiosk-secondary-btn" type="button" data-kiosk-action="new-order">Cancel</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  return "";
+}
+
+function renderKiosk() {
+  if (!state.kiosk.enabled) return;
+
+  const main = document.querySelector("main");
+  if (!main) return;
+
+  applyKioskDisplayMode();
+  document.title = `${kioskRestaurantName()} Kiosk | Customer Ordering`;
+  const screens = {
+    welcome: renderKioskWelcome,
+    order_type: renderKioskOrderType,
+    menu: renderKioskMenuScreen,
+    details: renderKioskDetails,
+    payment: renderKioskPayment,
+    review: renderKioskReview,
+    confirmation: renderKioskConfirmation,
+  };
+  const renderScreen = screens[state.kiosk.screen] || renderKioskWelcome;
+
+  main.innerHTML = `
+    <div class="kiosk-app kiosk-layout-${escapeHtml(kioskResolvedDisplayMode())}" data-kiosk-screen="${escapeHtml(state.kiosk.screen)}" data-kiosk-display-mode="${escapeHtml(kioskConfiguredDisplayMode())}">
+      ${renderKioskHeader()}
+      ${renderScreen()}
+      ${renderKioskOverlay()}
+    </div>
+  `;
+
+  restoreKioskActiveFieldFocus();
+}
+
+function validateKioskDetails() {
+  const name = document.querySelector("#kioskCustomerName")?.value?.trim() || state.kiosk.customerName.trim();
+  const phone = normalizePhone(document.querySelector("#kioskCustomerPhone")?.value || state.kiosk.customerPhone);
+
+  state.kiosk.customerName = name;
+  state.kiosk.customerPhone = phone;
+
+  if (!name) {
+    state.kiosk.submissionError = "Please enter your name.";
+    state.kiosk.keyboard.activeField = "name";
+    renderKiosk();
+    return false;
+  }
+
+  if (!phone || phone.replace(/\D/g, "").length < 7) {
+    state.kiosk.submissionError = "Enter a valid phone number.";
+    state.kiosk.keyboard.activeField = "phone";
+    renderKiosk();
+    return false;
+  }
+
+  return true;
+}
+
+async function placeKioskOrder() {
+  if (state.isSubmittingOrder) return;
+  if (!state.cart.length) {
+    state.kiosk.submissionError = "Add at least one item before placing the order.";
+    renderKiosk();
+    return;
+  }
+  if (!validateKioskDetails()) return;
+
+  state.isSubmittingOrder = true;
+  state.kiosk.submissionError = "";
+  state.paymentMethod = "pay_at_counter";
+  renderKiosk();
+
+  try {
+    const customer = await findOrCreateCustomer({
+      name: state.kiosk.customerName,
+      phone: state.kiosk.customerPhone,
+    });
+    const result = await handleOfflinePayment(customer);
+    const order = result.order || result;
+    console.info("[KIOSK_PRINT] order created", {
+      orderId: order?.id || order?.restaurant_order_id || order?.order_id || null,
+      orderNumber: order?.order_number || null,
+      kioskEnabled: state.kiosk.enabled,
+      tableQrEnabled: state.tableQr.enabled,
+    });
+    completeOrderSuccess({
+      order,
+      message: "Your kiosk order was sent to the restaurant.",
+      customer,
+    });
+    state.kiosk.screen = "confirmation";
+    state.isSubmittingOrder = false;
+    startKioskConfirmationTimer();
+    requestKioskReceiptPrint(order);
+  } catch (error) {
+    state.isSubmittingOrder = false;
+    state.kiosk.submissionError = `We could not place this order. Nothing was cleared. ${friendlyNetworkError(error)} Please try again.`;
+    renderKiosk();
+  }
+}
+
+function handleKioskClick(event) {
+  const keyboardButton = event.target.closest("[data-kiosk-key-action]");
+  if (keyboardButton) {
+    handleKioskKeyboardAction(keyboardButton.dataset.kioskKeyAction, keyboardButton.dataset.kioskKey || "");
+    return;
+  }
+
+  const orderTypeButton = event.target.closest("[data-kiosk-order-type]");
+  if (orderTypeButton) {
+    state.kiosk.orderType = orderTypeButton.dataset.kioskOrderType;
+    setKioskScreen("menu");
+    return;
+  }
+
+  const categoryButton = event.target.closest("[data-kiosk-category]");
+  if (categoryButton) {
+    state.selectedCategory = categoryButton.dataset.kioskCategory;
+    renderKiosk();
+    resetKioskActivity();
+    return;
+  }
+
+  const addButton = event.target.closest("[data-kiosk-add]");
+  if (addButton) {
+    const item = menuItems.find((menuItem) => menuItem.id === Number(addButton.dataset.kioskAdd));
+    if (item) addItemToCart(item, 1);
+    resetKioskActivity();
+    return;
+  }
+
+  const qtyButton = event.target.closest("[data-kiosk-qty][data-delta]");
+  if (qtyButton) {
+    changeQty(Number(qtyButton.dataset.kioskQty), Number(qtyButton.dataset.delta));
+    resetKioskActivity();
+    return;
+  }
+
+  const actionButton = event.target.closest("[data-kiosk-action]");
+  if (!actionButton) return;
+
+  const action = actionButton.dataset.kioskAction;
+  if (action === "start") setKioskScreen("order_type");
+  if (action === "menu") setKioskScreen("menu");
+  if (action === "details" && state.cart.length) setKioskScreen("details");
+  if (action === "payment" && validateKioskDetails()) setKioskScreen("payment");
+  if (action === "review") setKioskScreen("review");
+  if (action === "place-order") placeKioskOrder();
+  if (action === "clear-cart") {
+    state.kiosk.keyboard.activeField = "";
+    state.kiosk.clearConfirm = "cart";
+    renderKiosk();
+  }
+  if (action === "start-over") {
+    state.kiosk.keyboard.activeField = "";
+    state.kiosk.clearConfirm = "session";
+    renderKiosk();
+  }
+  if (action === "cancel-clear") {
+    state.kiosk.clearConfirm = false;
+    renderKiosk();
+    scheduleKioskIdleTimer();
+  }
+  if (action === "confirm-clear") {
+    if (state.kiosk.clearConfirm === "session") {
+      resetKioskSession();
+    } else {
+      state.cart = [];
+      state.cartFeedback = null;
+      state.orderSuccess = null;
+      state.confirmation = null;
+      state.kiosk.clearConfirm = false;
+      state.kiosk.keyboard.activeField = "";
+      saveCart();
+      renderKiosk();
+      scheduleKioskIdleTimer();
+    }
+  }
+  if (action === "continue-session") continueKioskSession();
+  if (action === "new-order") resetKioskSession();
+}
+
+function handleKioskInput(event) {
+  if (event.target.id === "kioskSearchInput") {
+    state.kiosk.searchQuery = event.target.value;
+    renderKiosk();
+    return;
+  }
+  if (event.target.id === "kioskCustomerName") {
+    const sanitized = sanitizeKioskName(event.target.value);
+    event.target.value = sanitized;
+    state.kiosk.customerName = sanitized;
+    state.kiosk.keyboard.activeField = "name";
+  }
+  if (event.target.id === "kioskCustomerPhone") {
+    const sanitized = sanitizeKioskPhone(event.target.value);
+    event.target.value = sanitized;
+    state.kiosk.customerPhone = sanitized;
+    state.kiosk.keyboard.activeField = "phone";
+  }
+  resetKioskActivity();
+}
+
+function handleKioskFocus(event) {
+  const field = event.target.dataset?.kioskField;
+  if (field === "name" || field === "phone") {
+    activateKioskKeyboard(field);
+  }
+}
+
+function restoreKioskActiveFieldFocus() {
+  if (!state.kiosk.enabled || state.kiosk.screen !== "details" || !state.kiosk.keyboard.activeField) return;
+
+  window.requestAnimationFrame(() => {
+    const input = document.querySelector(`[data-kiosk-field="${state.kiosk.keyboard.activeField}"]`);
+    input?.focus({ preventScroll: true });
+    input?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  });
+}
+
+function updateKioskTimerDebug() {
+  window.restaurantKioskTimerDebug = {
+    menuRefreshTimerCount: state.kiosk.menuRefreshTimer ? 1 : 0,
+    settingsRefreshTimerCount: state.kiosk.settingsRefreshTimer ? 1 : 0,
+    idleTimerCount: state.kiosk.idleTimer ? 1 : 0,
+    idleGraceTimerCount: state.kiosk.idleGraceTimer ? 1 : 0,
+    confirmationIntervalCount: state.kiosk.resetInterval ? 1 : 0,
+    confirmationResetTimerCount: state.kiosk.resetTimer ? 1 : 0,
+  };
+}
+
+function clearKioskPollingTimers() {
+  window.clearInterval(state.kiosk.menuRefreshTimer);
+  window.clearInterval(state.kiosk.settingsRefreshTimer);
+  state.kiosk.menuRefreshTimer = null;
+  state.kiosk.settingsRefreshTimer = null;
+  updateKioskTimerDebug();
+}
+
+function startKioskPolling() {
+  clearKioskPollingTimers();
+  state.kiosk.menuRefreshTimer = window.setInterval(() => loadLiveMenu({ background: true }), 60000);
+  state.kiosk.settingsRefreshTimer = window.setInterval(() => loadPublicSettings({ background: true }), 5000);
+  updateKioskTimerDebug();
+}
+
+function handleKioskWindowFocus() {
+  loadPublicSettings({ background: true });
+}
+
+function bindKioskEvents() {
+  if (state.kiosk.eventsBound) return;
+  state.kiosk.eventsBound = true;
+
+  const main = document.querySelector("main");
+  main?.addEventListener("click", handleKioskClick);
+  main?.addEventListener("input", handleKioskInput);
+  main?.addEventListener("focusin", handleKioskFocus);
+  ["pointerdown", "keydown", "touchstart"].forEach((eventName) => {
+    window.addEventListener(eventName, resetKioskActivity, { passive: true });
+  });
+  document.addEventListener("contextmenu", handleKioskContextMenu);
+  document.addEventListener("mousedown", handleKioskMouseDown);
+  document.addEventListener("dragstart", handleKioskDragStart);
+  window.addEventListener("resize", handleKioskOrientationChange);
+  window.addEventListener("orientationchange", handleKioskOrientationChange);
+  window.addEventListener("focus", handleKioskWindowFocus);
+  window.addEventListener("beforeunload", clearKioskPollingTimers, { once: true });
+}
+
+function startKioskMode() {
+  if (state.kiosk.initialized) return;
+  state.kiosk.initialized = true;
+
+  document.body.classList.add("kiosk-mode");
+  applyKioskDisplayMode();
+  loadKioskReceiptPrintMemory();
+  document.querySelector(".site-header")?.remove();
+  document.querySelector(".site-footer")?.remove();
+  document.querySelector(".chat-widget")?.remove();
+  state.cart = [];
+  state.orderSuccess = null;
+  state.confirmation = null;
+  state.paymentMethod = "pay_at_counter";
+  state.kiosk.paymentMethod = "pay_at_counter";
+  bindKioskEvents();
+  renderKiosk();
+  loadPublicSettings();
+  updateMenuStats();
+  restoreCart();
+  loadPaymentMethods();
+  loadLiveMenu();
+  startKioskPolling();
+}
+
 function bindEvents() {
   elements.filters.addEventListener("click", (event) => {
     const button = event.target.closest("[data-category]");
@@ -2784,20 +4304,26 @@ function startTrackingPage() {
 
 if (startTrackingPage()) {
   loadPublicSettings();
+} else if (state.kiosk.enabled) {
+  startKioskMode();
 } else {
-loadPublicSettings();
-updateMenuStats();
-restoreCart();
-renderFilters();
-renderMenu();
-renderCart();
-bindEvents();
-setupActiveNavigation();
-setupVoiceSystem();
-startCustomerNotificationPolling();
-loadPaymentMethods();
-loadLiveMenu();
-window.setInterval(loadLiveMenu, 60000);
-window.setInterval(loadPublicSettings, 5000);
-window.addEventListener("focus", loadPublicSettings);
+  if (state.tableQr.enabled) {
+    document.body.classList.add("table-qr-mode");
+  }
+  loadPublicSettings();
+  updateMenuStats();
+  restoreCart();
+  renderFilters();
+  renderMenu();
+  renderCart();
+  bindEvents();
+  setupActiveNavigation();
+  setupVoiceSystem();
+  startCustomerNotificationPolling();
+  loadPaymentMethods();
+  resolveTableQrContext();
+  loadLiveMenu();
+  window.setInterval(loadLiveMenu, 60000);
+  window.setInterval(loadPublicSettings, 5000);
+  window.addEventListener("focus", loadPublicSettings);
 }

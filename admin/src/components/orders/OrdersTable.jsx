@@ -52,6 +52,10 @@ function customerLabel(order) {
   return order.customer_name || "Walk-in customer";
 }
 
+function orderTokenLabel(order) {
+  return order.token_number ? `#${order.token_number}` : `#${order.order_number || order.id}`;
+}
+
 function isOfflinePending(order) {
   const method = String(order.payment_method || "").toLowerCase();
   const status = String(order.payment_status || "").toLowerCase();
@@ -95,8 +99,10 @@ function OrdersTable({ orders, onViewDetails, onStatusChange, onMarkPaid, loadin
             orders.map((order) => (
               <TableRow key={order.id} hover>
                 <TableCell>
-                  <Typography sx={{ fontWeight: 900 }}>#{order.order_number || order.id}</Typography>
-                  <Typography sx={{ fontSize: 12, color: "#6b7280" }}>ID {order.id}</Typography>
+                  <Typography sx={{ fontWeight: 900 }}>{orderTokenLabel(order)}</Typography>
+                  <Typography sx={{ fontSize: 12, color: "#6b7280" }}>
+                    {order.order_number || `ID ${order.id}`}
+                  </Typography>
                 </TableCell>
                 <TableCell>
                   <Typography variant="body2" sx={{ fontWeight: 700 }}>

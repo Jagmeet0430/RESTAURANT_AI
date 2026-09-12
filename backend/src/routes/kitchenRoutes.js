@@ -4,6 +4,7 @@ import express from "express";
 import { authMiddleware, authorizeRoles } from "../middleware/index.js";
 import { updateOrderStatus, getOrdersByStatus } from "../controllers/ordersController.js";
 import { cancelExpiredPendingOrders } from "../services/orderLifecycleService.js";
+import { ensureTableQrSchema } from "../services/tableQrService.js";
 
 const router = express.Router();
 const kitchenRoles = authorizeRoles(["admin", "staff", "kitchen_staff"]);
@@ -11,15 +12,20 @@ const kitchenRoles = authorizeRoles(["admin", "staff", "kitchen_staff"]);
 // Get live kitchen orders using the same workflow statuses as the Orders board.
 router.get("/orders", authMiddleware, kitchenRoles, async (req, res) => {
   try {
+    await ensureTableQrSchema();
     await cancelExpiredPendingOrders();
 
     const statuses = ["Confirmed", "Accepted", "Preparing", "Ready", "Out for Delivery"];
     const result = await req.app.locals.pool.query(
       `SELECT o.id,
               o.order_number,
+              o.token_number,
               o.status,
               o.payment_status,
               o.payment_method,
+              o.table_id,
+              o.table_number,
+              o.order_source,
               o.subtotal,
               o.tax,
               o.delivery_charge,
@@ -53,9 +59,13 @@ router.get("/orders", authMiddleware, kitchenRoles, async (req, res) => {
          AND NOT (
            COALESCE(o.payment_status, 'Pending') <> 'Paid'
            AND (
-             LOWER(COALESCE(o.payment_method, '')) LIKE 'razorpay%'
-             OR LOWER(COALESCE(o.payment_method, '')) = 'pay at counter'
-           )
+               LOWER(COALESCE(o.payment_method, '')) LIKE 'razorpay%'
+               OR (
+                 LOWER(COALESCE(o.payment_method, '')) = 'pay at counter'
+                 AND COALESCE(o.order_source, '') <> 'table_qr'
+                 AND COALESCE(o.special_instructions, '') NOT LIKE '%Source: Kiosk%'
+               )
+             )
          )
        GROUP BY o.id, c.id
        ORDER BY o.created_at ASC`,

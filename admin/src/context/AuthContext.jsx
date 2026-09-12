@@ -3,20 +3,55 @@ import authService from "../services/auth";
 
 const AuthContext = createContext(null);
 
+const clearStoredSession = () => {
+  localStorage.removeItem("authToken");
+  localStorage.removeItem("user");
+};
+
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    const storedUser = localStorage.getItem("user");
-    const storedToken = localStorage.getItem("authToken");
+    let isMounted = true;
 
-    if (storedUser && storedToken) {
-      setUser(JSON.parse(storedUser));
-    }
+    const restoreSession = async () => {
+      const storedToken = localStorage.getItem("authToken");
 
-    setLoading(false);
+      if (!storedToken) {
+        if (isMounted) setLoading(false);
+        return;
+      }
+
+      try {
+        const response = await authService.getProfile();
+        if (!isMounted) return;
+
+        if (response.success && response.data) {
+          localStorage.setItem("user", JSON.stringify(response.data));
+          setUser(response.data);
+        } else {
+          clearStoredSession();
+          setUser(null);
+        }
+      } catch (err) {
+        if (!isMounted) return;
+
+        if (err.response?.status === 401) {
+          clearStoredSession();
+        }
+        setUser(null);
+      } finally {
+        if (isMounted) setLoading(false);
+      }
+    };
+
+    restoreSession();
+
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   const login = async (email, password) => {
@@ -26,15 +61,25 @@ export const AuthProvider = ({ children }) => {
       const response = await authService.login(email, password);
 
       if (response.success) {
-        setUser(response.data.user);
-        return { success: true, user: response.data.user };
+        const profileResponse = await authService.getProfile();
+        const currentUser =
+          profileResponse.success && profileResponse.data
+            ? profileResponse.data
+            : response.data.user;
+
+        localStorage.setItem("user", JSON.stringify(currentUser));
+        setUser(currentUser);
+        return { success: true, user: currentUser };
       }
 
       setError(response.message);
       return { success: false, message: response.message };
     } catch (err) {
       const message = err.response?.data?.message || err.message;
-      console.error("AuthContext login error:", err);
+      console.error("AuthContext login error:", {
+        status: err.response?.status,
+        message,
+      });
       setError(message);
       return { success: false, message };
     }

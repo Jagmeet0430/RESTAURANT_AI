@@ -56,8 +56,8 @@ export const ordersService = {
     return response.data;
   },
 
-  markPaymentPaid: async (orderId) => {
-    const response = await apiClient.patch(`/payments/${orderId}/mark-paid`);
+  markPaymentPaid: async (orderId, payload = {}) => {
+    const response = await apiClient.patch(`/payments/${orderId}/mark-paid`, payload);
     return response.data;
   },
 };

@@ -15,14 +15,10 @@ export const authService = {
 
   // Admin login
   login: async (email, password) => {
-    console.log("📤 Sending login request...");
-
     const response = await apiClient.post("/auth/login", {
       email,
       password,
     });
-
-    console.log("📥 Backend response:", response);
 
     if (response.data.success) {
       localStorage.setItem("authToken", response.data.data.token);
@@ -45,6 +41,11 @@ export const authService = {
   // Verify token
   verifyToken: async () => {
     const response = await apiClient.get("/auth/verify");
+    return response.data;
+  },
+
+  getProfile: async () => {
+    const response = await apiClient.get("/auth/profile");
     return response.data;
   },
 

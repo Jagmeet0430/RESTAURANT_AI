@@ -45,6 +45,7 @@ function formatCurrency(value) {
 
 function Customers() {
   const [customers, setCustomers] = useState([]);
+  const [customerSummary, setCustomerSummary] = useState(null);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(false);
   const [usingFallback, setUsingFallback] = useState(false);
@@ -64,14 +65,17 @@ function Customers() {
 
       if (response.success) {
         setCustomers(response.data || []);
+        setCustomerSummary(response.summary || null);
         setUsingFallback(false);
       } else {
         setCustomers(FALLBACK_CUSTOMERS);
+        setCustomerSummary(null);
         setUsingFallback(true);
         setSnackbar({ open: true, message: response.message || "Showing sample customers", severity: "warning" });
       }
     } catch (error) {
       setCustomers(FALLBACK_CUSTOMERS);
+      setCustomerSummary(null);
       setUsingFallback(true);
       setSnackbar({
         open: true,
@@ -100,11 +104,20 @@ function Customers() {
   }, [customers, search, usingFallback]);
 
   const stats = useMemo(() => {
+    if (!usingFallback && customerSummary) {
+      return {
+        totalCustomers: Number(customerSummary.total_customers || visibleCustomers.length),
+        totalOrders: Number(customerSummary.total_orders || 0),
+        totalSpend: Number(customerSummary.total_spent || 0),
+        bestCustomer: customerSummary.top_customer || null,
+      };
+    }
+
     const totalOrders = visibleCustomers.reduce((sum, customer) => sum + Number(customer.total_orders || 0), 0);
     const totalSpend = visibleCustomers.reduce((sum, customer) => sum + Number(customer.total_spent || 0), 0);
     const bestCustomer = [...visibleCustomers].sort((a, b) => Number(b.total_spent || 0) - Number(a.total_spent || 0))[0];
-    return { totalOrders, totalSpend, bestCustomer };
-  }, [visibleCustomers]);
+    return { totalCustomers: visibleCustomers.length, totalOrders, totalSpend, bestCustomer };
+  }, [customerSummary, usingFallback, visibleCustomers]);
 
   const openEdit = (customer) => {
     setEditingCustomer(customer);
@@ -197,9 +210,9 @@ function Customers() {
       />
 
       <StatGrid>
-        <StatCard label="Customers" value={visibleCustomers.length} helper="Visible records" icon={<PeopleAltIcon />} accent="#1976d2" />
-        <StatCard label="Total orders" value={stats.totalOrders} helper="From visible customers" icon={<WorkspacePremiumIcon />} accent="#059669" />
-        <StatCard label="Total spend" value={formatCurrency(stats.totalSpend)} helper="From visible customers" icon={<WalletIcon />} accent="#7c3aed" />
+        <StatCard label="Customers" value={stats.totalCustomers} helper={search.trim().length >= 2 ? "Matching records" : "Active records"} icon={<PeopleAltIcon />} accent="#1976d2" />
+        <StatCard label="Total orders" value={stats.totalOrders} helper="From actual orders" icon={<WorkspacePremiumIcon />} accent="#059669" />
+        <StatCard label="Total spend" value={formatCurrency(stats.totalSpend)} helper="From actual orders" icon={<WalletIcon />} accent="#7c3aed" />
         <StatCard label="Top customer" value={stats.bestCustomer?.name || "-"} helper={stats.bestCustomer ? formatCurrency(stats.bestCustomer.total_spent) : "No data"} icon={<PeopleAltIcon />} accent="#dc6b19" />
       </StatGrid>
 

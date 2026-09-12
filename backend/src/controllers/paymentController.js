@@ -3,12 +3,19 @@ import crypto from "node:crypto";
 import { getRazorpayClient } from "../config/razorpay.js";
 import { pool } from "../config/database.js";
 import { authMiddleware, authorizeRoles } from "../middleware/index.js";
-import { createBillForOrder } from "../services/billingService.js";
+import { createBillForOrder, normalizeStaffPaymentMethod, payOrder } from "../services/billingService.js";
 import { deductInventoryForOrder } from "../services/inventoryStockService.js";
 import { createCustomerNotification, ensureNotificationTable } from "../services/orderLifecycleService.js";
 import { requireVerifiedPhoneToken } from "../services/otpService.js";
 import { ensureOrderSecuritySchema } from "../services/orderSchemaService.js";
 import { sendOrderStatusNotification } from "../services/notificationService.js";
+import {
+  appendOrderContextInstructions,
+  ensureTableQrSchema,
+  generateDailyTokenNumber,
+  normalizeOrderSource,
+  resolveTableForOrder,
+} from "../services/tableQrService.js";
 import { generateTrackingToken } from "../utils/trackingToken.js";
 import { normalizePhoneNumber } from "../utils/phoneNumber.js";
 
@@ -248,9 +255,12 @@ async function insertOrderWithItems(client, {
   billType = "order",
   orderType = "pickup",
   idempotencyKey = null,
+  tableToken = null,
+  orderSource = null,
 }) {
   await ensureNotificationTable(client);
   await ensureOrderSecuritySchema(client);
+  await ensureTableQrSchema(client);
 
   const cleanIdempotencyKey = String(idempotencyKey || req?.get?.("Idempotency-Key") || "").trim().slice(0, 120) || null;
 
@@ -282,6 +292,12 @@ async function insertOrderWithItems(client, {
   }
 
   const customer = await requireCustomer(client, customerId);
+  const table = await resolveTableForOrder(client, tableToken);
+  const normalizedOrderSource = normalizeOrderSource(orderSource, table ? "table_qr" : "customer_web");
+  const contextualInstructions = appendOrderContextInstructions(specialInstructions, {
+    orderSource: normalizedOrderSource,
+    table,
+  });
   const normalizedPhone = normalizePhoneNumber(customer.phone);
   const totals = await calculateOrderAmount(client, items);
   let phoneVerified = false;
@@ -293,6 +309,7 @@ async function insertOrderWithItems(client, {
     phoneVerified = true;
   }
   const orderNumber = await generateOrderNumber(client);
+  const dailyToken = await generateDailyTokenNumber(client);
   const trackingToken = generateTrackingToken();
 
   const orderResult = await client.query(
@@ -300,10 +317,11 @@ async function insertOrderWithItems(client, {
        customer_id, order_number, status, payment_status, payment_method,
        subtotal, tax, delivery_charge, discount, total_amount, special_instructions,
        customer_name, customer_phone, phone_verified, order_type, tracking_token,
-       ip_address, user_agent, idempotency_key
+       ip_address, user_agent, idempotency_key, table_id, table_number, order_source,
+       token_number, token_date
      )
      VALUES ($1, $2, 'Confirmed', $3, $4, $5, $6, $7, $8, $9, $10,
-             $11, $12, $13, $14, $15, $16, $17, $18)
+             $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
      RETURNING *`,
     [
       customer.id,
@@ -315,15 +333,20 @@ async function insertOrderWithItems(client, {
       totals.deliveryCharge,
       totals.discount,
       totals.total,
-      specialInstructions || null,
+      contextualInstructions,
       customer.name,
       normalizedPhone,
       phoneVerified,
-      normalizeOrderType(orderType),
+      table ? "dine_in" : normalizeOrderType(orderType),
       trackingToken,
       clientIp(req),
       String(req?.headers?.["user-agent"] || "").slice(0, 500),
       cleanIdempotencyKey,
+      table?.id || null,
+      table?.table_number || null,
+      normalizedOrderSource,
+      dailyToken.token_number,
+      dailyToken.token_date,
     ]
   );
 
@@ -371,6 +394,8 @@ export const createPaymentOrder = async (req, res) => {
       otpToken: req.body.otp_verification_token,
       orderType: req.body.order_type,
       idempotencyKey: req.get("Idempotency-Key") || req.body.idempotency_key,
+      tableToken: req.body.table_token,
+      orderSource: req.body.order_source,
       billType: "online",
     });
 
@@ -382,6 +407,9 @@ export const createPaymentOrder = async (req, res) => {
         data: {
           restaurant_order_id: order.id,
           order_number: order.order_number,
+          token_number: order.token_number,
+          table_number: order.table_number,
+          order_source: order.order_source,
           tracking_token: order.tracking_token,
           tracking_url: `${process.env.FRONTEND_URL || "http://localhost:5001/customer"}/track-order/${order.tracking_token}`,
           totals: publicTotals(totals),
@@ -402,9 +430,9 @@ export const createPaymentOrder = async (req, res) => {
     await client.query(
       `INSERT INTO payments (
          order_id, customer_id, gateway, payment_method, gateway_order_id,
-         amount, currency, payment_status
+         amount, currency, payment_status, source_type, source_id
        )
-       VALUES ($1, $2, 'razorpay', $3, $4, $5, 'INR', 'pending')`,
+       VALUES ($1, $2, 'razorpay', $3, $4, $5, 'INR', 'pending', 'order', $1)`,
       [order.id, customer.id, onlineMethod, razorpayOrder.id, totals.total]
     );
 
@@ -419,6 +447,9 @@ export const createPaymentOrder = async (req, res) => {
       data: {
         restaurant_order_id: order.id,
         order_number: order.order_number,
+        token_number: order.token_number,
+        table_number: order.table_number,
+        order_source: order.order_source,
         tracking_token: order.tracking_token,
         tracking_url: `${process.env.FRONTEND_URL || "http://localhost:5001/customer"}/track-order/${order.tracking_token}`,
         razorpay_order_id: razorpayOrder.id,
@@ -583,6 +614,8 @@ export const createCashOrder = async (req, res) => {
       otpToken: req.body.otp_verification_token,
       orderType: req.body.order_type,
       idempotencyKey: req.get("Idempotency-Key") || req.body.idempotency_key,
+      tableToken: req.body.table_token,
+      orderSource: req.body.order_source,
       billType: "offline",
     });
 
@@ -601,9 +634,10 @@ export const createCashOrder = async (req, res) => {
 
     await client.query(
       `INSERT INTO payments (
-         order_id, customer_id, gateway, payment_method, amount, currency, payment_status
+         order_id, customer_id, gateway, payment_method, amount, currency, payment_status,
+         source_type, source_id
        )
-       VALUES ($1, $2, 'offline', $3, $4, 'INR', 'pending')`,
+       VALUES ($1, $2, 'offline', $3, $4, 'INR', 'pending', 'order', $1)`,
       [order.id, customer.id, offlineMethod, totals.total]
     );
 
@@ -647,7 +681,7 @@ export const createCashOrder = async (req, res) => {
 
 export const markOrderPaid = [
   authMiddleware,
-  authorizeRoles(["admin", "staff"]),
+  authorizeRoles(["admin", "staff", "manager"]),
   async (req, res) => {
     const client = await pool.connect();
 
@@ -659,58 +693,11 @@ export const markOrderPaid = [
       }
 
       await client.query("BEGIN");
-
-      const paymentResult = await client.query(
-        `UPDATE payments
-         SET payment_status = 'paid',
-             transaction_id = COALESCE(transaction_id, $1),
-             paid_at = COALESCE(paid_at, CURRENT_TIMESTAMP),
-             updated_at = CURRENT_TIMESTAMP
-         WHERE order_id = $2
-           AND gateway = 'offline'
-           AND payment_status <> 'paid'
-         RETURNING transaction_id`,
-        [`offline-${orderId}-${Date.now()}`, orderId]
-      );
-
-      if (paymentResult.rowCount === 0) {
-        const existingPaid = await client.query(
-          `SELECT o.*
-           FROM orders o
-           JOIN payments p ON p.order_id = o.id
-           WHERE o.id = $1
-             AND p.gateway = 'offline'
-             AND p.payment_status = 'paid'
-           LIMIT 1`,
-          [orderId]
-        );
-
-        if (existingPaid.rowCount > 0) {
-          await client.query("COMMIT");
-          return res.json({
-            success: true,
-            message: "Cash payment was already marked as paid",
-            data: existingPaid.rows[0],
-          });
-        }
-
-        throw Object.assign(new Error("Offline pending payment not found"), { statusCode: 404 });
-      }
-
-      const orderResult = await client.query(
-        `UPDATE orders
-         SET payment_status = 'Paid',
-             transaction_id = COALESCE(transaction_id, $1),
-             paid_at = COALESCE(paid_at, CURRENT_TIMESTAMP),
-             updated_at = CURRENT_TIMESTAMP
-         WHERE id = $2
-         RETURNING *`,
-        [paymentResult.rows[0].transaction_id, orderId]
-      );
-
-      const bill = await createBillForOrder(client, {
+      const method = normalizeStaffPaymentMethod(req.body.payment_method || req.body.paymentMethod || "cash");
+      const result = await payOrder(client, {
         orderId,
-        billType: "offline",
+        paymentMethod: method.code,
+        expectedTotal: req.body.expected_total ?? req.body.expectedTotal,
         createdBy: req.user?.id || null,
       });
 
@@ -718,8 +705,8 @@ export const markOrderPaid = [
 
       return res.json({
         success: true,
-        message: "Cash payment marked as paid",
-        data: { ...orderResult.rows[0], bill },
+        message: result.alreadyPaid ? "Payment was already marked as paid" : "Payment marked as paid",
+        data: { ...result.order, bill: result.bill, already_paid: result.alreadyPaid },
       });
     } catch (error) {
       await client.query("ROLLBACK");
@@ -741,7 +728,9 @@ async function markRazorpayPaid(client, { gatewayOrderId, gatewayPaymentId }) {
          payment_status = 'paid',
          failure_reason = NULL,
          paid_at = COALESCE(paid_at, CURRENT_TIMESTAMP),
-         updated_at = CURRENT_TIMESTAMP
+         updated_at = CURRENT_TIMESTAMP,
+         source_type = 'order',
+         source_id = order_id
      WHERE gateway_order_id = $2
        AND gateway = 'razorpay'
      RETURNING order_id`,
@@ -749,16 +738,24 @@ async function markRazorpayPaid(client, { gatewayOrderId, gatewayPaymentId }) {
   );
 
   for (const payment of paymentResult.rows) {
-    await client.query(
+    const orderResult = await client.query(
       `UPDATE orders
        SET payment_status = 'Paid',
            transaction_id = COALESCE(transaction_id, $1),
            paid_at = COALESCE(paid_at, CURRENT_TIMESTAMP),
            updated_at = CURRENT_TIMESTAMP
        WHERE id = $2
-         AND status <> 'Cancelled'`,
+         AND status <> 'Cancelled'
+       RETURNING id`,
       [gatewayPaymentId || null, payment.order_id]
     );
+
+    if (orderResult.rowCount > 0) {
+      await createBillForOrder(client, {
+        orderId: payment.order_id,
+        billType: "online",
+      });
+    }
   }
 }
 

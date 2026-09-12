@@ -1,7 +1,7 @@
 {
   "name": "admin",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.4.2",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -16,6 +16,7 @@
     "@mui/material": "^9.1.2",
     "axios": "^1.18.1",
     "chart.js": "^4.5.1",
+    "qrcode": "^1.5.4",
     "react": "^19.2.7",
     "react-chartjs-2": "^5.3.1",
     "react-dom": "^19.2.7",

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, Box, Button, Snackbar } from "@mui/material";
 import RefreshIcon from "@mui/icons-material/Refresh";
 import AccessTimeIcon from "@mui/icons-material/AccessTime";
@@ -8,19 +8,8 @@ import KitchenBoard from "../../components/kitchen/KitchenBoard";
 import { kitchenService } from "../../services/order";
 import { PageHeader, StatCard, StatGrid } from "../../components/common/PageKit";
 
-const PHASE_8_FALLBACK_ORDERS = [
-  {
-    id: 101,
-    order_number: "ORD-101",
-    status: "Preparing",
-    customer_name: "Table 5",
-    items: [
-      { name: "Paneer Tikka Pizza", quantity: 2 },
-      { name: "Veggie Noodles", quantity: 1 },
-    ],
-    created_at: new Date(Date.now() - 8 * 60000).toISOString(),
-  },
-];
+const LIVE_POLL_INTERVAL_MS = 3000;
+const HIDDEN_POLL_INTERVAL_MS = 15000;
 
 const nextKitchenStatus = {
   Confirmed: "Accepted",
@@ -36,40 +25,99 @@ function Kitchen() {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(false);
   const [usingFallback, setUsingFallback] = useState(false);
+  const [ordersError, setOrdersError] = useState("");
+  const [lastSyncedAt, setLastSyncedAt] = useState(null);
   const [snackbar, setSnackbar] = useState({ open: false, message: "", severity: "success" });
+  const requestInFlightRef = useRef(false);
+  const pollTimerRef = useRef(null);
+  const seenOrderIdsRef = useRef(new Set());
+  const hasLoadedOnceRef = useRef(false);
 
-  const fetchKitchenOrders = useCallback(async () => {
-    setLoading(true);
+  const fetchKitchenOrders = useCallback(async ({ silent = false } = {}) => {
+    if (requestInFlightRef.current) {
+      return;
+    }
+
+    requestInFlightRef.current = true;
+    if (!silent) setLoading(true);
     try {
       const response = await kitchenService.getActiveOrders();
       if (response.success) {
-        setOrders(response.data || []);
+        const nextOrders = response.data || [];
+        const nextIds = new Set(nextOrders.map((order) => String(order.id)));
+        const newOrderCount = nextOrders.filter((order) => !seenOrderIdsRef.current.has(String(order.id))).length;
+
+        setOrders(nextOrders);
+        if (hasLoadedOnceRef.current && newOrderCount > 0) {
+          setSnackbar({
+            open: true,
+            message: `${newOrderCount} new kitchen ticket${newOrderCount === 1 ? "" : "s"} received.`,
+            severity: "info",
+          });
+        }
+        seenOrderIdsRef.current = nextIds;
+        hasLoadedOnceRef.current = true;
         setUsingFallback(false);
+        setOrdersError("");
+        setLastSyncedAt(new Date());
       } else {
-        setOrders(PHASE_8_FALLBACK_ORDERS);
         setUsingFallback(true);
-        setSnackbar({ open: true, message: response.message || "Showing sample kitchen order", severity: "warning" });
+        setOrdersError(response.message || "Kitchen orders API did not return a successful response.");
+        if (!silent) {
+          setSnackbar({
+            open: true,
+            message: response.message || "Kitchen orders could not load.",
+            severity: "warning",
+          });
+        }
       }
     } catch (error) {
-      setOrders(PHASE_8_FALLBACK_ORDERS);
       setUsingFallback(true);
-      setSnackbar({
-        open: true,
-        message: error?.response?.data?.message || "Backend unavailable. Showing sample kitchen order.",
-        severity: "warning",
-      });
+      setOrdersError(error?.response?.data?.message || "Restaurant server unavailable. Reconnecting...");
+      if (!silent) {
+        setSnackbar({
+          open: true,
+          message: error?.response?.data?.message || "Restaurant server unavailable. Reconnecting...",
+          severity: "warning",
+        });
+      }
     } finally {
-      setLoading(false);
+      requestInFlightRef.current = false;
+      if (!silent) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    const initialLoadId = window.setTimeout(fetchKitchenOrders, 0);
-    const intervalId = window.setInterval(fetchKitchenOrders, 8000);
+    fetchKitchenOrders();
+  }, [fetchKitchenOrders]);
+
+  useEffect(() => {
+    let stopped = false;
+
+    const scheduleNextPoll = () => {
+      if (stopped) return;
+      const interval = document.hidden ? HIDDEN_POLL_INTERVAL_MS : LIVE_POLL_INTERVAL_MS;
+      pollTimerRef.current = window.setTimeout(runPoll, interval);
+    };
+
+    const runPoll = async () => {
+      await fetchKitchenOrders({ silent: true });
+      scheduleNextPoll();
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) return;
+      window.clearTimeout(pollTimerRef.current);
+      runPoll();
+    };
+
+    pollTimerRef.current = window.setTimeout(runPoll, LIVE_POLL_INTERVAL_MS);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
 
     return () => {
-      window.clearTimeout(initialLoadId);
-      window.clearInterval(intervalId);
+      stopped = true;
+      window.clearTimeout(pollTimerRef.current);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, [fetchKitchenOrders]);
 
@@ -130,12 +178,18 @@ function Kitchen() {
       <StatGrid>
         <StatCard label="Active tickets" value={kitchenOrders.length} helper="Currently in kitchen" icon={<RestaurantIcon />} accent="#1976d2" />
         <StatCard label="Preparing" value={kitchenOrders.filter((order) => order.status === "Preparing").length} helper="Cooking now" icon={<AccessTimeIcon />} accent="#dc6b19" />
-        <StatCard label="Auto refresh" value="8 sec" helper="Live kitchen sync" icon={<RoomServiceIcon />} accent="#059669" />
+        <StatCard label="Auto refresh" value="3 sec" helper="Live kitchen sync" icon={<RoomServiceIcon />} accent="#059669" />
       </StatGrid>
 
       {usingFallback && (
         <Alert severity="warning" sx={{ mb: 2 }}>
-          Backend kitchen orders are unavailable, so sample tickets are being shown for preview.
+          {ordersError || "Restaurant server unavailable. Reconnecting..."}
+        </Alert>
+      )}
+
+      {!usingFallback && lastSyncedAt && (
+        <Alert severity="success" sx={{ mb: 2 }}>
+          Live sync active. Last update {lastSyncedAt.toLocaleTimeString()}.
         </Alert>
       )}
 

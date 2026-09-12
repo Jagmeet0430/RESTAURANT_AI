@@ -2,7 +2,78 @@
 import { pool } from "../config/database.js";
 import { successResponse, errorResponse, asyncHandler } from "../utils/index.js";
 import { createPhoneOtp, verifyPhoneOtp } from "../services/otpService.js";
-import { normalizePhoneNumber } from "../utils/phoneNumber.js";
+import { normalizePhoneNumber, phoneLookupCandidates } from "../utils/phoneNumber.js";
+
+const VALID_CUSTOMER_ORDER_WHERE = "COALESCE(status, '') <> 'Cancelled'";
+
+const customerOrderTotalsCte = `
+  WITH order_totals AS (
+    SELECT
+      customer_id,
+      COUNT(*)::int AS total_orders,
+      COALESCE(SUM(total_amount), 0) AS total_spent
+    FROM orders
+    WHERE customer_id IS NOT NULL
+      AND ${VALID_CUSTOMER_ORDER_WHERE}
+    GROUP BY customer_id
+  )
+`;
+
+const customerMetricsFields = `
+  c.id,
+  c.name,
+  c.email,
+  c.phone,
+  c.address,
+  c.city,
+  c.state,
+  c.postal_code,
+  c.country,
+  COALESCE(c.loyalty_points, 0)::int AS loyalty_points,
+  COALESCE(ot.total_orders, 0)::int AS total_orders,
+  COALESCE(ot.total_spent, 0) AS total_spent,
+  COALESCE(c.total_orders, 0)::int AS legacy_total_orders,
+  COALESCE(c.total_spent, 0) AS legacy_total_spent,
+  c.is_active,
+  c.created_at
+`;
+
+async function queryCustomerSummary(params = [], whereSql = "c.is_active = true") {
+  const result = await pool.query(
+    `${customerOrderTotalsCte},
+     matched_customers AS (
+       SELECT c.id, c.name, COALESCE(ot.total_orders, 0)::int AS total_orders, COALESCE(ot.total_spent, 0) AS total_spent
+       FROM customers c
+       LEFT JOIN order_totals ot ON ot.customer_id = c.id
+       WHERE ${whereSql}
+     )
+     SELECT
+       COUNT(*)::int AS total_customers,
+       COALESCE(SUM(total_orders), 0)::int AS total_orders,
+       COALESCE(SUM(total_spent), 0) AS total_spent,
+       (
+         SELECT json_build_object(
+           'id', id,
+           'name', name,
+           'total_orders', total_orders,
+           'total_spent', total_spent
+         )
+         FROM matched_customers
+         WHERE total_orders > 0
+         ORDER BY total_spent DESC, total_orders DESC, id DESC
+         LIMIT 1
+       ) AS top_customer
+     FROM matched_customers`,
+    params
+  );
+
+  return {
+    total_customers: Number(result.rows[0]?.total_customers || 0),
+    total_orders: Number(result.rows[0]?.total_orders || 0),
+    total_spent: Number(result.rows[0]?.total_spent || 0),
+    top_customer: result.rows[0]?.top_customer || null,
+  };
+}
 
 // Get all customers
 export const getAllCustomers = asyncHandler(async (req, res) => {
@@ -10,15 +81,22 @@ export const getAllCustomers = asyncHandler(async (req, res) => {
   const offset = parseInt(req.query.offset) || 0;
 
   const result = await pool.query(
-    `SELECT id, name, email, phone, city, state, loyalty_points, total_orders, total_spent, is_active, created_at
-     FROM customers
-     WHERE is_active = true
-     ORDER BY total_spent DESC
+    `${customerOrderTotalsCte}
+     SELECT ${customerMetricsFields}
+     FROM customers c
+     LEFT JOIN order_totals ot ON ot.customer_id = c.id
+     WHERE c.is_active = true
+     ORDER BY COALESCE(ot.total_spent, 0) DESC, COALESCE(ot.total_orders, 0) DESC, c.id DESC
      LIMIT $1 OFFSET $2`,
     [limit, offset]
   );
 
-  return successResponse(res, result.rows, "Customers retrieved successfully");
+  return res.status(200).json({
+    success: true,
+    message: "Customers retrieved successfully",
+    data: result.rows,
+    summary: await queryCustomerSummary(),
+  });
 });
 
 // Get customer by ID
@@ -26,10 +104,11 @@ export const getCustomerById = asyncHandler(async (req, res) => {
   const { id } = req.params;
 
   const customerResult = await pool.query(
-    `SELECT id, name, email, phone, address, city, state, postal_code, country,
-            loyalty_points, total_orders, total_spent, is_active, created_at
-     FROM customers
-     WHERE id = $1`,
+    `${customerOrderTotalsCte}
+     SELECT ${customerMetricsFields}
+     FROM customers c
+     LEFT JOIN order_totals ot ON ot.customer_id = c.id
+     WHERE c.id = $1`,
     [id]
   );
 
@@ -138,14 +217,16 @@ export const createCustomer = asyncHandler(async (req, res) => {
   }
 
   let normalizedPhone;
+  let phoneCandidates;
   try {
     normalizedPhone = normalizePhoneNumber(phone);
+    phoneCandidates = phoneLookupCandidates(phone);
   } catch (error) {
     return errorResponse(res, error.message, error.statusCode || 400);
   }
 
   // Check if customer already exists by phone
-  const existing = await pool.query("SELECT id FROM customers WHERE phone = $1", [normalizedPhone]);
+  const existing = await pool.query("SELECT id FROM customers WHERE phone = ANY($1::text[])", [phoneCandidates]);
   if (existing.rows.length > 0) {
     return errorResponse(res, "Customer with this phone number already exists", 409);
   }
@@ -205,6 +286,7 @@ export const verifyCustomerOtp = asyncHandler(async (req, res) => {
 export const updateCustomer = asyncHandler(async (req, res) => {
   const { id } = req.params;
   const { name, email, phone, address, city, state, postal_code, country, is_active } = req.body;
+  let normalizedPhone = null;
 
   // Check if customer exists
   const existing = await pool.query("SELECT id FROM customers WHERE id = $1", [id]);
@@ -213,7 +295,13 @@ export const updateCustomer = asyncHandler(async (req, res) => {
   }
 
   if (phone) {
-    const phoneCheck = await pool.query("SELECT id FROM customers WHERE phone = $1 AND id != $2", [phone, id]);
+    try {
+      normalizedPhone = normalizePhoneNumber(phone);
+    } catch (error) {
+      return errorResponse(res, error.message, error.statusCode || 400);
+    }
+
+    const phoneCheck = await pool.query("SELECT id FROM customers WHERE phone = ANY($1::text[]) AND id != $2", [phoneLookupCandidates(phone), id]);
     if (phoneCheck.rows.length > 0) {
       return errorResponse(res, "Customer with this phone number already exists", 409);
     }
@@ -240,10 +328,19 @@ export const updateCustomer = asyncHandler(async (req, res) => {
          updated_at = CURRENT_TIMESTAMP
      WHERE id = $10
      RETURNING id, name, email, phone, address, city, state, postal_code, country, loyalty_points, total_orders, total_spent, is_active, updated_at`,
-    [name, email, phone, address, city, state, postal_code, country, is_active, id]
+    [name, email, normalizedPhone, address, city, state, postal_code, country, is_active, id]
   );
 
-  return successResponse(res, result.rows[0], "Customer updated successfully");
+  const updatedCustomer = await pool.query(
+    `${customerOrderTotalsCte}
+     SELECT ${customerMetricsFields}, c.updated_at
+     FROM customers c
+     LEFT JOIN order_totals ot ON ot.customer_id = c.id
+     WHERE c.id = $1`,
+    [result.rows[0].id]
+  );
+
+  return successResponse(res, updatedCustomer.rows[0], "Customer updated successfully");
 });
 
 // Delete customer
@@ -270,18 +367,23 @@ export const deleteCustomer = asyncHandler(async (req, res) => {
 export const getCustomerByPhone = asyncHandler(async (req, res) => {
   const { phone } = req.params;
   let normalizedPhone;
+  let phoneCandidates;
   try {
     normalizedPhone = normalizePhoneNumber(phone);
+    phoneCandidates = phoneLookupCandidates(phone);
   } catch (error) {
     return errorResponse(res, error.message, error.statusCode || 400);
   }
 
   const result = await pool.query(
-    `SELECT id, name, email, phone, address, city, state, postal_code, country,
-            loyalty_points, total_orders, total_spent, is_active, created_at
-     FROM customers
-     WHERE phone = $1`,
-    [normalizedPhone]
+    `${customerOrderTotalsCte}
+     SELECT ${customerMetricsFields}
+     FROM customers c
+     LEFT JOIN order_totals ot ON ot.customer_id = c.id
+     WHERE c.phone = ANY($1::text[])
+     ORDER BY c.phone = $2 DESC, c.id DESC
+     LIMIT 1`,
+    [phoneCandidates, normalizedPhone]
   );
 
   if (result.rows.length === 0) {
@@ -296,10 +398,11 @@ export const getCustomerByEmail = asyncHandler(async (req, res) => {
   const { email } = req.params;
 
   const result = await pool.query(
-    `SELECT id, name, email, phone, address, city, state, postal_code, country,
-            loyalty_points, total_orders, total_spent, is_active, created_at
-     FROM customers
-     WHERE email = $1`,
+    `${customerOrderTotalsCte}
+     SELECT ${customerMetricsFields}
+     FROM customers c
+     LEFT JOIN order_totals ot ON ot.customer_id = c.id
+     WHERE c.email = $1`,
     [email]
   );
 
@@ -344,17 +447,29 @@ export const searchCustomers = asyncHandler(async (req, res) => {
   }
 
   const result = await pool.query(
-    `SELECT id, name, email, phone, city, loyalty_points, total_orders, total_spent, is_active, created_at
-     FROM customers
-     WHERE is_active = true AND (
-       name ILIKE $1 OR 
-       email ILIKE $1 OR 
-       phone ILIKE $1 OR
-       city ILIKE $1
+    `${customerOrderTotalsCte}
+     SELECT ${customerMetricsFields}
+     FROM customers c
+     LEFT JOIN order_totals ot ON ot.customer_id = c.id
+     WHERE c.is_active = true AND (
+       c.name ILIKE $1 OR
+       c.email ILIKE $1 OR
+       c.phone ILIKE $1 OR
+       c.city ILIKE $1
      )
-     ORDER BY total_spent DESC`,
+     ORDER BY COALESCE(ot.total_spent, 0) DESC, COALESCE(ot.total_orders, 0) DESC, c.id DESC`,
     [`%${query}%`]
   );
 
-  return successResponse(res, result.rows, "Search results retrieved successfully");
+  return res.status(200).json({
+    success: true,
+    message: "Search results retrieved successfully",
+    data: result.rows,
+    summary: await queryCustomerSummary([`%${query}%`], `c.is_active = true AND (
+       c.name ILIKE $1 OR
+       c.email ILIKE $1 OR
+       c.phone ILIKE $1 OR
+       c.city ILIKE $1
+     )`),
+  });
 });

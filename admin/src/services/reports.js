@@ -41,4 +41,9 @@ export const getSalesReport = async () => {
   return response.data;
 };
 
-export default { exportSales, exportInventory, exportCustomers, exportAllReports, exportAllSales, getSalesReport };
+export const getEndOfDayReport = async () => {
+  const response = await apiClient.get('/reports/end-of-day');
+  return response.data;
+};
+
+export default { exportSales, exportInventory, exportCustomers, exportAllReports, exportAllSales, getSalesReport, getEndOfDayReport };

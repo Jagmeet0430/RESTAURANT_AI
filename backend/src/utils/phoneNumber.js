@@ -42,6 +42,23 @@ export function normalizePhoneNumber(phone = "") {
   throw error;
 }
 
+export function phoneLookupCandidates(phone = "") {
+  const raw = String(phone || "").trim();
+  const normalized = normalizePhoneNumber(raw);
+  const digits = raw.replace(/\D/g, "");
+  const normalizedDigits = normalized.replace(/\D/g, "");
+  const candidates = new Set([normalized]);
+
+  if (raw) candidates.add(raw);
+  if (digits.length === 10) candidates.add(digits);
+  if (digits.length === 12 && digits.startsWith("91")) candidates.add(digits.slice(2));
+  if (normalizedDigits.length === 12 && normalizedDigits.startsWith("91")) {
+    candidates.add(normalizedDigits.slice(2));
+  }
+
+  return [...candidates].filter(Boolean);
+}
+
 export function maskPhoneNumber(phone = "") {
   const digits = String(phone).replace(/\D/g, "");
   if (digits.length < 4) return "******";

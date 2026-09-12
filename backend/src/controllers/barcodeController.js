@@ -1,5 +1,7 @@
 import { pool } from "../config/database.js";
+import { ensureBillingSchema, generatePosBillNumber, normalizeStaffPaymentMethod } from "../services/billingService.js";
 import { asyncHandler } from "../utils/index.js";
+import { normalizePhoneNumber, phoneLookupCandidates } from "../utils/phoneNumber.js";
 
 const GST_RATE = 0.05;
 const MAX_CART_ITEMS = 50;
@@ -12,9 +14,25 @@ const POS_PAYMENT_METHODS = new Map([
 ]);
 let counterSaleSchemaReady;
 
+function normalizeCounterCustomerPhone(phone) {
+  const raw = String(phone || "").trim();
+  if (!raw || raw === COUNTER_CUSTOMER_PHONE) return COUNTER_CUSTOMER_PHONE;
+
+  const digits = raw.replace(/\D/g, "");
+  const looksLikeCustomerPhone = raw.startsWith("+") || digits.length >= 10;
+  if (!looksLikeCustomerPhone) return raw;
+
+  try {
+    return normalizePhoneNumber(raw);
+  } catch {
+    return raw;
+  }
+}
+
 async function ensureCounterSaleSchema(client = pool) {
   if (!counterSaleSchemaReady) {
     counterSaleSchemaReady = (async () => {
+      await ensureBillingSchema(client);
       await client.query(`
         CREATE TABLE IF NOT EXISTS counter_sales (
           id SERIAL PRIMARY KEY,
@@ -127,7 +145,33 @@ function normalizePaymentMethod(value) {
 
 async function getCounterCustomer(client, payload = {}) {
   const name = String(payload.customerName || payload.customer_name || "Counter Customer").trim() || "Counter Customer";
-  const phone = String(payload.customerPhone || payload.customer_phone || COUNTER_CUSTOMER_PHONE).trim() || COUNTER_CUSTOMER_PHONE;
+  const rawPhone = payload.customerPhone || payload.customer_phone || COUNTER_CUSTOMER_PHONE;
+  const phone = normalizeCounterCustomerPhone(rawPhone);
+  let candidates = [phone];
+  try {
+    candidates = phoneLookupCandidates(rawPhone);
+  } catch {
+    candidates = [phone];
+  }
+
+  const existing = await client.query(
+    `UPDATE customers
+     SET name = COALESCE(NULLIF($1, ''), name),
+         updated_at = CURRENT_TIMESTAMP
+     WHERE id = (
+       SELECT id
+       FROM customers
+       WHERE phone = ANY($2::text[])
+       ORDER BY phone = $3 DESC, id DESC
+       LIMIT 1
+     )
+     RETURNING id, name, phone`,
+    [name, candidates, phone]
+  );
+
+  if (existing.rowCount > 0) {
+    return existing.rows[0];
+  }
 
   const result = await client.query(
     `INSERT INTO customers (name, phone, is_active)
@@ -372,6 +416,8 @@ export const getCounterSale = asyncHandler(async (req, res) => {
 
   const lineItems = itemsResult.rows.map(mapCounterSaleItem);
   const bill = {
+    source_type: "counter_sale",
+    source_id: sale.id,
     bill_number: sale.bill_number,
     created_at: sale.created_at,
     payment_method: sale.payment_method,
@@ -430,6 +476,8 @@ export const createCounterSale = asyncHandler(async (req, res) => {
           data: {
             sale: mapCounterSale(existingSale.rows[0]),
             bill: {
+              source_type: "counter_sale",
+              source_id: existingSale.rows[0].id,
               bill_number: existingSale.rows[0].bill_number,
               total_amount: Number(existingSale.rows[0].total_amount || 0),
             },
@@ -443,9 +491,10 @@ export const createCounterSale = asyncHandler(async (req, res) => {
     }
 
     const paymentMethod = normalizePaymentMethod(req.body.paymentMethod || req.body.payment_method);
+    const staffPaymentMethod = normalizeStaffPaymentMethod(paymentMethod);
     const customer = await getCounterCustomer(client, req.body);
     const sale = await calculateSale(client, req.body.items);
-    const billNumber = `POS-${Date.now()}`;
+    const billNumber = await generatePosBillNumber(client);
     const createdAt = new Date().toISOString();
 
     const saleResult = await client.query(
@@ -476,6 +525,21 @@ export const createCounterSale = asyncHandler(async (req, res) => {
     );
 
     const counterSale = saleResult.rows[0];
+
+    await client.query(
+      `INSERT INTO payments (
+         order_id, customer_id, gateway, payment_method, amount, currency,
+         payment_status, transaction_id, paid_at, source_type, source_id
+       )
+       VALUES (NULL, $1, 'offline', $2, $3, 'INR', 'paid', $4, CURRENT_TIMESTAMP, 'counter_sale', $5)`,
+      [
+        customer.id,
+        staffPaymentMethod.code,
+        sale.total,
+        `pos-${counterSale.id}-${Date.now()}`,
+        counterSale.id,
+      ]
+    );
 
     for (const item of sale.verifiedItems) {
       await client.query(
@@ -531,9 +595,12 @@ export const createCounterSale = asyncHandler(async (req, res) => {
     }
 
     const bill = {
+      source_type: "counter_sale",
+      source_id: counterSale.id,
       bill_number: billNumber,
       created_at: createdAt,
       payment_method: paymentMethod,
+      payment_status: "Paid",
       customer_name: customer.name,
       customer_phone: customer.phone,
       line_items: sale.verifiedItems.map((item) => ({

@@ -33,6 +33,10 @@ function customerLabel(order) {
   return order.customer_name || "Walk-in customer";
 }
 
+function orderTokenLabel(order) {
+  return order.token_number ? `#${order.token_number}` : `#${order.order_number || order.id}`;
+}
+
 function KitchenOrderCard({ order, onStatusAdvance }) {
   const items = order.items && order.items.length > 0 ? order.items : [];
   const actionLabel = nextStatus[order.status || "Confirmed"];
@@ -53,9 +57,21 @@ function KitchenOrderCard({ order, onStatusAdvance }) {
         <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 2, mb: 2 }}>
           <Box sx={{ minWidth: 0 }}>
             <Typography sx={{ fontWeight: 900, color: "#111827" }}>
-              #{order.order_number || order.id}
+              {orderTokenLabel(order)}
             </Typography>
-            <Typography sx={{ fontSize: 13, color: "#6b7280" }}>{customerLabel(order)}</Typography>
+            {order.token_number && (
+              <Typography sx={{ fontSize: 11, color: "#6b7280" }}>{order.order_number}</Typography>
+            )}
+            {order.table_number ? (
+              <Chip
+                size="small"
+                label={customerLabel(order)}
+                color="primary"
+                sx={{ mt: 0.5, height: 24, fontWeight: 900 }}
+              />
+            ) : (
+              <Typography sx={{ fontSize: 13, color: "#6b7280" }}>{customerLabel(order)}</Typography>
+            )}
           </Box>
           <OrderStatusChip status={order.status || "Confirmed"} />
         </Box>

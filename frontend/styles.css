@@ -1951,6 +1951,271 @@ input {
   }
 }
 
+@media (max-width: 768px) {
+  body:not(.kiosk-mode) {
+    overflow-x: hidden;
+  }
+
+  body:not(.kiosk-mode) .menu-section {
+    padding: 28px 12px 32px;
+  }
+
+  body:not(.kiosk-mode) .menu-section .section-heading {
+    margin-bottom: 18px;
+  }
+
+  body:not(.kiosk-mode) .menu-section .section-heading h2 {
+    font-size: 30px;
+  }
+
+  body:not(.kiosk-mode) .menu-summary {
+    gap: 7px;
+    margin-top: 10px;
+  }
+
+  body:not(.kiosk-mode) .menu-tools {
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+
+  body:not(.kiosk-mode) .search-box input {
+    height: 46px;
+    font-size: 16px;
+  }
+
+  body:not(.kiosk-mode) .category-filters {
+    gap: 8px;
+  }
+
+  body:not(.kiosk-mode) .filter-btn {
+    min-height: 44px;
+    padding: 9px 12px;
+  }
+
+  body:not(.kiosk-mode) .menu-layout {
+    min-width: 0;
+    gap: 20px;
+  }
+
+  body:not(.kiosk-mode) .menu-list,
+  body:not(.kiosk-mode) .menu-grid,
+  body:not(.kiosk-mode) .menu-card,
+  body:not(.kiosk-mode) .menu-card-body,
+  body:not(.kiosk-mode) .cart-panel,
+  body:not(.kiosk-mode) .cart-card {
+    min-width: 0;
+  }
+
+  body:not(.kiosk-mode) .menu-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  body:not(.kiosk-mode) .menu-card {
+    display: grid;
+    grid-template-columns: 110px minmax(0, 1fr);
+    align-items: start;
+  }
+
+  body:not(.kiosk-mode) .item-photo,
+  body:not(.kiosk-mode) .skeleton-photo {
+    width: 110px;
+    height: 110px;
+    aspect-ratio: 1;
+    border-right: 1px solid var(--line);
+    border-bottom: 0;
+  }
+
+  body:not(.kiosk-mode) .menu-card-body {
+    display: flex;
+    flex-direction: column;
+    align-self: stretch;
+    gap: 5px;
+    padding: 9px 10px 10px 12px;
+  }
+
+  body:not(.kiosk-mode) .category-label {
+    align-self: flex-start;
+    margin: 0;
+    padding: 3px 7px;
+    font-size: 10px;
+  }
+
+  body:not(.kiosk-mode) .menu-card h3 {
+    min-height: 0;
+    margin: 0;
+    font-size: 15px;
+    line-height: 1.25;
+  }
+
+  body:not(.kiosk-mode) .availability-pill {
+    padding: 2px 7px;
+    font-size: 10px;
+  }
+
+  body:not(.kiosk-mode) .menu-meta {
+    gap: 8px;
+    margin-top: auto;
+  }
+
+  body:not(.kiosk-mode) .price {
+    flex: 0 0 auto;
+    font-size: 16px;
+    white-space: nowrap;
+  }
+
+  body:not(.kiosk-mode) .add-btn {
+    min-width: 76px;
+    height: 44px;
+    padding: 0 12px;
+  }
+
+  body:not(.kiosk-mode) .card-qty-control {
+    grid-template-columns: 44px minmax(28px, auto) 44px;
+  }
+
+  body:not(.kiosk-mode) .card-qty-control span,
+  body:not(.kiosk-mode) .card-qty-btn {
+    height: 44px;
+  }
+
+  body:not(.kiosk-mode) .card-qty-btn {
+    width: 44px;
+  }
+
+  body:not(.kiosk-mode) .cart-card {
+    padding: 14px;
+  }
+
+  body:not(.kiosk-mode) .customer-fields {
+    gap: 12px;
+    margin-bottom: 14px;
+  }
+
+  body:not(.kiosk-mode) .customer-fields input,
+  body:not(.kiosk-mode) .customer-fields select {
+    min-height: 48px;
+    padding: 0 12px;
+    font-size: 16px;
+  }
+
+  body:not(.kiosk-mode) .cart-items {
+    max-height: none;
+  }
+
+  body:not(.kiosk-mode) .cart-line {
+    gap: 8px;
+    padding: 4px 0 12px;
+  }
+
+  body:not(.kiosk-mode) .qty-btn,
+  body:not(.kiosk-mode) .remove-btn {
+    width: 44px;
+    height: 44px;
+  }
+
+  body:not(.kiosk-mode) .payment-methods {
+    gap: 6px;
+    padding: 12px;
+  }
+
+  body:not(.kiosk-mode) .payment-methods label {
+    min-height: 44px;
+  }
+
+  body:not(.kiosk-mode) .payment-methods input {
+    width: 20px;
+    height: 20px;
+    flex: 0 0 auto;
+  }
+
+  body:not(.kiosk-mode) .cart-actions {
+    gap: 10px;
+  }
+
+  body:not(.kiosk-mode) .cart-actions button {
+    width: 100%;
+    min-height: 48px;
+  }
+
+  body:not(.kiosk-mode) .chat-widget {
+    right: auto;
+    bottom: max(12px, env(safe-area-inset-bottom));
+    left: 12px;
+  }
+
+  body:not(.kiosk-mode) .chat-toggle {
+    width: 56px;
+    height: 56px;
+  }
+
+  body:not(.kiosk-mode) .chat-toggle::before {
+    inset: -4px;
+  }
+
+  body:not(.kiosk-mode) .chat-toggle::after {
+    top: 4px;
+    right: 5px;
+    width: 9px;
+    height: 9px;
+  }
+
+  body:not(.kiosk-mode) .ai-avatar {
+    width: 44px;
+    height: 44px;
+  }
+
+  body:not(.kiosk-mode) .ai-avatar svg {
+    width: 32px;
+    height: 32px;
+  }
+
+  body:not(.kiosk-mode) .ai-chat-card {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    max-height: 58vh;
+  }
+
+  body:not(.kiosk-mode) .chat-header {
+    flex: 0 0 auto;
+    padding: 12px;
+  }
+
+  body:not(.kiosk-mode) .chat-messages {
+    min-height: 0;
+    flex: 1 1 auto;
+    max-height: none;
+    padding: 12px;
+  }
+
+  body:not(.kiosk-mode) .chat-prompts {
+    flex: 0 1 auto;
+    overflow-y: auto;
+  }
+
+  body:not(.kiosk-mode) .popular-questions {
+    min-height: 0;
+    flex: 0 1 auto;
+    overflow-y: auto;
+  }
+
+  body:not(.kiosk-mode) .chat-form {
+    flex: 0 0 auto;
+    grid-template-columns: 44px minmax(0, 1fr) auto;
+    padding: 10px;
+  }
+
+  body:not(.kiosk-mode) .chat-form input {
+    width: 100%;
+    font-size: 16px;
+  }
+
+  body:not(.kiosk-mode) .chat-footer-actions {
+    flex: 0 0 auto;
+  }
+}
+
 @media (max-width: 640px) {
   .site-header {
     align-items: flex-start;

@@ -19,6 +19,12 @@ import {
 } from "../services/orderStatusService.js";
 import { sendOrderStatusNotification } from "../services/notificationService.js";
 import {
+  DEFAULT_GST_RATE,
+  DEFAULT_PACKING_CHARGE,
+  calculateOrderTotals,
+  normalizeOrderTypeForTotals,
+} from "../services/orderTotalsService.js";
+import {
   appendOrderContextInstructions,
   ensureTableQrSchema,
   generateDailyTokenNumber,
@@ -30,8 +36,11 @@ import { normalizePhoneNumber, phoneLookupCandidates } from "../utils/phoneNumbe
 
 const MAX_ITEM_QUANTITY = 20;
 const MAX_CART_ITEMS = 50;
+const MAX_TOTAL_QUANTITY = Math.max(MAX_ITEM_QUANTITY, Number(process.env.MAX_TOTAL_QUANTITY || 100));
 const LARGE_ORDER_LOGIN_AMOUNT = 1000;
 const MINIMUM_ORDER_VALUE = Number(process.env.MINIMUM_ORDER_VALUE || 0);
+const PUBLIC_DAILY_ORDER_LIMIT = Math.max(1, Number(process.env.PUBLIC_DAILY_ORDER_LIMIT || 5));
+const PUBLIC_WEBSITE_ORDER_SOURCES = new Set(["customer_web", "website"]);
 
 const requiresPaymentBeforeKitchen = (order) => {
   const method = String(order.payment_method || "").toLowerCase();
@@ -49,8 +58,40 @@ function clientIp(req) {
 }
 
 function normalizeOrderType(value) {
-  const normalized = String(value || "pickup").trim().toLowerCase().replace(/\s+/g, "_");
-  return ["pickup", "delivery", "dine_in"].includes(normalized) ? normalized : "pickup";
+  return normalizeOrderTypeForTotals(value);
+}
+
+async function enforcePublicWebsiteOrderRules(client, { orderSource, orderType, normalizedPhone, otpToken }) {
+  if (!PUBLIC_WEBSITE_ORDER_SOURCES.has(String(orderSource || "").toLowerCase())) return;
+
+  if (String(orderType || "").toLowerCase() === "delivery") {
+    const error = new Error("Delivery is not available yet. Please choose Pickup or Dine-in.");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (!otpToken) {
+    const error = new Error("Please verify your phone number before placing the order.");
+    error.statusCode = 401;
+    throw error;
+  }
+
+  const limitResult = await client.query(
+    `SELECT COUNT(*)::int AS count
+     FROM orders
+     WHERE customer_phone = $1
+       AND COALESCE(order_source, 'customer_web') IN ('customer_web', 'website')
+       AND created_at >= CURRENT_DATE
+       AND created_at < CURRENT_DATE + INTERVAL '1 day'`,
+    [normalizedPhone]
+  );
+
+  if (Number(limitResult.rows[0]?.count || 0) >= PUBLIC_DAILY_ORDER_LIMIT) {
+    const error = new Error("You have reached today's order limit. Please contact the restaurant if you need help.");
+    error.statusCode = 429;
+    error.code = "DAILY_ORDER_LIMIT_REACHED";
+    throw error;
+  }
 }
 
 // Generate unique order number
@@ -250,6 +291,11 @@ export const createOrder = asyncHandler(async (req, res) => {
     }
   }
 
+  const totalQuantity = items.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
+  if (totalQuantity > MAX_TOTAL_QUANTITY) {
+    return errorResponse(res, `Cart can contain at most ${MAX_TOTAL_QUANTITY} total items`, 400);
+  }
+
   if (!resolvedCustomerId) {
     const normalizedPhone = normalizePhoneNumber(phone);
     const existingCustomer = await pool.query(
@@ -300,6 +346,7 @@ export const createOrder = asyncHandler(async (req, res) => {
 
       const table = await resolveTableForOrder(client, table_token);
       const normalizedOrderSource = normalizeOrderSource(order_source, table ? "table_qr" : "customer_web");
+      const requestedOrderType = String(order_type || orderType || "").trim().toLowerCase().replace(/\s+/g, "_");
       const normalizedOrderType = table ? "dine_in" : normalizeOrderType(order_type || orderType);
       const contextualInstructions = appendOrderContextInstructions(special_instructions, {
         orderSource: normalizedOrderSource,
@@ -312,37 +359,54 @@ export const createOrder = asyncHandler(async (req, res) => {
 
       // Get menu item prices
       const menuResult = await client.query(
-        `SELECT id, price FROM menu WHERE id = ANY($1)`,
+        `SELECT id, name, price, is_available FROM menu WHERE id = ANY($1)`,
         [menuIds]
       );
 
       const menuPrices = {};
+      const menuAvailability = {};
+      const menuNames = {};
       menuResult.rows.forEach((item) => {
-        menuPrices[item.id] = item.price;
+        menuPrices[item.id] = Number(item.price);
+        menuAvailability[item.id] = item.is_available !== false;
+        menuNames[item.id] = item.name;
       });
 
       // Validate all items exist and calculate subtotal
       for (const item of items) {
-        if (!menuPrices[item.menu_id]) {
+        if (!Object.prototype.hasOwnProperty.call(menuPrices, item.menu_id)) {
           throw new Error(`Menu item ${item.menu_id} not found`);
+        }
+        if (!menuAvailability[item.menu_id]) {
+          throw Object.assign(new Error(`${menuNames[item.menu_id] || "This item"} is currently unavailable`), { statusCode: 409 });
         }
         subtotal += menuPrices[item.menu_id] * item.quantity;
       }
 
-      const tax = Math.round(subtotal * 0.05 * 100) / 100; // 5% GST
-      const deliveryCharge = 10; // Packing charge
-      const totalAmount = subtotal + tax + deliveryCharge;
-      if (subtotal < MINIMUM_ORDER_VALUE) {
+      const totals = calculateOrderTotals({
+        subtotal,
+        orderType: normalizedOrderType,
+        gstRate: DEFAULT_GST_RATE,
+        packingCharge: DEFAULT_PACKING_CHARGE,
+        discount: 0,
+      });
+      if (totals.subtotal < MINIMUM_ORDER_VALUE) {
         throw Object.assign(new Error(`Minimum order value is Rs. ${MINIMUM_ORDER_VALUE}`), { statusCode: 400 });
       }
 
       const normalizedPhone = normalizePhoneNumber(customer.rows[0].phone);
       const verificationTokenToUse = otp_verification_token || verificationToken;
       let phoneVerified = false;
+      await enforcePublicWebsiteOrderRules(client, {
+        orderSource: normalizedOrderSource,
+        orderType: requestedOrderType || normalizedOrderType,
+        normalizedPhone,
+        otpToken: verificationTokenToUse,
+      });
       if (verificationTokenToUse) {
         await requireVerifiedPhoneToken(normalizedPhone, verificationTokenToUse, {
           client,
-          largeOrder: totalAmount >= LARGE_ORDER_LOGIN_AMOUNT,
+          largeOrder: totals.total >= LARGE_ORDER_LOGIN_AMOUNT,
         });
         phoneVerified = true;
       }
@@ -368,10 +432,10 @@ export const createOrder = asyncHandler(async (req, res) => {
           resolvedCustomerId,
           orderNumber,
           payment_method || paymentMethod || "Cash",
-          subtotal,
-          tax,
-          deliveryCharge,
-          totalAmount,
+          totals.subtotal,
+          totals.tax,
+          totals.deliveryCharge,
+          totals.total,
           contextualInstructions,
           delivery_address,
           customer.rows[0].name,
@@ -433,10 +497,11 @@ export const createOrder = asyncHandler(async (req, res) => {
       console.log("Order:", order.order_number);
       console.log("Customer:", `${customer.rows[0].name} (${customer.rows[0].phone})`);
       console.log("Items:", items.length);
-      console.log("Subtotal:", `Rs. ${Number(subtotal).toFixed(0)}`);
-      console.log("GST:", `Rs. ${Number(tax).toFixed(0)}`);
-      console.log("Packing:", `Rs. ${Number(deliveryCharge).toFixed(0)}`);
-      console.log("Grand total:", `Rs. ${Number(totalAmount).toFixed(0)}`);
+      console.log("Subtotal:", `Rs. ${Number(totals.subtotal).toFixed(0)}`);
+      console.log("CGST:", `Rs. ${Number(totals.cgst).toFixed(2)}`);
+      console.log("SGST:", `Rs. ${Number(totals.sgst).toFixed(2)}`);
+      console.log("Packing:", `Rs. ${Number(totals.deliveryCharge).toFixed(0)}`);
+      console.log("Grand total:", `Rs. ${Number(totals.total).toFixed(0)}`);
       console.log("Status:", order.status);
       console.log("========================================");
 
@@ -453,6 +518,13 @@ export const createOrder = asyncHandler(async (req, res) => {
       client.release();
     }
   } catch (error) {
+    if (error.code) {
+      return res.status(error.statusCode || 400).json({
+        success: false,
+        code: error.code,
+        message: error.message,
+      });
+    }
     return errorResponse(res, error.message, error.statusCode || 400);
   }
 });

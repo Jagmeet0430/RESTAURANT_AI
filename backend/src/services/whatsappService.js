@@ -97,7 +97,8 @@ export async function sendWhatsAppMessage({ to, body, templateName, templateLang
     throw Object.assign(new Error("WHATSAPP_PROVIDER must be meta or twilio in production"), { temporary: false });
   }
 
-  console.log(`WhatsApp mock message to ${to}: ${body}`);
+  const safeBody = String(body || "").replace(/\b\d{6}\b/g, "******");
+  console.log(`WhatsApp mock message to ${to}: ${safeBody}`);
   return {
     provider: "mock",
     providerMessageId: `mock-${Date.now()}`,

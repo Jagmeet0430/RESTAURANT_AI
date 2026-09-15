@@ -372,92 +372,96 @@ export async function printOrderReceipt(client, orderId, { source = "manual", fo
     throw error;
   }
 
-  const { configPath, config } = await getPrinterConfig();
-  logger.info("[RECEIPT_PRINT] printer config loaded", {
-    orderId: parsedOrderId,
-    configPath,
-    enabled: config.enabled,
-    printerName: config.printerName,
-    paperWidth: config.paperWidth,
-    copies: config.copies,
-    autoPrintKioskOrders: config.autoPrintKioskOrders,
-  });
-  if (!config.enabled || !config.printerName) {
-    return {
-      printed: false,
-      skipped: true,
-      reason: config.enabled ? "printer_not_configured" : "printing_disabled",
-      configPath,
-    };
-  }
-
-  if (source === "kiosk" && !config.autoPrintKioskOrders) {
-    return { printed: false, skipped: true, reason: "kiosk_auto_print_disabled", configPath };
-  }
-
   const key = printedRecordKey(parsedOrderId);
-  if (!force) {
-    const previous = await getPrintedRecord(parsedOrderId);
-    if (previous?.result === "printed" && previous.printedAt) {
-      return {
-        printed: false,
-        skipped: true,
-        duplicate: true,
-        reason: "already_printed",
-        printedAt: previous.printedAt,
-        printerName: previous.printerName,
-      };
-    }
-
-    if (printLocks.has(key)) {
-      return { printed: false, skipped: true, duplicate: true, reason: "print_in_progress" };
-    }
+  if (printLocks.has(key)) {
+    return { printed: false, skipped: true, duplicate: true, reason: "print_in_progress" };
   }
 
   printLocks.add(key);
-  await markPrintAttempt(parsedOrderId, {
-    result: "attempting",
-    source,
-    printerName: config.printerName,
-    attemptedAt: new Date().toISOString(),
-  });
 
   try {
-    const receipt = await getOrderReceipt(client, parsedOrderId);
-    logger.info("[RECEIPT_PRINT] order found", {
+    const { configPath, config } = await getPrinterConfig();
+    logger.info("[RECEIPT_PRINT] printer config loaded", {
       orderId: parsedOrderId,
-      orderNumber: receipt.order_number,
-      sourceType: receipt.source_type,
-    });
-    const result = await spoolReceiptText({ receipt, config, duplicate });
-    await markPrintAttempt(parsedOrderId, {
-      result: "printed",
-      source,
+      configPath,
+      enabled: config.enabled,
       printerName: config.printerName,
       paperWidth: config.paperWidth,
       copies: config.copies,
-      printedAt: new Date().toISOString(),
-      jobPath: result.jobPath,
+      autoPrintKioskOrders: config.autoPrintKioskOrders,
     });
-    logger.info("[RECEIPT_PRINT] success recorded", {
-      orderId: parsedOrderId,
-      source,
-      printerName: config.printerName,
-      exitCode: result.exitCode,
-      stdout: result.stdout,
-      stderr: result.stderr,
-    });
-    return { printed: true, skipped: false, printerName: config.printerName, paperWidth: config.paperWidth, copies: config.copies };
-  } catch (error) {
+
+    if (!config.enabled || !config.printerName) {
+      return {
+        printed: false,
+        skipped: true,
+        reason: config.enabled ? "printer_not_configured" : "printing_disabled",
+        configPath,
+      };
+    }
+
+    if (source === "kiosk" && !config.autoPrintKioskOrders) {
+      return { printed: false, skipped: true, reason: "kiosk_auto_print_disabled", configPath };
+    }
+
+    if (!force) {
+      const previous = await getPrintedRecord(parsedOrderId);
+      if (previous?.result === "printed" && previous.printedAt) {
+        return {
+          printed: false,
+          skipped: true,
+          duplicate: true,
+          reason: "already_printed",
+          printedAt: previous.printedAt,
+          printerName: previous.printerName,
+        };
+      }
+    }
+
     await markPrintAttempt(parsedOrderId, {
-      result: "failed",
+      result: "attempting",
       source,
       printerName: config.printerName,
-      failedAt: new Date().toISOString(),
-      error: error.message,
+      attemptedAt: new Date().toISOString(),
     });
-    logger.error("Thermal receipt print failed", { orderId: parsedOrderId, source, error });
-    return { printed: false, skipped: false, failed: true, message: error.message, printerName: config.printerName };
+
+    try {
+      const receipt = await getOrderReceipt(client, parsedOrderId);
+      logger.info("[RECEIPT_PRINT] order found", {
+        orderId: parsedOrderId,
+        orderNumber: receipt.order_number,
+        sourceType: receipt.source_type,
+      });
+      const result = await spoolReceiptText({ receipt, config, duplicate });
+      await markPrintAttempt(parsedOrderId, {
+        result: "printed",
+        source,
+        printerName: config.printerName,
+        paperWidth: config.paperWidth,
+        copies: config.copies,
+        printedAt: new Date().toISOString(),
+        jobPath: result.jobPath,
+      });
+      logger.info("[RECEIPT_PRINT] success recorded", {
+        orderId: parsedOrderId,
+        source,
+        printerName: config.printerName,
+        exitCode: result.exitCode,
+        stdout: result.stdout,
+        stderr: result.stderr,
+      });
+      return { printed: true, skipped: false, printerName: config.printerName, paperWidth: config.paperWidth, copies: config.copies };
+    } catch (error) {
+      await markPrintAttempt(parsedOrderId, {
+        result: "failed",
+        source,
+        printerName: config.printerName,
+        failedAt: new Date().toISOString(),
+        error: error.message,
+      });
+      logger.error("Thermal receipt print failed", { orderId: parsedOrderId, source, error });
+      return { printed: false, skipped: false, failed: true, message: error.message, printerName: config.printerName };
+    }
   } finally {
     printLocks.delete(key);
   }

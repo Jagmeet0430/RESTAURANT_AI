@@ -13,8 +13,9 @@ const router = express.Router();
 
 const createOrderLimiter = createRateLimiter({
   windowMs: 60_000,
-  max: 10,
+  max: 5,
   keyPrefix: "payments:create",
+  message: "Too many order attempts. Please wait a moment and try again.",
 });
 
 const verifyLimiter = createRateLimiter({

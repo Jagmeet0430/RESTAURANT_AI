@@ -8,7 +8,7 @@
       name="description"
       content="MAHESH customer website for fresh bakery items, pizzas, chaat, Chinese snacks, pastries, and quick ordering."
     />
-    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="styles.css?v=public-mobile-cart-otp-1" />
     <script src="config.js"></script>
   </head>
   <body>
@@ -119,10 +119,10 @@
                   <select id="orderType">
                     <option value="Pickup">Pickup</option>
                     <option value="Dine-in">Dine-in</option>
-                    <option value="Delivery">Delivery</option>
                   </select>
                 </label>
               </div>
+              <div id="phoneVerification" class="phone-verification" aria-live="polite"></div>
 
               <div id="cartItems" class="cart-items">
                 <p class="empty-cart">Add items from the menu to start an order.</p>
@@ -164,10 +164,6 @@
                   <span>Wallet</span>
                 </label>
                 <label>
-                  <input type="radio" name="paymentMethod" value="cash_on_delivery" />
-                  <span>Cash on Delivery</span>
-                </label>
-                <label>
                   <input type="radio" name="paymentMethod" value="pay_at_counter" checked />
                   <span>Pay at Restaurant Counter</span>
                 </label>
@@ -179,6 +175,13 @@
               <p id="cartHint" class="cart-hint">Add at least one item before sending an order request.</p>
             </div>
           </aside>
+          <button id="mobileCartButton" class="mobile-cart-button" type="button" aria-controls="mobileCartSheet" aria-expanded="false" hidden>
+            <span aria-hidden="true">Cart</span>
+            <strong>0 items</strong>
+            <b>Rs. 0</b>
+          </button>
+          <div id="mobileCartBackdrop" class="mobile-cart-backdrop" hidden></div>
+          <section id="mobileCartSheet" class="mobile-cart-sheet" aria-label="Your order" aria-hidden="true" hidden></section>
         </div>
       </section>
 

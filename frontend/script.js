@@ -174,6 +174,16 @@ const state = {
   orderSuccess: null,
   checkoutStep: "cart",
   paymentMethod: "pay_at_counter",
+  mobileCartOpen: false,
+  phoneVerification: {
+    status: "idle",
+    phone: "",
+    token: "",
+    otp: "",
+    resendAt: 0,
+    message: "",
+    error: "",
+  },
   onlinePaymentsEnabled: true,
   paymentMethodsLoaded: false,
   menuStatus: "loading",
@@ -234,6 +244,7 @@ const elements = {
   placeOrder: document.querySelector("#placeOrder"),
   customerName: document.querySelector("#customerName"),
   customerPhone: document.querySelector("#customerPhone"),
+  phoneVerification: document.querySelector("#phoneVerification"),
   orderType: document.querySelector("#orderType"),
   menuCount: document.querySelector("#menuCount"),
   activeCategoryLabel: document.querySelector("#activeCategoryLabel"),
@@ -252,6 +263,9 @@ const elements = {
   voiceToggle: document.querySelector("#voiceToggle"),
   chatStatus: document.querySelector("#chatStatus"),
   toast: document.querySelector("#toast"),
+  mobileCartButton: document.querySelector("#mobileCartButton"),
+  mobileCartBackdrop: document.querySelector("#mobileCartBackdrop"),
+  mobileCartSheet: document.querySelector("#mobileCartSheet"),
 };
 
 const LOCAL_API_BASE_URL = "http://localhost:5001/api";
@@ -301,6 +315,7 @@ const MAX_ITEM_QUANTITY = 20;
 const MAX_CART_ITEMS = 50;
 const RAZORPAY_CHECKOUT_SCRIPT = "https://checkout.razorpay.com/v1/checkout.js";
 const ONLINE_PAYMENT_METHODS = new Set(["upi", "card", "netbanking", "wallet"]);
+const PHONE_VERIFICATION_RESEND_FALLBACK_SECONDS = 30;
 
 function apiUrl(path, baseUrl = API_BASE_URL) {
   return `${baseUrl}${path}`;
@@ -593,12 +608,47 @@ function normalizePhone(phone = "") {
     .replace(/[^\d+]/g, "");
 }
 
+function normalizeIndianPhoneForClient(phone = "") {
+  const raw = String(phone || "").trim();
+  const digits = raw.replace(/\D/g, "");
+  if (digits.length === 10) return `+91${digits}`;
+  if (digits.length === 12 && digits.startsWith("91")) return `+${digits}`;
+  if (raw.startsWith("+") && digits.length >= 10) return `+${digits}`;
+  return normalizePhone(raw);
+}
+
+function publicWebsiteOrderRequiresOtp() {
+  return !state.kiosk.enabled && !state.tableQr.enabled;
+}
+
+function isPhoneVerifiedFor(phone) {
+  const normalized = normalizeIndianPhoneForClient(phone);
+  return (
+    state.phoneVerification.status === "verified" &&
+    Boolean(state.phoneVerification.token) &&
+    normalizeIndianPhoneForClient(state.phoneVerification.phone) === normalized
+  );
+}
+
+function resetPhoneVerification({ keepPhone = false } = {}) {
+  const phone = keepPhone ? state.phoneVerification.phone : "";
+  state.phoneVerification = {
+    status: "idle",
+    phone,
+    token: "",
+    otp: "",
+    resendAt: 0,
+    message: "",
+    error: "",
+  };
+}
+
 function selectedPaymentMethod() {
   if (state.kiosk.enabled || state.tableQr.enabled) {
     return "pay_at_counter";
   }
   const checked = elements.paymentMethods?.querySelector("input[name='paymentMethod']:checked");
-  return checked?.value || state.paymentMethod || "cash_on_delivery";
+  return checked?.value || state.paymentMethod || "pay_at_counter";
 }
 
 function isOnlinePayment(method = selectedPaymentMethod()) {
@@ -611,7 +661,6 @@ function paymentMethodLabel(method = selectedPaymentMethod()) {
     card: "Debit/Credit Card",
     netbanking: "Net Banking",
     wallet: "Wallet",
-    cash_on_delivery: "Cash on Delivery",
     pay_at_counter: "Pay at Restaurant Counter",
   };
 
@@ -661,7 +710,7 @@ function applyPaymentAvailability() {
   }
 
   if (isOnlinePayment(selectedPaymentMethod()) && !state.onlinePaymentsEnabled) {
-    selectPaymentMethod("cash_on_delivery");
+    selectPaymentMethod("pay_at_counter");
   }
 }
 
@@ -1496,7 +1545,6 @@ function currentOrderTypeLabel() {
 function orderTypePayloadValue() {
   const orderType = currentOrderTypeLabel().toLowerCase();
   if (orderType.includes("dine")) return "dine_in";
-  if (orderType.includes("delivery")) return "delivery";
   return "pickup";
 }
 
@@ -1541,6 +1589,7 @@ function renderCart() {
   elements.cartTax.textContent = formatPrice(tax);
   elements.cartPacking.textContent = formatPrice(packing);
   elements.cartTotal.textContent = formatPrice(total);
+  updateMobileCartButton();
   const countChanged = renderCart.previousCount !== undefined && renderCart.previousCount !== count;
   const totalChanged = renderCart.previousTotal !== undefined && renderCart.previousTotal !== total;
   renderCart.previousCount = count;
@@ -1630,6 +1679,8 @@ function renderCart() {
       : "Add at least one item before sending an order request.";
     updatePlaceOrderButtonText();
     if (state.tableQr.enabled) applyTableQrControls();
+    renderPhoneVerification();
+    renderMobileCart();
     return;
   }
 
@@ -1661,9 +1712,15 @@ function renderCart() {
   elements.cartHint.textContent =
     state.checkoutStep === "payment"
       ? "Choose a payment method, then confirm your order."
+      : state.checkoutStep === "phone"
+      ? "Verify your phone number to continue checkout."
+      : state.checkoutStep === "details"
+      ? "Confirm your name, then continue to payment."
       : "Check your name and phone, then proceed to choose a payment method.";
   updatePlaceOrderButtonText();
   if (state.tableQr.enabled) applyTableQrControls();
+  renderPhoneVerification();
+  renderMobileCart();
 }
 
 function clearCart() {
@@ -1696,6 +1753,289 @@ function clearCart() {
     renderMenu();
     showToast("Cart cleared", "All items removed from your order.", "warning");
   }, 180);
+}
+
+function phoneVerificationMarkup({ compact = false } = {}) {
+  if (!publicWebsiteOrderRequiresOtp()) return "";
+
+  const phone = elements.customerPhone?.value?.trim() || state.phoneVerification.phone || "";
+  const verified = isPhoneVerifiedFor(phone);
+  const resendSeconds = Math.max(0, Math.ceil((state.phoneVerification.resendAt - Date.now()) / 1000));
+  const maskedPhone = phone
+    ? normalizeIndianPhoneForClient(phone).replace(/\d(?=\d{4})/g, "*")
+    : "";
+
+  return `
+    <div class="phone-verification-card ${verified ? "is-verified" : ""} ${compact ? "is-compact" : ""}">
+      <div>
+        <strong>${verified ? "Phone verified" : "Verify phone"}</strong>
+        <span>${
+          verified
+            ? `Orders and tracking updates will use ${escapeHtml(maskedPhone)}.`
+            : "A 6-digit OTP is required before placing this order."
+        }</span>
+      </div>
+      ${
+        verified
+          ? `<button class="secondary-btn" type="button" data-otp-reset>Change</button>`
+          : `<div class="otp-actions">
+              <button class="secondary-btn" type="button" data-otp-send ${!phone || resendSeconds > 0 ? "disabled" : ""}>
+                ${state.phoneVerification.status === "sent" ? "Resend OTP" : "Send OTP"}
+              </button>
+              ${
+                state.phoneVerification.status === "sent"
+                  ? `<label class="otp-input-label">
+                      <span>Enter OTP</span>
+                      <input data-otp-input inputmode="numeric" autocomplete="one-time-code" maxlength="6" value="${escapeHtml(state.phoneVerification.otp)}" placeholder="000000" />
+                    </label>
+                    <button class="primary-btn" type="button" data-otp-verify ${state.phoneVerification.otp.length === 6 ? "" : "disabled"}>Verify</button>`
+                  : ""
+              }
+            </div>`
+      }
+      ${
+        state.phoneVerification.error
+          ? `<p class="otp-message is-error">${escapeHtml(state.phoneVerification.error)}</p>`
+          : state.phoneVerification.message
+          ? `<p class="otp-message">${escapeHtml(state.phoneVerification.message)}</p>`
+          : resendSeconds > 0
+          ? `<p class="otp-message">Resend OTP in ${resendSeconds}s</p>`
+          : ""
+      }
+    </div>
+  `;
+}
+
+function renderPhoneVerification() {
+  if (!elements.phoneVerification) return;
+  elements.phoneVerification.innerHTML = phoneVerificationMarkup();
+}
+
+async function sendPhoneOtp() {
+  const phone = elements.customerPhone.value.trim();
+  if (!phone) {
+    showToast("Phone required", "Enter your phone number before requesting OTP.", "warning");
+    return;
+  }
+
+  state.phoneVerification.status = "sending";
+  state.phoneVerification.phone = phone;
+  state.phoneVerification.error = "";
+  state.phoneVerification.message = "Sending OTP...";
+  renderCart();
+
+  try {
+    const result = await requestJson("/customers/otp/send", {
+      method: "POST",
+      body: JSON.stringify({ phone }),
+    });
+    const resendSeconds = Number(result.resend_after_seconds || PHONE_VERIFICATION_RESEND_FALLBACK_SECONDS);
+    state.phoneVerification.status = "sent";
+    state.phoneVerification.phone = result.phone || phone;
+    state.phoneVerification.token = "";
+    state.phoneVerification.otp = "";
+    state.phoneVerification.resendAt = Date.now() + resendSeconds * 1000;
+    state.phoneVerification.message = `OTP sent to ${normalizeIndianPhoneForClient(phone).replace(/\d(?=\d{4})/g, "*")}.`;
+    state.phoneVerification.error = "";
+    window.setTimeout(renderCart, resendSeconds * 1000 + 100);
+    showToast("OTP sent", "Enter the 6-digit code to continue.", "success");
+  } catch (error) {
+    state.phoneVerification.status = "idle";
+    state.phoneVerification.error = friendlyNetworkError(error);
+    state.phoneVerification.message = "";
+    showToast("Could not send OTP", state.phoneVerification.error, "warning");
+  }
+
+  renderCart();
+}
+
+async function verifyPhoneOtpForCheckout() {
+  const phone = elements.customerPhone.value.trim();
+  const otp = state.phoneVerification.otp.trim();
+  if (!phone || !/^\d{6}$/.test(otp)) {
+    showToast("Enter OTP", "Use the 6-digit code sent to your phone.", "warning");
+    return;
+  }
+
+  state.phoneVerification.status = "verifying";
+  state.phoneVerification.error = "";
+  state.phoneVerification.message = "Verifying OTP...";
+  renderCart();
+
+  try {
+    const result = await requestJson("/customers/otp/verify", {
+      method: "POST",
+      body: JSON.stringify({ phone, otp }),
+    });
+    state.phoneVerification.status = "verified";
+    state.phoneVerification.phone = result.phone || phone;
+    state.phoneVerification.token = result.verification_token || "";
+    state.phoneVerification.otp = "";
+    state.phoneVerification.message = "Phone verified. Continue checkout.";
+    state.phoneVerification.error = "";
+    if (state.checkoutStep === "phone") state.checkoutStep = "details";
+    showToast("Phone verified", "You can place this order now.", "success");
+  } catch (error) {
+    state.phoneVerification.status = "sent";
+    state.phoneVerification.error = friendlyNetworkError(error);
+    state.phoneVerification.message = "";
+    showToast("OTP not verified", state.phoneVerification.error, "warning");
+  }
+
+  renderCart();
+}
+
+function updateMobileCartButton() {
+  if (!elements.mobileCartButton) return;
+  const { count, total } = cartTotals();
+  const shouldShow = !state.kiosk.enabled && count > 0;
+  elements.mobileCartButton.hidden = !shouldShow;
+  elements.mobileCartButton.setAttribute("aria-expanded", state.mobileCartOpen ? "true" : "false");
+  elements.mobileCartButton.innerHTML = `
+    <span aria-hidden="true">Cart</span>
+    <strong>${count} ${count === 1 ? "item" : "items"}</strong>
+    <b>${formatPrice(total)}</b>
+  `;
+  document.body.classList.toggle("has-mobile-cart", shouldShow);
+  document.body.classList.toggle("mobile-cart-open", state.mobileCartOpen && shouldShow);
+}
+
+function setMobileCartOpen(isOpen) {
+  state.mobileCartOpen = Boolean(isOpen && state.cart.length && !state.kiosk.enabled);
+  if (elements.mobileCartBackdrop) elements.mobileCartBackdrop.hidden = !state.mobileCartOpen;
+  if (elements.mobileCartSheet) {
+    elements.mobileCartSheet.hidden = !state.mobileCartOpen;
+    elements.mobileCartSheet.setAttribute("aria-hidden", state.mobileCartOpen ? "false" : "true");
+  }
+  renderCart();
+}
+
+function mobileCartLinesMarkup() {
+  if (!state.cart.length) {
+    return `<div class="empty-cart"><strong>Your cart is empty</strong><span>Add items from the menu.</span></div>`;
+  }
+
+  return state.cart
+    .map(
+      (item) => `
+        <div class="mobile-cart-line">
+          <div>
+            <strong>${escapeHtml(item.name)}</strong>
+            <span>${formatPrice(item.price)} each</span>
+          </div>
+          <div class="cart-qty">
+            <button class="qty-btn" data-mobile-id="${item.id}" data-mobile-delta="-1" type="button" aria-label="Remove one ${escapeHtml(item.name)}">-</button>
+            <span class="qty-value">${item.qty}</span>
+            <button class="qty-btn" data-mobile-id="${item.id}" data-mobile-delta="1" type="button" aria-label="Add one ${escapeHtml(item.name)}">+</button>
+            <button class="remove-btn" data-mobile-id="${item.id}" data-mobile-remove="true" type="button" aria-label="Remove ${escapeHtml(item.name)}">x</button>
+          </div>
+          <strong>${formatPrice(item.price * item.qty)}</strong>
+        </div>
+      `
+    )
+    .join("");
+}
+
+function checkoutStepMarkup() {
+  const { subtotal, tax, packing, total } = cartTotals();
+  const step = state.checkoutStep;
+  const orderType = currentOrderTypeLabel();
+
+  if (step === "cart") {
+    return `
+      <div class="mobile-checkout-step">
+        <div class="mobile-cart-lines">${mobileCartLinesMarkup()}</div>
+        <div class="cart-total-line"><span>Subtotal</span><strong>${formatPrice(subtotal)}</strong></div>
+        <button class="primary-btn full-width" type="button" data-mobile-action="order-type" ${state.cart.length ? "" : "disabled"}>Continue to checkout</button>
+      </div>
+    `;
+  }
+
+  if (step === "order_type") {
+    return `
+      <div class="mobile-checkout-step">
+        <h3>Order type</h3>
+        <div class="mobile-order-type-grid">
+          <button class="${orderType === "Pickup" ? "is-active" : ""}" type="button" data-mobile-order-type="Pickup">Pickup</button>
+          <button class="${orderType === "Dine-in" ? "is-active" : ""}" type="button" data-mobile-order-type="Dine-in">Dine-in</button>
+        </div>
+        <button class="primary-btn full-width" type="button" data-mobile-action="${publicWebsiteOrderRequiresOtp() ? "phone" : "details"}">Continue</button>
+      </div>
+    `;
+  }
+
+  if (step === "phone") {
+    return `
+      <div class="mobile-checkout-step">
+        <h3>Phone verification</h3>
+        <label class="mobile-field">Phone
+          <input data-mobile-field="phone" type="tel" inputmode="tel" value="${escapeHtml(elements.customerPhone.value)}" placeholder="98765 43210" />
+        </label>
+        ${phoneVerificationMarkup({ compact: true })}
+        <button class="primary-btn full-width" type="button" data-mobile-action="details" ${isPhoneVerifiedFor(elements.customerPhone.value) ? "" : "disabled"}>Continue</button>
+      </div>
+    `;
+  }
+
+  if (step === "details") {
+    return `
+      <div class="mobile-checkout-step">
+        <h3>Customer details</h3>
+        <label class="mobile-field">Name
+          <input data-mobile-field="name" type="text" value="${escapeHtml(elements.customerName.value)}" placeholder="Your name" />
+        </label>
+        <label class="mobile-field">Phone
+          <input data-mobile-field="phone" type="tel" inputmode="tel" value="${escapeHtml(elements.customerPhone.value)}" placeholder="Your phone" />
+        </label>
+        <button class="primary-btn full-width" type="button" data-mobile-action="payment">Continue to payment</button>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="mobile-checkout-step">
+      <h3>Payment</h3>
+      <div class="mobile-payment-choice">${paymentMethodLabel(selectedPaymentMethod())}</div>
+      <div class="mobile-totals">
+        <div><span>Subtotal</span><strong>${formatPrice(subtotal)}</strong></div>
+        <div><span>GST</span><strong>${formatPrice(tax)}</strong></div>
+        <div><span>Packing</span><strong>${formatPrice(packing)}</strong></div>
+        <div class="grand-total"><span>Total</span><strong>${formatPrice(total)}</strong></div>
+      </div>
+      <button class="primary-btn full-width" type="button" data-mobile-action="place-order" ${state.isSubmittingOrder ? "disabled" : ""}>
+        ${state.isSubmittingOrder ? "Placing order..." : "Place order"}
+      </button>
+    </div>
+  `;
+}
+
+function renderMobileCart() {
+  if (!elements.mobileCartSheet) return;
+  updateMobileCartButton();
+
+  if (!state.cart.length || state.kiosk.enabled) {
+    state.mobileCartOpen = false;
+    if (elements.mobileCartBackdrop) elements.mobileCartBackdrop.hidden = true;
+    elements.mobileCartSheet.hidden = true;
+    elements.mobileCartSheet.setAttribute("aria-hidden", "true");
+    updateMobileCartButton();
+    return;
+  }
+
+  if (!state.mobileCartOpen) return;
+
+  const { count, total } = cartTotals();
+  elements.mobileCartSheet.innerHTML = `
+    <div class="mobile-cart-sheet-handle" aria-hidden="true"></div>
+    <div class="mobile-cart-sheet-head">
+      <div>
+        <strong>Your order</strong>
+        <span>${count} ${count === 1 ? "item" : "items"} • ${formatPrice(total)}</span>
+      </div>
+      <button type="button" data-mobile-action="close" aria-label="Close cart">x</button>
+    </div>
+    ${checkoutStepMarkup()}
+  `;
 }
 
 async function requestJson(path, options = {}) {
@@ -1764,6 +2104,10 @@ function buildPaymentPayload(customer) {
     })),
   };
 
+  if (publicWebsiteOrderRequiresOtp()) {
+    payload.otp_verification_token = state.phoneVerification.token;
+  }
+
   if (state.tableQr.status === "valid") {
     payload.table_token = state.tableQr.token;
   }
@@ -1826,6 +2170,7 @@ function completeOrderSuccess({ order, paymentData, message, customer }) {
     ? `Order ${orderLabel} was sent to the restaurant.${trackingUrl ? ` Track it here: ${trackingUrl}` : ""}`
     : message || "Your order was sent to the restaurant.";
   state.orderIdempotencyKey = "";
+  resetPhoneVerification();
   saveCart();
   renderCart();
   renderMenu();
@@ -2056,22 +2401,35 @@ async function placeOrder() {
   const phone = elements.customerPhone.value.trim();
 
   if (!name || !phone) {
+    if (state.mobileCartOpen) state.checkoutStep = "details";
     showToast("Name and phone required", "Add customer details before sending the order.", "warning");
+    renderCart();
+    return;
+  }
+
+  if (publicWebsiteOrderRequiresOtp() && !isPhoneVerifiedFor(phone)) {
+    state.checkoutStep = "phone";
+    showToast("Phone verification required", "Verify your phone with OTP before placing this order.", "warning");
+    renderCart();
     return;
   }
 
   if (state.checkoutStep !== "payment") {
-    state.checkoutStep = "payment";
+    state.checkoutStep = state.mobileCartOpen ? "order_type" : "payment";
     setPaymentSelectorVisible(true);
     await loadPaymentMethods();
     renderCart();
-    showToast("Choose payment method", "Select how you want to pay, then confirm the order.", "info");
+    showToast(
+      state.mobileCartOpen ? "Review checkout" : "Choose payment method",
+      state.mobileCartOpen ? "Confirm order type and customer details." : "Select how you want to pay, then confirm the order.",
+      "info"
+    );
     return;
   }
 
   if (isOnlinePayment() && !state.onlinePaymentsEnabled) {
-    showToast("Online payment not configured", "Choose Cash on Delivery or Pay at Restaurant Counter for now.", "warning");
-    selectPaymentMethod("cash_on_delivery");
+    showToast("Online payment not configured", "Choose Pay at Restaurant Counter for now.", "warning");
+    selectPaymentMethod("pay_at_counter");
     updatePlaceOrderButtonText();
     return;
   }
@@ -2098,6 +2456,9 @@ async function placeOrder() {
         message: "Your order was sent to the restaurant.",
         customer,
       });
+      if (order?.order?.tracking_token || order?.tracking_url) {
+        state.mobileCartOpen = false;
+      }
       showToast(order.notification?.title || "Order saved", order.notification?.message || state.orderSuccess, "success");
     }
 
@@ -2107,7 +2468,7 @@ async function placeOrder() {
     if (/razorpay environment variables are missing/i.test(message)) {
       state.onlinePaymentsEnabled = false;
       applyPaymentAvailability();
-      showToast("Online payment not configured", "Choose Cash on Delivery or Pay at Restaurant Counter for now.", "warning");
+      showToast("Online payment not configured", "Choose Pay at Restaurant Counter for now.", "warning");
     } else {
       showToast("Unable to place order", message, "warning");
     }
@@ -2165,7 +2526,7 @@ function menuDocuments() {
     {
       type: "service",
       title: "Ordering",
-      text: "To place an order, choose items, press ADD, enter name and phone, select pickup, dine-in, or delivery, then send the order request.",
+      text: "To place an order, choose items, press ADD, enter name and phone, select pickup or dine-in, then send the order request.",
     },
     {
       type: "service",
@@ -2488,15 +2849,15 @@ function handleLocalCustomerQuestion(question) {
   }
 
   if (/\b(order|place order|how to buy|checkout|cart)\b/.test(text)) {
-    return "To order, add items to the cart, enter your name and phone number, choose pickup, dine-in, or delivery, then send the order request.";
+    return "To order, add items to the cart, enter your name and phone number, choose pickup or dine-in, then send the order request.";
   }
 
   if (/\b(delivery|deliver|pickup|dine in|dine-in|takeaway|take away)\b/.test(text)) {
-    return "You can choose pickup, dine-in, or delivery on the order form. Delivery availability may depend on your location, so the restaurant can confirm after you send the request.";
+    return "You can choose pickup or dine-in on the order form. Delivery is not available yet.";
   }
 
   if (/\b(payment|pay|cash|online|upi|card)\b/.test(text)) {
-    return "Checkout supports UPI, card, net banking, wallet, Cash on Delivery, and Pay at Restaurant Counter. Online payments are confirmed only after secure server verification.";
+    return "Checkout supports UPI, card, net banking, wallet, and Pay at Restaurant Counter. Online payments are confirmed only after secure server verification.";
   }
 
   if (/\b(cancel|cancellation|refund|return|exchange|replace|replacement|change order|modify)\b/.test(text)) {
@@ -4039,10 +4400,36 @@ function bindEvents() {
     changeQty(Number(button.dataset.id), Number(button.dataset.delta));
   });
 
+  elements.phoneVerification?.addEventListener("click", (event) => {
+    if (event.target.closest("[data-otp-send]")) {
+      sendPhoneOtp();
+      return;
+    }
+    if (event.target.closest("[data-otp-verify]")) {
+      verifyPhoneOtpForCheckout();
+      return;
+    }
+    if (event.target.closest("[data-otp-reset]")) {
+      resetPhoneVerification();
+      renderCart();
+    }
+  });
+
+  elements.phoneVerification?.addEventListener("input", (event) => {
+    if (!event.target.matches("[data-otp-input]")) return;
+    state.phoneVerification.otp = event.target.value.replace(/\D/g, "").slice(0, 6);
+    event.target.value = state.phoneVerification.otp;
+    const verifyButton = elements.phoneVerification.querySelector("[data-otp-verify]");
+    if (verifyButton) verifyButton.disabled = state.phoneVerification.otp.length !== 6;
+  });
+
   elements.searchInput.addEventListener("input", renderMenu);
   elements.clearCart.addEventListener("click", clearCart);
   elements.customerName.addEventListener("input", renderCart);
   elements.customerPhone.addEventListener("input", () => {
+    if (!isPhoneVerifiedFor(elements.customerPhone.value)) {
+      resetPhoneVerification({ keepPhone: true });
+    }
     renderCart();
     saveCustomerPhone(elements.customerPhone.value);
   });
@@ -4053,6 +4440,76 @@ function bindEvents() {
   });
 
   elements.placeOrder.addEventListener("click", placeOrder);
+  elements.mobileCartButton?.addEventListener("click", () => setMobileCartOpen(true));
+  elements.mobileCartBackdrop?.addEventListener("click", () => setMobileCartOpen(false));
+  elements.mobileCartSheet?.addEventListener("click", (event) => {
+    const closeButton = event.target.closest("[data-mobile-action='close']");
+    if (closeButton) {
+      setMobileCartOpen(false);
+      return;
+    }
+
+    const qtyButton = event.target.closest("[data-mobile-id][data-mobile-delta]");
+    if (qtyButton) {
+      changeQty(Number(qtyButton.dataset.mobileId), Number(qtyButton.dataset.mobileDelta));
+      return;
+    }
+
+    const removeButton = event.target.closest("[data-mobile-id][data-mobile-remove]");
+    if (removeButton) {
+      removeCartItem(Number(removeButton.dataset.mobileId));
+      return;
+    }
+
+    const orderTypeButton = event.target.closest("[data-mobile-order-type]");
+    if (orderTypeButton && elements.orderType) {
+      elements.orderType.value = orderTypeButton.dataset.mobileOrderType;
+      renderCart();
+      return;
+    }
+
+    if (event.target.closest("[data-otp-send]")) {
+      sendPhoneOtp();
+      return;
+    }
+    if (event.target.closest("[data-otp-verify]")) {
+      verifyPhoneOtpForCheckout();
+      return;
+    }
+    if (event.target.closest("[data-otp-reset]")) {
+      resetPhoneVerification();
+      renderCart();
+      return;
+    }
+
+    const action = event.target.closest("[data-mobile-action]")?.dataset.mobileAction;
+    if (!action) return;
+    if (action === "order-type") state.checkoutStep = "order_type";
+    if (action === "phone") state.checkoutStep = "phone";
+    if (action === "details") state.checkoutStep = "details";
+    if (action === "payment") state.checkoutStep = "payment";
+    if (action === "place-order") placeOrder();
+    renderCart();
+  });
+
+  elements.mobileCartSheet?.addEventListener("input", (event) => {
+    if (event.target.matches("[data-mobile-field='name']")) {
+      elements.customerName.value = event.target.value;
+      return;
+    }
+    if (event.target.matches("[data-mobile-field='phone']")) {
+      elements.customerPhone.value = event.target.value;
+      if (!isPhoneVerifiedFor(elements.customerPhone.value)) resetPhoneVerification({ keepPhone: true });
+      saveCustomerPhone(elements.customerPhone.value);
+      return;
+    }
+    if (event.target.matches("[data-otp-input]")) {
+      state.phoneVerification.otp = event.target.value.replace(/\D/g, "").slice(0, 6);
+      event.target.value = state.phoneVerification.otp;
+      const verifyButton = elements.mobileCartSheet.querySelector("[data-otp-verify]");
+      if (verifyButton) verifyButton.disabled = state.phoneVerification.otp.length !== 6;
+    }
+  });
   elements.chatToggle.addEventListener("click", () => {
     document.querySelector("#ai").scrollIntoView({ behavior: "smooth" });
     window.setTimeout(() => {

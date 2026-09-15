@@ -35,3 +35,6 @@ runtime/edge-kiosk-card-layout-check/
 runtime/*.pid
 
 runtime/*.process.json
+
+tmp-chrome-*/
+tmp-mobile-*.png

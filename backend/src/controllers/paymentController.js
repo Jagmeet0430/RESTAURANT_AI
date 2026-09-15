@@ -7,8 +7,15 @@ import { createBillForOrder, normalizeStaffPaymentMethod, payOrder } from "../se
 import { deductInventoryForOrder } from "../services/inventoryStockService.js";
 import { createCustomerNotification, ensureNotificationTable } from "../services/orderLifecycleService.js";
 import { requireVerifiedPhoneToken } from "../services/otpService.js";
+import { printOrderReceipt } from "../services/receiptPrinterService.js";
 import { ensureOrderSecuritySchema } from "../services/orderSchemaService.js";
 import { sendOrderStatusNotification } from "../services/notificationService.js";
+import {
+  DEFAULT_GST_RATE,
+  DEFAULT_PACKING_CHARGE,
+  calculateOrderTotals,
+  normalizeOrderTypeForTotals,
+} from "../services/orderTotalsService.js";
 import {
   appendOrderContextInstructions,
   ensureTableQrSchema,
@@ -22,11 +29,35 @@ import { normalizePhoneNumber } from "../utils/phoneNumber.js";
 const MAX_CART_ITEMS = 50;
 const MAX_ITEM_QUANTITY = 20;
 const LARGE_ORDER_LOGIN_AMOUNT = 1000;
-const GST_RATE = 0.05;
-const PACKING_CHARGE = 10;
 const MINIMUM_ORDER_VALUE = Number(process.env.MINIMUM_ORDER_VALUE || 0);
+const PUBLIC_DAILY_ORDER_LIMIT = Math.max(1, Number(process.env.PUBLIC_DAILY_ORDER_LIMIT || 5));
+const MAX_TOTAL_QUANTITY = Math.max(MAX_ITEM_QUANTITY, Number(process.env.MAX_TOTAL_QUANTITY || 100));
 const ONLINE_METHODS = new Set(["upi", "card", "netbanking", "wallet"]);
 const OFFLINE_METHODS = new Set(["cash_on_delivery", "pay_at_counter"]);
+const PUBLIC_WEBSITE_ORDER_SOURCES = new Set(["customer_web", "website"]);
+
+function requestAutomaticOrderReceipt(order) {
+  const orderSource = String(order?.order_source || "").toLowerCase();
+  if (!Number.isInteger(Number(order?.id)) || orderSource !== "kiosk") return;
+
+  printOrderReceipt(pool, Number(order.id), { source: "kiosk" })
+    .then((result) => {
+      console.info("[RECEIPT_PRINT] automatic order result", {
+        orderId: Number(order.id),
+        orderSource,
+        printed: Boolean(result?.printed),
+        skipped: Boolean(result?.skipped),
+        reason: result?.reason || "",
+      });
+    })
+    .catch((error) => {
+      console.error("[RECEIPT_PRINT] automatic order request failed", {
+        orderId: Number(order.id),
+        orderSource,
+        message: error?.message || "Unknown print error",
+      });
+    });
+}
 
 export const getPaymentMethods = (req, res) => {
   const onlineEnabled = Boolean(process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET);
@@ -41,7 +72,6 @@ export const getPaymentMethods = (req, res) => {
         { id: "card", label: "Debit/Credit Card", gateway: "razorpay", enabled: onlineEnabled },
         { id: "netbanking", label: "Net Banking", gateway: "razorpay", enabled: onlineEnabled },
         { id: "wallet", label: "Wallet", gateway: "razorpay", enabled: onlineEnabled },
-        { id: "cash_on_delivery", label: "Cash on Delivery", gateway: "offline", enabled: true },
         { id: "pay_at_counter", label: "Pay at Restaurant Counter", gateway: "offline", enabled: true },
       ],
     },
@@ -70,7 +100,7 @@ function normalizeOnlineMethod(value) {
 }
 
 function normalizeOfflineMethod(value) {
-  const method = String(value || "cash_on_delivery").trim().toLowerCase();
+  const method = String(value || "pay_at_counter").trim().toLowerCase();
   if (!OFFLINE_METHODS.has(method)) {
     const error = new Error("Invalid offline payment method");
     error.statusCode = 400;
@@ -85,7 +115,7 @@ function orderPaymentLabel(method) {
     card: "Razorpay Card",
     netbanking: "Razorpay Net Banking",
     wallet: "Razorpay Wallet",
-    cash_on_delivery: "Cash on Delivery",
+    cash_on_delivery: "Cash",
     pay_at_counter: "Pay at Counter",
   };
 
@@ -96,6 +126,10 @@ function publicTotals(totals) {
   return {
     subtotal: totals.subtotal,
     tax: totals.tax,
+    cgst: totals.cgst,
+    sgst: totals.sgst,
+    cgst_rate: totals.cgstRate,
+    sgst_rate: totals.sgstRate,
     delivery_charge: totals.deliveryCharge,
     discount: totals.discount,
     total: totals.total,
@@ -117,9 +151,7 @@ function clientIp(req) {
 }
 
 function normalizeOrderType(value) {
-  const normalized = String(value || "pickup").trim().toLowerCase().replace(/\s+/g, "_");
-  if (["pickup", "delivery", "dine_in"].includes(normalized)) return normalized;
-  return "pickup";
+  return normalizeOrderTypeForTotals(value);
 }
 
 function normalizeItems(items) {
@@ -156,10 +188,51 @@ function normalizeItems(items) {
     mergedItems.set(menuId, (mergedItems.get(menuId) || 0) + quantity);
   }
 
-  return Array.from(mergedItems, ([menuId, quantity]) => ({ menuId, quantity }));
+  const normalizedItems = Array.from(mergedItems, ([menuId, quantity]) => ({ menuId, quantity }));
+  const totalQuantity = normalizedItems.reduce((sum, item) => sum + item.quantity, 0);
+  if (totalQuantity > MAX_TOTAL_QUANTITY) {
+    const error = new Error(`Cart can contain at most ${MAX_TOTAL_QUANTITY} total items`);
+    error.statusCode = 400;
+    throw error;
+  }
+
+  return normalizedItems;
 }
 
-async function calculateOrderAmount(client, items) {
+async function enforcePublicWebsiteOrderRules(client, { orderSource, orderType, normalizedPhone, otpToken }) {
+  if (!PUBLIC_WEBSITE_ORDER_SOURCES.has(String(orderSource || "").toLowerCase())) return;
+
+  if (String(orderType || "").toLowerCase() === "delivery") {
+    const error = new Error("Delivery is not available yet. Please choose Pickup or Dine-in.");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (!otpToken) {
+    const error = new Error("Please verify your phone number before placing the order.");
+    error.statusCode = 401;
+    throw error;
+  }
+
+  const limitResult = await client.query(
+    `SELECT COUNT(*)::int AS count
+     FROM orders
+     WHERE customer_phone = $1
+       AND COALESCE(order_source, 'customer_web') IN ('customer_web', 'website')
+       AND created_at >= CURRENT_DATE
+       AND created_at < CURRENT_DATE + INTERVAL '1 day'`,
+    [normalizedPhone]
+  );
+
+  if (Number(limitResult.rows[0]?.count || 0) >= PUBLIC_DAILY_ORDER_LIMIT) {
+    const error = new Error("You have reached today's order limit. Please contact the restaurant if you need help.");
+    error.statusCode = 429;
+    error.code = "DAILY_ORDER_LIMIT_REACHED";
+    throw error;
+  }
+}
+
+async function calculateOrderAmount(client, items, { orderType = "pickup" } = {}) {
   const normalizedItems = normalizeItems(items);
   const menuIds = normalizedItems.map((item) => item.menuId);
 
@@ -202,24 +275,22 @@ async function calculateOrderAmount(client, items) {
     });
   }
 
-  subtotal = Number(subtotal.toFixed(2));
-  const tax = Number((subtotal * GST_RATE).toFixed(2));
-  const deliveryCharge = subtotal > 0 ? PACKING_CHARGE : 0;
-  const discount = 0;
-  const total = Number((subtotal + tax + deliveryCharge - discount).toFixed(2));
+  const totals = calculateOrderTotals({
+    subtotal,
+    orderType,
+    gstRate: DEFAULT_GST_RATE,
+    packingCharge: DEFAULT_PACKING_CHARGE,
+    discount: 0,
+  });
 
-  if (subtotal < MINIMUM_ORDER_VALUE) {
+  if (totals.subtotal < MINIMUM_ORDER_VALUE) {
     const error = new Error(`Minimum order value is Rs. ${MINIMUM_ORDER_VALUE}`);
     error.statusCode = 400;
     throw error;
   }
 
   return {
-    subtotal,
-    tax,
-    deliveryCharge,
-    discount,
-    total,
+    ...totals,
     verifiedItems,
   };
 }
@@ -294,13 +365,21 @@ async function insertOrderWithItems(client, {
   const customer = await requireCustomer(client, customerId);
   const table = await resolveTableForOrder(client, tableToken);
   const normalizedOrderSource = normalizeOrderSource(orderSource, table ? "table_qr" : "customer_web");
+  const requestedOrderType = String(orderType || "").trim().toLowerCase().replace(/\s+/g, "_");
+  const normalizedOrderType = table ? "dine_in" : normalizeOrderType(orderType);
   const contextualInstructions = appendOrderContextInstructions(specialInstructions, {
     orderSource: normalizedOrderSource,
     table,
   });
   const normalizedPhone = normalizePhoneNumber(customer.phone);
-  const totals = await calculateOrderAmount(client, items);
+  const totals = await calculateOrderAmount(client, items, { orderType: normalizedOrderType });
   let phoneVerified = false;
+  await enforcePublicWebsiteOrderRules(client, {
+    orderSource: normalizedOrderSource,
+    orderType: requestedOrderType || normalizedOrderType,
+    normalizedPhone,
+    otpToken,
+  });
   if (otpToken) {
     await requireVerifiedPhoneToken(normalizedPhone, otpToken, {
       client,
@@ -337,7 +416,7 @@ async function insertOrderWithItems(client, {
       customer.name,
       normalizedPhone,
       phoneVerified,
-      table ? "dine_in" : normalizeOrderType(orderType),
+      normalizedOrderType,
       trackingToken,
       clientIp(req),
       String(req?.headers?.["user-agent"] || "").slice(0, 500),
@@ -467,6 +546,7 @@ export const createPaymentOrder = async (req, res) => {
     console.error("Create payment order error:", error.message);
     return res.status(error.statusCode || 500).json({
       success: false,
+      code: error.code || undefined,
       message: error.message || "Unable to create payment order",
     });
   } finally {
@@ -621,6 +701,7 @@ export const createCashOrder = async (req, res) => {
 
     if (duplicate) {
       await client.query("COMMIT");
+      requestAutomaticOrderReceipt(order);
       return res.status(200).json({
         success: true,
         message: "Duplicate order request ignored",
@@ -651,6 +732,7 @@ export const createCashOrder = async (req, res) => {
     });
 
     await client.query("COMMIT");
+    requestAutomaticOrderReceipt(order);
     sendOrderStatusNotification({ ...order, customer_name: customer.name, customer_phone: order.customer_phone }).catch((error) =>
       console.error("WhatsApp order confirmation failed:", error.message)
     );
@@ -672,6 +754,7 @@ export const createCashOrder = async (req, res) => {
     console.error("Offline order error:", error.message);
     return res.status(error.statusCode || 500).json({
       success: false,
+      code: error.code || undefined,
       message: error.message || "Unable to place order",
     });
   } finally {

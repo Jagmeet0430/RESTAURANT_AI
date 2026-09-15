@@ -1,4 +1,5 @@
 import { pool } from "../config/database.js";
+import { receiptTotalsFromRow } from "./orderTotalsService.js";
 
 const BILL_PREFIX = "BILL";
 const POS_BILL_PREFIX = "POS";
@@ -328,13 +329,7 @@ function mapLineItems(items = []) {
 }
 
 function mapReceiptTotals(row) {
-  return {
-    subtotal: money(row.subtotal),
-    discount: money(row.discount),
-    tax: money(row.tax ?? row.gst_amount),
-    packing: money(row.delivery_charge),
-    grand_total: money(row.total_amount),
-  };
+  return receiptTotalsFromRow(row);
 }
 
 export async function getOrderReceipt(client, orderIdOrBillId, { lookup = "order" } = {}) {
@@ -1051,6 +1046,10 @@ export async function getTestReceipt(client = pool) {
       subtotal: 15,
       discount: 0,
       tax: 0,
+      cgst: 0,
+      sgst: 0,
+      cgst_rate: 0.025,
+      sgst_rate: 0.025,
       packing: 0,
       grand_total: 15,
     },

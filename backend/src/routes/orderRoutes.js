@@ -14,6 +14,12 @@ const trackingLimiter = createRateLimiter({
   keyPrefix: "orders:track",
   message: "Too many tracking requests. Please wait and try again.",
 });
+const publicOrderLimiter = createRateLimiter({
+  windowMs: 60_000,
+  max: 5,
+  keyPrefix: "orders:create",
+  message: "Too many order attempts. Please wait a moment and try again.",
+});
 
 // Admin routes (requires authentication)
 router.get("/", authMiddleware, orderRoles, getAllOrders);
@@ -23,7 +29,7 @@ router.get("/status/:status", authMiddleware, orderRoles, getOrdersByStatus);
 router.get("/recent/public", getRecentPublicOrders);
 router.get("/track/:trackingToken", trackingLimiter, getTrackedOrder);
 router.get("/track/:trackingToken/events", trackingLimiter, streamTrackedOrder);
-router.post("/", createOrder);
+router.post("/", publicOrderLimiter, createOrder);
 
 router.get("/:id", authMiddleware, orderRoles, getOrderById);
 

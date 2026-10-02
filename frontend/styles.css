@@ -755,6 +755,216 @@ input {
   color: #b91c1c;
 }
 
+.track-orders-section {
+  padding: 72px clamp(18px, 5vw, 72px);
+  background: #fffaf0;
+}
+
+.track-orders-section > .section-heading {
+  width: min(820px, 100%);
+  max-width: 820px;
+  margin-inline: auto;
+}
+
+.track-orders-card {
+  width: min(820px, 100%);
+  display: grid;
+  gap: 18px;
+  margin: 0 auto;
+  border: 1px solid #f3d7a8;
+  border-radius: 22px;
+  padding: clamp(18px, 3vw, 28px);
+  background: #fff;
+  box-shadow: 0 18px 42px rgba(127, 29, 29, 0.08);
+}
+
+.track-orders-form {
+  display: grid;
+  min-width: 0;
+  gap: 14px;
+}
+
+.track-orders-form label {
+  display: grid;
+  gap: 7px;
+  color: #374151;
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.track-orders-form input {
+  width: 100%;
+  min-width: 0;
+  min-height: 52px;
+  border: 1px solid #d7ded9;
+  border-radius: 14px;
+  padding: 0 14px;
+  background: #fff;
+  color: var(--ink);
+  font-size: 16px;
+  outline: none;
+}
+
+.track-orders-form input:focus {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 4px rgba(237, 28, 36, 0.1);
+}
+
+.track-orders-actions .primary-btn,
+.track-orders-actions .secondary-btn {
+  min-height: 48px;
+  justify-content: center;
+}
+
+.track-orders-actions,
+.track-orders-verified {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.track-orders-verified {
+  justify-content: space-between;
+  border: 1px solid #bbf7d0;
+  border-radius: 16px;
+  padding: 12px;
+  background: #f0fdf4;
+}
+
+.track-orders-verified strong,
+.track-orders-verified span {
+  display: block;
+}
+
+.track-orders-verified span,
+.track-orders-copy,
+.track-orders-empty,
+.track-orders-message {
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.track-orders-message {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: #fffaf0;
+  overflow-wrap: anywhere;
+}
+
+.track-orders-message.is-error {
+  color: #b91c1c;
+  background: #fff1f2;
+}
+
+.track-orders-list {
+  display: grid;
+  gap: 12px;
+}
+
+.track-orders-list h3 {
+  margin: 0;
+  font-size: 22px;
+}
+
+.track-order-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  border: 1px solid #eadfd0;
+  border-radius: 18px;
+  padding: 14px;
+  background: #fffdf8;
+}
+
+.track-order-card.is-active {
+  border-color: #bfdbfe;
+  background: #f8fbff;
+}
+
+.track-order-card.is-completed {
+  background: #f8fafc;
+}
+
+.track-order-card.is-cancelled {
+  border-color: #fecaca;
+  background: #fef2f2;
+}
+
+.track-order-main {
+  display: grid;
+  min-width: 0;
+  gap: 7px;
+}
+
+.track-order-main strong {
+  overflow-wrap: anywhere;
+  font-size: 18px;
+}
+
+.track-order-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.track-order-meta span {
+  min-width: 0;
+}
+
+.track-order-status {
+  justify-self: start;
+  border-radius: 999px;
+  padding: 5px 10px;
+  background: #fff1d3;
+  color: #8a4b05;
+  font-size: 12px;
+  font-weight: 950;
+}
+
+.track-order-card.is-active .track-order-status {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.track-order-card.is-completed .track-order-status {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.track-order-card.is-cancelled .track-order-status {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.track-order-side {
+  display: grid;
+  justify-items: end;
+  gap: 10px;
+}
+
+.track-order-price {
+  color: var(--ink);
+  font-size: 18px;
+  font-weight: 950;
+  white-space: nowrap;
+}
+
+.track-order-side .primary-btn {
+  min-height: 42px;
+  padding-inline: 14px;
+}
+
+.table-qr-mode [data-track-entry],
+.table-qr-mode [data-track-orders-section] {
+  display: none;
+}
+
 .cart-items {
   display: grid;
   gap: 10px;
@@ -2056,6 +2266,44 @@ input {
 
   body:not(.kiosk-mode) .menu-section {
     padding: 28px 12px 32px;
+  }
+
+  body:not(.kiosk-mode) .track-orders-section {
+    padding: 32px 12px;
+  }
+
+  body:not(.kiosk-mode) .track-orders-card {
+    border-radius: 18px;
+    padding: 14px;
+  }
+
+  body:not(.kiosk-mode) .track-orders-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  body:not(.kiosk-mode) .track-orders-actions button,
+  body:not(.kiosk-mode) .track-orders-actions a {
+    width: 100%;
+    min-height: 48px;
+  }
+
+  body:not(.kiosk-mode) .track-order-card {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  body:not(.kiosk-mode) .track-order-side {
+    width: 100%;
+    justify-items: stretch;
+  }
+
+  body:not(.kiosk-mode) .track-order-side .primary-btn {
+    width: 100%;
+    min-height: 48px;
+  }
+
+  body:not(.kiosk-mode) .track-order-price {
+    justify-self: start;
   }
 
   body:not(.kiosk-mode) .menu-section .section-heading {

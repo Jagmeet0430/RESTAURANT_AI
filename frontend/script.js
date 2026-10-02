@@ -653,17 +653,34 @@ function trackOrdersEnabled() {
 }
 
 async function requestPhoneOtp(phone) {
-  return requestJson("/customers/otp/send", {
-    method: "POST",
-    body: JSON.stringify({ phone }),
-  });
+  try {
+    return await requestJson("/customers/otp/send", {
+      method: "POST",
+      body: JSON.stringify({ phone: normalizeIndianPhoneForClient(phone) }),
+    });
+  } catch (error) {
+    throw otpRequestError(error, "send");
+  }
 }
 
 async function requestPhoneOtpVerification(phone, otp) {
-  return requestJson("/customers/otp/verify", {
-    method: "POST",
-    body: JSON.stringify({ phone, otp }),
-  });
+  try {
+    return await requestJson("/customers/otp/verify", {
+      method: "POST",
+      body: JSON.stringify({ phone: normalizeIndianPhoneForClient(phone), otp: String(otp).trim() }),
+    });
+  } catch (error) {
+    throw otpRequestError(error, "verify");
+  }
+}
+
+function otpRequestError(error, action) {
+  let message;
+  if (error.status === 403) message = "Request not allowed.";
+  else if (error.status === 429) message = "Too many attempts. Please wait and try again.";
+  else if (error.status >= 500) message = `Unable to ${action} OTP right now. Please try again.`;
+  else message = friendlyNetworkError(error);
+  return Object.assign(new Error(message), { status: error.status });
 }
 
 function selectedPaymentMethod() {
@@ -2452,9 +2469,11 @@ async function requestJson(path, options = {}) {
   const payload = await response.json().catch(() => ({}));
 
   if (!response.ok) {
-    throw new Error(response.status >= 500
+    const error = new Error(response.status >= 500
       ? "Unable to connect right now. Please try again."
       : friendlyNetworkError({ message: payload.message || "Request failed" }));
+    error.status = response.status;
+    throw error;
   }
 
   return payload.data || payload;
@@ -2745,6 +2764,8 @@ async function requestKioskReceiptPrint(order) {
 async function loadCustomerNotifications({ announce = false } = {}) {
   const phone = elements.customerPhone.value.trim() || localStorage.getItem(CUSTOMER_PHONE_STORAGE_KEY) || "";
   if (!phone) return;
+  // This optional order-notification feed is unrelated to sending or verifying OTP.
+  if (publicWebsiteOrderRequiresOtp() && !isPhoneVerifiedFor(phone)) return;
 
   try {
     const notifications = await requestJson(`/notifications/phone/${encodeURIComponent(phone)}`);
@@ -2767,6 +2788,7 @@ async function loadCustomerNotifications({ announce = false } = {}) {
       });
     }
   } catch {
+    // A new customer (or a deployment without this feed) can return 404.
     // Notification polling should never interrupt menu browsing or ordering.
   }
 }

@@ -9,7 +9,7 @@
       content="MAHESH customer website for fresh bakery items, pizzas, chaat, Chinese snacks, pastries, and quick ordering."
     />
     <link rel="stylesheet" href="styles.css?v=public-mobile-cart-otp-1" />
-    <script src="config.js"></script>
+    <script src="config.js?v=canonical-api-1"></script>
   </head>
   <body>
     <header class="site-header">
@@ -24,6 +24,7 @@
       <nav class="main-nav" aria-label="Main navigation">
         <a href="#home">Home</a>
         <a href="#menu">Menu</a>
+        <a href="#track-orders" data-track-entry>Track Orders</a>
         <a href="#ai">AI Assistant</a>
         <a href="#quality">Quality</a>
         <a href="#contact">Contact</a>
@@ -43,7 +44,7 @@
           </p>
           <div class="hero-actions">
             <a class="primary-btn" href="#menu">Explore menu</a>
-            <a class="secondary-btn" href="#contact">Plan an order</a>
+            <a class="secondary-btn" href="#track-orders" data-track-entry>Track My Orders</a>
           </div>
           <div class="trust-row" aria-label="Restaurant highlights">
             <span>66 menu items</span>
@@ -69,6 +70,16 @@
           <strong>Fast counter flow</strong>
           <span>Build a cart and share it with the restaurant team.</span>
         </article>
+      </section>
+
+      <section id="track-orders" class="track-orders-section scroll-mt-24" data-track-orders-section>
+        <div class="section-heading">
+          <span class="eyebrow">Order tracking</span>
+          <h2>Track My Orders</h2>
+          <p>Enter the phone number you used when placing your order, verify it with OTP, and open your live tracking link.</p>
+        </div>
+
+        <div id="trackOrdersApp" class="track-orders-card" aria-live="polite"></div>
       </section>
 
       <section id="menu" class="menu-section scroll-mt-24">
@@ -241,7 +252,7 @@
           <h2>MAHESH AI Assistant</h2>
           <p>
             Ask anything about the menu, budget, dietary preferences, combos,
-            or ordering. The assistant uses the backend AI service and can also
+            or ordering. The assistant uses the restaurant menu service and can also
             update your cart from natural language.
           </p>
         </div>
@@ -259,7 +270,7 @@
             <div>
               <span class="eyebrow">Ask anything...</span>
               <h3>MAHESH AI Assistant</h3>
-              <small id="chatStatus">Backend AI ready</small>
+              <small id="chatStatus">Assistant ready</small>
             </div>
           </div>
 
@@ -289,7 +300,7 @@
 
           <div class="chat-footer-actions">
             <button id="voiceToggle" type="button" aria-pressed="true">Voice reply: On</button>
-            <span>Answers come from backend AI. Cart actions update instantly.</span>
+            <span>Answers come from the menu assistant. Cart actions update instantly.</span>
           </div>
         </div>
       </section>
@@ -403,6 +414,6 @@
     </section>
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
-    <script src="script.js?v=kiosk-mode-110"></script>
+    <script src="script.js?v=checkout-otp-2"></script>
   </body>
 </html>

@@ -184,6 +184,16 @@ const state = {
     message: "",
     error: "",
   },
+  trackOrders: {
+    status: "idle",
+    phone: "",
+    otp: "",
+    token: "",
+    resendAt: 0,
+    orders: [],
+    message: "",
+    error: "",
+  },
   onlinePaymentsEnabled: true,
   paymentMethodsLoaded: false,
   menuStatus: "loading",
@@ -245,6 +255,7 @@ const elements = {
   customerName: document.querySelector("#customerName"),
   customerPhone: document.querySelector("#customerPhone"),
   phoneVerification: document.querySelector("#phoneVerification"),
+  trackOrdersApp: document.querySelector("#trackOrdersApp"),
   orderType: document.querySelector("#orderType"),
   menuCount: document.querySelector("#menuCount"),
   activeCategoryLabel: document.querySelector("#activeCategoryLabel"),
@@ -268,46 +279,19 @@ const elements = {
   mobileCartSheet: document.querySelector("#mobileCartSheet"),
 };
 
-const LOCAL_API_BASE_URL = "http://localhost:5001/api";
-const PRODUCTION_API_BASE_URL = "https://restaurantai-api.vercel.app/api";
-const storedApiBaseUrl = localStorage.getItem("restaurantApiBaseUrl");
-const configuredApiBaseUrl =
-  window.RESTAURANTAI_API_BASE_URL ||
-  window.RESTAURANT_API_BASE_URL ||
-  window.RESTAURANTAI_CONFIG?.apiBaseUrl ||
-  "";
-const isLocalApiHost =
-  window.location.hostname === "localhost" ||
-  window.location.hostname === "127.0.0.1" ||
-  window.location.hostname === "" ||
-  window.location.hostname.startsWith("192.168.") ||
-  window.location.hostname.startsWith("10.") ||
-  /^172\.(1[6-9]|2\d|3[0-1])\./.test(window.location.hostname);
-const sameHostApiBaseUrl =
-  window.location.hostname && isLocalApiHost
-    ? `${window.location.protocol}//${window.location.hostname}:5001/api`
-    : "";
-const environmentApiBaseUrl = isLocalApiHost
-  ? sameHostApiBaseUrl || LOCAL_API_BASE_URL
-  : PRODUCTION_API_BASE_URL;
-const API_BASE_URLS = [
-  configuredApiBaseUrl,
-  environmentApiBaseUrl,
-  storedApiBaseUrl,
-  LOCAL_API_BASE_URL,
-  PRODUCTION_API_BASE_URL,
-]
-  .filter(Boolean)
-  .map((url) => url.replace(/\/$/, ""))
-  .filter((url, index, urls) => urls.indexOf(url) === index);
-let API_BASE_URL = API_BASE_URLS[0];
+// config.js resolves the base once for every customer API and tracking stream.
+const API_BASE_URL = window.RESTAURANTAI_API_BASE_URL;
 const CART_STORAGE_KEY = "restaurantai_cart";
 const CUSTOMER_PHONE_STORAGE_KEY = "restaurantai_customer_phone";
 const CUSTOMER_NOTIFICATION_SEEN_KEY = "restaurantai_seen_notifications";
 const PUBLIC_SETTINGS_STORAGE_KEY = "restaurantai_public_settings";
+const PUBLIC_MENU_CACHE_KEY = "restaurantai_menu_cache_v1";
 const KIOSK_PRINTED_RECEIPTS_STORAGE_KEY = "restaurantai_kiosk_printed_receipts";
 const DEFAULT_LOGO_PATH = "assets/mahesh-logo.svg";
 const MENU_IMAGE_FALLBACK_SRC = "assets/hero-food.png";
+const PUBLIC_MENU_CACHE_VERSION = 1;
+const PUBLIC_MENU_CACHE_TTL_MS = 15 * 60 * 1000;
+const PUBLIC_MENU_REQUEST_TIMEOUT_MS = 15000;
 const GST_RATE = 0.05;
 const PACKING_CHARGE = 10;
 const MAX_MESSAGE_LENGTH = 500;
@@ -316,31 +300,38 @@ const MAX_CART_ITEMS = 50;
 const RAZORPAY_CHECKOUT_SCRIPT = "https://checkout.razorpay.com/v1/checkout.js";
 const ONLINE_PAYMENT_METHODS = new Set(["upi", "card", "netbanking", "wallet"]);
 const PHONE_VERIFICATION_RESEND_FALLBACK_SECONDS = 30;
+let liveMenuRequest = null;
 
-function apiUrl(path, baseUrl = API_BASE_URL) {
-  return `${baseUrl}${path}`;
+function apiUrl(path) {
+  if (!API_BASE_URL) throw new Error("Unable to connect right now. Please try again.");
+  return `${API_BASE_URL}${path}`;
 }
 
 async function fetchApi(path, options = {}) {
-  let lastError = null;
-
-  for (const baseUrl of API_BASE_URLS) {
-    try {
-      const response = await fetch(apiUrl(path, baseUrl), options);
-      API_BASE_URL = baseUrl;
-      localStorage.setItem("restaurantApiBaseUrl", baseUrl);
-      return response;
-    } catch (error) {
-      lastError = error;
-    }
+  const { timeoutMs = 0, ...fetchOptions } = options;
+  const controller =
+    timeoutMs > 0 && !fetchOptions.signal && typeof AbortController !== "undefined"
+      ? new AbortController()
+      : null;
+  const timeoutId = controller
+    ? window.setTimeout(() => controller.abort(), timeoutMs)
+    : null;
+  try {
+    return await fetch(apiUrl(path), {
+      ...fetchOptions,
+      signal: controller?.signal || fetchOptions.signal,
+    });
+  } catch (error) {
+    if (error?.name === "AbortError") throw error;
+    throw new Error("Unable to connect right now. Please try again.");
+  } finally {
+    if (timeoutId) window.clearTimeout(timeoutId);
   }
-
-  throw lastError || new Error("Backend API unavailable");
 }
 
 function friendlyNetworkError(error) {
-  if (/failed to fetch|networkerror|load failed/i.test(error?.message || "")) {
-    return "Backend server is not reachable. Start the backend or check the LAN API address, then try again.";
+  if (error?.name === "AbortError" || /failed to fetch|networkerror|load failed|CORS blocked origin|start the backend|LAN API|localhost|PostgreSQL/i.test(error?.message || "")) {
+    return "Unable to connect right now. Please try again.";
   }
   return error?.message || "Please try again.";
 }
@@ -641,6 +632,38 @@ function resetPhoneVerification({ keepPhone = false } = {}) {
     message: "",
     error: "",
   };
+}
+
+function resetTrackOrders({ keepPhone = false } = {}) {
+  const phone = keepPhone ? state.trackOrders.phone : "";
+  state.trackOrders = {
+    status: "idle",
+    phone,
+    otp: "",
+    token: "",
+    resendAt: 0,
+    orders: [],
+    message: "",
+    error: "",
+  };
+}
+
+function trackOrdersEnabled() {
+  return !state.kiosk.enabled && !state.tableQr.enabled;
+}
+
+async function requestPhoneOtp(phone) {
+  return requestJson("/customers/otp/send", {
+    method: "POST",
+    body: JSON.stringify({ phone }),
+  });
+}
+
+async function requestPhoneOtpVerification(phone, otp) {
+  return requestJson("/customers/otp/verify", {
+    method: "POST",
+    body: JSON.stringify({ phone, otp }),
+  });
 }
 
 function selectedPaymentMethod() {
@@ -948,6 +971,88 @@ function menuItemsEqual(leftItems, rightItems) {
   });
 }
 
+function canUsePublicMenuCache() {
+  return !state.kiosk.enabled && !state.tableQr.enabled;
+}
+
+function publicMenuCachePayload(items) {
+  return items.map((item) => ({
+    id: item.id,
+    name: item.name,
+    category: item.category,
+    price: item.price,
+    image: item.image,
+    description: item.description,
+    isAvailable: item.isAvailable,
+  }));
+}
+
+function normalizeMenuItems(items) {
+  return (Array.isArray(items) ? items : [])
+    .map(normalizeApiMenuItem)
+    .filter((item) => item.name && Number.isFinite(item.price));
+}
+
+function readPublicMenuCache() {
+  if (!canUsePublicMenuCache()) return null;
+
+  try {
+    const cached = JSON.parse(localStorage.getItem(PUBLIC_MENU_CACHE_KEY) || "null");
+    if (!cached || cached.version !== PUBLIC_MENU_CACHE_VERSION || !Array.isArray(cached.data)) {
+      return null;
+    }
+
+    const savedAt = Number(cached.savedAt || 0);
+    const items = normalizeMenuItems(cached.data);
+    if (!items.length || !Number.isFinite(savedAt)) {
+      return null;
+    }
+
+    return {
+      items,
+      savedAt,
+      isFresh: Date.now() - savedAt <= PUBLIC_MENU_CACHE_TTL_MS,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writePublicMenuCache(items) {
+  if (!canUsePublicMenuCache()) return;
+
+  try {
+    localStorage.setItem(
+      PUBLIC_MENU_CACHE_KEY,
+      JSON.stringify({
+        version: PUBLIC_MENU_CACHE_VERSION,
+        savedAt: Date.now(),
+        data: publicMenuCachePayload(items),
+      })
+    );
+  } catch {
+    // Cache is an optimization only; menu rendering should not depend on it.
+  }
+}
+
+function restorePublicMenuCache() {
+  const cached = readPublicMenuCache();
+  if (!cached || !cached.isFresh) return false;
+
+  menuItems = cached.items;
+  state.menuStatus = "ready";
+  state.menuError = "";
+  if (!categories().includes(state.selectedCategory)) {
+    state.selectedCategory = "All";
+  }
+  updateMenuStats();
+  return true;
+}
+
+function renderMenuSkeletonCount() {
+  return window.matchMedia?.("(max-width: 768px)")?.matches ? 4 : 6;
+}
+
 function captureKioskMenuView() {
   if (!state.kiosk.enabled || state.kiosk.screen !== "menu") return null;
 
@@ -986,7 +1091,7 @@ function updateMenuStats() {
   if (trustStats[1]) trustStats[1].textContent = `${Math.max(categories().length - 1, 0)} categories`;
 }
 
-async function loadLiveMenu({ background = false } = {}) {
+async function refreshLiveMenu({ background = false } = {}) {
   const hasLastKnownMenu = state.menuStatus === "ready" || state.menuStatus === "empty";
   if (!background || !hasLastKnownMenu) {
     state.menuStatus = "loading";
@@ -1004,21 +1109,21 @@ async function loadLiveMenu({ background = false } = {}) {
       headers: {
         Accept: "application/json",
       },
+      ...(canUsePublicMenuCache() ? { timeoutMs: PUBLIC_MENU_REQUEST_TIMEOUT_MS } : {}),
     });
 
     if (!response.ok) {
-      throw new Error("Menu API unavailable");
+      throw new Error("Menu unavailable");
     }
 
     const payload = await response.json();
     const apiItems = Array.isArray(payload) ? payload : Array.isArray(payload?.data) ? payload.data : [];
-    const availableItems = apiItems
-      .map(normalizeApiMenuItem)
-      .filter((item) => item.name && Number.isFinite(item.price));
+    const availableItems = normalizeMenuItems(apiItems);
 
     const hadMenuError = Boolean(state.menuError);
     const menuChanged = !menuItemsEqual(menuItems, availableItems);
     state.menuError = "";
+    writePublicMenuCache(availableItems);
     if (!menuChanged) {
       state.menuStatus = availableItems.length ? "ready" : "empty";
       if (hadMenuError) {
@@ -1070,20 +1175,57 @@ async function loadLiveMenu({ background = false } = {}) {
       return;
     }
 
-    menuItems = fallbackMenuItems.map(normalizeApiMenuItem);
-    state.menuStatus = "ready";
-    state.menuError = error.message || "Live menu unavailable. Using saved customer menu.";
-    if (elements.chatStatus) {
-      setChatStatus("Saved menu ready");
+    if (!canUsePublicMenuCache()) {
+      menuItems = fallbackMenuItems.map(normalizeApiMenuItem);
+      state.menuStatus = "ready";
+      state.menuError = error.message || "Live menu unavailable. Using saved customer menu.";
+      if (elements.chatStatus) {
+        setChatStatus("Saved menu ready");
+      }
+      updateMenuStats();
+      if (state.kiosk.enabled) {
+        renderKiosk();
+      } else {
+        renderFilters();
+        renderMenu();
+      }
+      return;
     }
-    updateMenuStats();
-    if (state.kiosk.enabled) {
-      renderKiosk();
-    } else {
+
+    const cached = readPublicMenuCache();
+    if (cached) {
+      menuItems = cached.items;
+      state.menuStatus = "ready";
+      state.menuError = "";
+      updateMenuStats();
       renderFilters();
       renderMenu();
+      renderCart();
+      return;
     }
+
+    menuItems = [];
+    state.menuStatus = "error";
+    state.menuError =
+      error?.name === "AbortError"
+        ? "The menu is taking longer than expected. Please try again."
+        : "We couldn't load the menu right now.";
+    updateMenuStats();
+    renderFilters();
+    renderMenu();
   }
+}
+
+function loadLiveMenu(options = {}) {
+  if (liveMenuRequest) {
+    return liveMenuRequest;
+  }
+
+  liveMenuRequest = refreshLiveMenu(options).finally(() => {
+    liveMenuRequest = null;
+  });
+
+  return liveMenuRequest;
 }
 
 function triggerClass(element, className, duration = 320) {
@@ -1107,6 +1249,14 @@ function showToast(title, detail = "", type = "info") {
   showToast.timer = window.setTimeout(() => {
     elements.toast.classList.remove("is-visible");
   }, 2000);
+}
+
+function debounce(callback, delay = 250) {
+  let timerId = null;
+  return (...args) => {
+    window.clearTimeout(timerId);
+    timerId = window.setTimeout(() => callback(...args), delay);
+  };
 }
 
 function filteredItems() {
@@ -1299,12 +1449,7 @@ function photoForItem(item) {
 
 function renderFilters() {
   if (state.menuStatus === "loading") {
-    elements.filters.innerHTML = `
-      <button class="filter-btn is-active" type="button" disabled>
-        <span class="filter-icon" aria-hidden="true">🍽</span>
-        <span>Loading menu...</span>
-      </button>
-    `;
+    elements.filters.innerHTML = "";
     return;
   }
 
@@ -1329,8 +1474,8 @@ function renderFilters() {
 function renderMenu() {
   if (state.menuStatus === "loading") {
     elements.menuCount.textContent = "Loading menu...";
-    elements.activeCategoryLabel.textContent = "Connecting to PostgreSQL menu";
-    elements.menuGrid.innerHTML = Array.from({ length: 6 })
+    elements.activeCategoryLabel.textContent = "Preparing today's menu";
+    elements.menuGrid.innerHTML = Array.from({ length: renderMenuSkeletonCount() })
       .map(
         () => `
           <article class="menu-card skeleton-card" aria-hidden="true">
@@ -1349,12 +1494,12 @@ function renderMenu() {
 
   if (state.menuStatus === "error") {
     elements.menuCount.textContent = "Unable to load menu";
-    elements.activeCategoryLabel.textContent = "Database menu unavailable";
+    elements.activeCategoryLabel.textContent = "Menu unavailable";
     elements.menuGrid.innerHTML = `
       <div class="no-results menu-error">
-        <strong>Unable to load menu.</strong>
-        <span>${escapeHtml(state.menuError || "Please check the backend server and PostgreSQL connection.")}</span>
-        <button class="retry-btn" type="button" data-retry-menu>Retry</button>
+        <strong>We couldn't load the menu right now.</strong>
+        <span>${escapeHtml(state.menuError || "Please try again in a moment.")}</span>
+        <button class="retry-btn" type="button" data-retry-menu>Try again</button>
       </div>
     `;
     return;
@@ -1362,11 +1507,11 @@ function renderMenu() {
 
   if (state.menuStatus === "empty") {
     elements.menuCount.textContent = "Showing 0 of 0 items";
-    elements.activeCategoryLabel.textContent = "No database menu items found";
+    elements.activeCategoryLabel.textContent = "No menu items available";
     elements.menuGrid.innerHTML = `
       <div class="no-results">
-        <strong>No menu items found</strong>
-        <span>Add menu items from the admin dashboard or seed the PostgreSQL database.</span>
+        <strong>No menu items available right now</strong>
+        <span>Please check back soon or ask the restaurant team.</span>
       </div>
     `;
     return;
@@ -1675,7 +1820,7 @@ function renderCart() {
     }
     elements.placeOrder.disabled = false;
     elements.cartHint.textContent = state.orderSuccess
-      ? "Your order is saved in PostgreSQL and ready for the restaurant team."
+      ? "Your order is saved and ready for the restaurant team."
       : "Add at least one item before sending an order request.";
     updatePlaceOrderButtonText();
     if (state.tableQr.enabled) applyTableQrControls();
@@ -1825,10 +1970,7 @@ async function sendPhoneOtp() {
   renderCart();
 
   try {
-    const result = await requestJson("/customers/otp/send", {
-      method: "POST",
-      body: JSON.stringify({ phone }),
-    });
+    const result = await requestPhoneOtp(phone);
     const resendSeconds = Number(result.resend_after_seconds || PHONE_VERIFICATION_RESEND_FALLBACK_SECONDS);
     state.phoneVerification.status = "sent";
     state.phoneVerification.phone = result.phone || phone;
@@ -1863,10 +2005,7 @@ async function verifyPhoneOtpForCheckout() {
   renderCart();
 
   try {
-    const result = await requestJson("/customers/otp/verify", {
-      method: "POST",
-      body: JSON.stringify({ phone, otp }),
-    });
+    const result = await requestPhoneOtpVerification(phone, otp);
     state.phoneVerification.status = "verified";
     state.phoneVerification.phone = result.phone || phone;
     state.phoneVerification.token = result.verification_token || "";
@@ -1883,6 +2022,269 @@ async function verifyPhoneOtpForCheckout() {
   }
 
   renderCart();
+}
+
+function trackOrderStatusKey(status = "") {
+  return String(status || "").trim().toLowerCase().replace(/\s+/g, "_");
+}
+
+function trackOrderCardState(status = "") {
+  const normalized = trackOrderStatusKey(status);
+  if (normalized === "cancelled") return "cancelled";
+  if (normalized === "completed") return "completed";
+  return "active";
+}
+
+function formatOrderDate(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const startOfOrderDay = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+  const dayDiff = Math.round((startOfToday - startOfOrderDay) / 86_400_000);
+  const time = date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  if (dayDiff === 0) return `Today, ${time}`;
+  if (dayDiff === 1) return `Yesterday, ${time}`;
+  return date.toLocaleString([], { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" });
+}
+
+function trackOrdersPhone() {
+  return document.querySelector("#trackOrdersPhone")?.value?.trim() || state.trackOrders.phone || "";
+}
+
+function trackOrdersMaskedPhone(phone = state.trackOrders.phone) {
+  return phone ? normalizeIndianPhoneForClient(phone).replace(/\d(?=\d{4})/g, "*") : "";
+}
+
+function trackOrdersMessageMarkup() {
+  if (state.trackOrders.error) {
+    return `<p class="track-orders-message is-error">${escapeHtml(state.trackOrders.error)}</p>`;
+  }
+  if (state.trackOrders.message) {
+    return `<p class="track-orders-message">${escapeHtml(state.trackOrders.message)}</p>`;
+  }
+  const resendSeconds = Math.max(0, Math.ceil((state.trackOrders.resendAt - Date.now()) / 1000));
+  if (resendSeconds > 0 && state.trackOrders.status !== "verified" && state.trackOrders.status !== "loaded") {
+    return `<p class="track-orders-message">Resend OTP in ${resendSeconds}s</p>`;
+  }
+  return "";
+}
+
+function trackOrdersPhoneStepMarkup() {
+  const busy = ["sending", "verifying", "loading"].includes(state.trackOrders.status);
+  const resendSeconds = Math.max(0, Math.ceil((state.trackOrders.resendAt - Date.now()) / 1000));
+  const sent = ["sent", "verifying"].includes(state.trackOrders.status);
+
+  return `
+    <div class="track-orders-form">
+      <p class="track-orders-copy">Enter the phone number you used when placing your order.</p>
+      <label>
+        Phone
+        <input id="trackOrdersPhone" type="tel" inputmode="tel" autocomplete="tel" value="${escapeHtml(state.trackOrders.phone)}" placeholder="+91 98765 43210" ${busy ? "disabled" : ""} />
+      </label>
+      <div class="track-orders-actions">
+        <button class="primary-btn" type="button" data-track-action="send-otp" ${busy || !state.trackOrders.phone || resendSeconds > 0 ? "disabled" : ""}>
+          ${state.trackOrders.status === "sent" ? "Resend OTP" : state.trackOrders.status === "sending" ? "Sending OTP..." : "Send OTP"}
+        </button>
+      </div>
+      ${
+        sent
+          ? `<label>
+              Enter the 6-digit code sent to your phone
+              <input id="trackOrdersOtp" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" value="${escapeHtml(state.trackOrders.otp)}" placeholder="000000" ${state.trackOrders.status === "verifying" ? "disabled" : ""} />
+            </label>
+            <div class="track-orders-actions">
+              <button class="primary-btn" type="button" data-track-action="verify-otp" ${state.trackOrders.otp.length === 6 && state.trackOrders.status !== "verifying" ? "" : "disabled"}>
+                ${state.trackOrders.status === "verifying" ? "Verifying..." : "Verify"}
+              </button>
+              <button class="secondary-btn" type="button" data-track-action="change-phone">Change phone</button>
+            </div>`
+          : ""
+      }
+      ${trackOrdersMessageMarkup()}
+    </div>
+  `;
+}
+
+function trackOrdersVerifiedMarkup() {
+  if (!state.trackOrders.token) return "";
+  return `
+    <div class="track-orders-verified">
+      <div>
+        <strong>Phone verified</strong>
+        <span>Showing orders for ${escapeHtml(trackOrdersMaskedPhone())}.</span>
+      </div>
+      <button class="secondary-btn" type="button" data-track-action="change-phone">Change</button>
+    </div>
+  `;
+}
+
+function trackOrderCardMarkup(order) {
+  const stateName = trackOrderCardState(order.status);
+  const buttonLabel = stateName === "active" ? "Track Order" : "View Order";
+  return `
+    <article class="track-order-card is-${stateName}" data-track-token="${escapeHtml(order.tracking_token || "")}" data-track-url="${escapeHtml(order.tracking_url || "")}">
+      <div class="track-order-main">
+        <span class="track-order-status">${escapeHtml(statusText(order.status))}</span>
+        <strong>Order #${escapeHtml(order.order_number || order.id || "")}</strong>
+        <div class="track-order-meta">
+          <span>${escapeHtml(formatOrderDate(order.created_at))}</span>
+          <span>${escapeHtml(statusText(order.order_type || "pickup"))}</span>
+        </div>
+      </div>
+      <div class="track-order-side">
+        <span class="track-order-price">${formatPrice(order.total_amount)}</span>
+        <button class="primary-btn" type="button" data-track-action="open-order">${buttonLabel}</button>
+      </div>
+    </article>
+  `;
+}
+
+function trackOrdersListMarkup() {
+  if (state.trackOrders.status === "loading") {
+    return `<p class="track-orders-message">Loading your orders...</p>`;
+  }
+  if (state.trackOrders.status !== "loaded") return "";
+  if (!state.trackOrders.orders.length) {
+    return `<div class="track-orders-empty">No recent orders were found for this phone number.</div>`;
+  }
+  return `
+    <div class="track-orders-list">
+      <h3>Your Orders</h3>
+      ${state.trackOrders.orders.map(trackOrderCardMarkup).join("")}
+    </div>
+  `;
+}
+
+function renderTrackOrders() {
+  if (!elements.trackOrdersApp || !trackOrdersEnabled()) return;
+  const isVerified = Boolean(state.trackOrders.token);
+  elements.trackOrdersApp.innerHTML = `
+    ${isVerified ? trackOrdersVerifiedMarkup() : trackOrdersPhoneStepMarkup()}
+    ${isVerified ? trackOrdersMessageMarkup() : ""}
+    ${trackOrdersListMarkup()}
+  `;
+}
+
+async function sendTrackOrdersOtp() {
+  const phone = trackOrdersPhone();
+  if (!phone) {
+    state.trackOrders.error = "Enter your phone number before requesting OTP.";
+    renderTrackOrders();
+    showToast("Phone required", state.trackOrders.error, "warning");
+    return;
+  }
+
+  state.trackOrders.status = "sending";
+  state.trackOrders.phone = phone;
+  state.trackOrders.otp = "";
+  state.trackOrders.token = "";
+  state.trackOrders.orders = [];
+  state.trackOrders.error = "";
+  state.trackOrders.message = "Sending OTP...";
+  renderTrackOrders();
+
+  try {
+    const result = await requestPhoneOtp(phone);
+    const resendSeconds = Number(result.resend_after_seconds || PHONE_VERIFICATION_RESEND_FALLBACK_SECONDS);
+    state.trackOrders.status = "sent";
+    state.trackOrders.phone = result.phone || phone;
+    state.trackOrders.resendAt = Date.now() + resendSeconds * 1000;
+    state.trackOrders.message = `OTP sent to ${trackOrdersMaskedPhone(result.phone || phone)}.`;
+    state.trackOrders.error = "";
+    window.setTimeout(renderTrackOrders, resendSeconds * 1000 + 100);
+    showToast("OTP sent", "Enter the 6-digit code to view your orders.", "success");
+  } catch (error) {
+    state.trackOrders.status = "idle";
+    state.trackOrders.error = friendlyNetworkError(error);
+    state.trackOrders.message = "";
+    showToast("Could not send OTP", state.trackOrders.error, "warning");
+  }
+
+  renderTrackOrders();
+}
+
+async function loadVerifiedCustomerOrders() {
+  state.trackOrders.status = "loading";
+  state.trackOrders.error = "";
+  state.trackOrders.message = "Loading your orders...";
+  renderTrackOrders();
+
+  try {
+    const result = await requestJson("/customers/orders", {
+      method: "POST",
+      body: JSON.stringify({
+        phone: state.trackOrders.phone,
+        otp_verification_token: state.trackOrders.token,
+      }),
+    });
+    state.trackOrders.status = "loaded";
+    state.trackOrders.orders = Array.isArray(result.orders) ? result.orders : [];
+    state.trackOrders.message = state.trackOrders.orders.length
+      ? `${state.trackOrders.orders.length} recent ${state.trackOrders.orders.length === 1 ? "order" : "orders"} found.`
+      : "";
+    state.trackOrders.error = "";
+  } catch (error) {
+    state.trackOrders.status = state.trackOrders.token ? "verified" : "sent";
+    state.trackOrders.orders = [];
+    state.trackOrders.error = friendlyNetworkError(error);
+    state.trackOrders.message = "";
+    showToast("Could not load orders", state.trackOrders.error, "warning");
+  }
+
+  renderTrackOrders();
+}
+
+async function verifyTrackOrdersOtp() {
+  const phone = trackOrdersPhone();
+  const otp = state.trackOrders.otp.trim();
+  if (!phone || !/^\d{6}$/.test(otp)) {
+    state.trackOrders.error = "Use the 6-digit code sent to your phone.";
+    renderTrackOrders();
+    showToast("Enter OTP", state.trackOrders.error, "warning");
+    return;
+  }
+
+  state.trackOrders.status = "verifying";
+  state.trackOrders.phone = phone;
+  state.trackOrders.error = "";
+  state.trackOrders.message = "Verifying OTP...";
+  renderTrackOrders();
+
+  try {
+    const result = await requestPhoneOtpVerification(phone, otp);
+    state.trackOrders.phone = result.phone || phone;
+    state.trackOrders.token = result.verification_token || "";
+    state.trackOrders.otp = "";
+    state.trackOrders.error = "";
+    state.trackOrders.message = "Phone verified.";
+    if (!state.trackOrders.token) {
+      throw new Error("Phone verification did not return a valid session. Please try again.");
+    }
+    await loadVerifiedCustomerOrders();
+    showToast("Phone verified", "Your orders are ready.", "success");
+  } catch (error) {
+    state.trackOrders.status = "sent";
+    state.trackOrders.token = "";
+    state.trackOrders.error = friendlyNetworkError(error);
+    state.trackOrders.message = "";
+    showToast("OTP not verified", state.trackOrders.error, "warning");
+    renderTrackOrders();
+  }
+}
+
+function openTrackedOrder(card) {
+  const trackingUrl = card?.dataset?.trackUrl || "";
+  const trackingToken = card?.dataset?.trackToken || "";
+  if (trackingUrl) {
+    window.location.href = trackingUrl;
+    return;
+  }
+  if (trackingToken) {
+    window.location.href = `track-order/${encodeURIComponent(trackingToken)}`;
+  }
 }
 
 function updateMobileCartButton() {
@@ -2050,7 +2452,9 @@ async function requestJson(path, options = {}) {
   const payload = await response.json().catch(() => ({}));
 
   if (!response.ok) {
-    throw new Error(payload.message || "Request failed");
+    throw new Error(response.status >= 500
+      ? "Unable to connect right now. Please try again."
+      : friendlyNetworkError({ message: payload.message || "Request failed" }));
   }
 
   return payload.data || payload;
@@ -2784,7 +3188,7 @@ function handleLocalMenuQuestion(question) {
   if (text.includes("eggless")) {
     const candidates = localEgglessCandidateItems();
     if (candidates.length) {
-      return `I need the live database to confirm eggless flags, but these cake and bakery items are on the menu: ${formatItemList(candidates)}.`;
+      return `I need the latest menu details to confirm eggless options, but these cake and bakery items are on the menu: ${formatItemList(candidates)}.`;
     }
   }
 
@@ -2857,7 +3261,7 @@ function handleLocalCustomerQuestion(question) {
   }
 
   if (/\b(payment|pay|cash|online|upi|card)\b/.test(text)) {
-    return "Checkout supports UPI, card, net banking, wallet, and Pay at Restaurant Counter. Online payments are confirmed only after secure server verification.";
+    return "Checkout supports UPI, card, net banking, wallet, and Pay at Restaurant Counter. Online payments are confirmed only after secure payment verification.";
   }
 
   if (/\b(cancel|cancellation|refund|return|exchange|replace|replacement|change order|modify)\b/.test(text)) {
@@ -3155,7 +3559,7 @@ function handleCartAction(question) {
   }
 
   if (state.menuStatus !== "ready" || !menuItems.length) {
-    return "I cannot update the cart until the live menu is available. Please retry the menu connection first.";
+    return "I cannot update the cart until the menu is available. Please try loading the menu again first.";
   }
 
   const added = [];
@@ -3221,7 +3625,7 @@ function isLocalHost() {
 
 function voiceSupportProblem() {
   if (!window.isSecureContext && !isLocalHost()) {
-    return "Voice input needs HTTPS or localhost. Open the app on localhost to use the mic.";
+    return "Voice input needs a secure connection. Please type your question for now.";
   }
 
   if (!navigator.mediaDevices?.getUserMedia) {
@@ -3243,7 +3647,7 @@ async function requestMicrophonePermission() {
 function voiceErrorMessage(errorName) {
   const messages = {
     "not-allowed": "Microphone permission was blocked. Allow microphone access in the browser address bar.",
-    "service-not-allowed": "Speech recognition service is blocked in this browser. Try Chrome or Edge on localhost.",
+    "service-not-allowed": "Speech recognition is blocked in this browser. Try Chrome or Edge.",
     "audio-capture": "No microphone was detected. Check your microphone connection.",
     network: "Speech recognition needs network access in this browser. Try again or type your question.",
     "no-speech": "I did not hear anything. Click Mic and speak again.",
@@ -3266,10 +3670,10 @@ function backendAnswer(data) {
 
 function chatStatusForResponse(data) {
   if (data.type === "voice_recommendation") return "Voice recommendation service";
-  if (data.type === "database_menu") return "Live database menu";
-  if (data.type === "database_fallback") return "Live menu fallback";
+  if (data.type === "database_menu") return "Live menu";
+  if (data.type === "database_fallback") return "Menu assistant";
   if (data.type === "customer_concierge") return "Customer assistant";
-  return "Backend RAG answered";
+  return "Assistant answered";
 }
 
 async function askChatbot(question) {
@@ -3304,7 +3708,7 @@ async function askChatbot(question) {
     }
 
     pendingMessage = addChatMessage("bot", "Searching MAHESH menu knowledge...");
-    setChatStatus("Checking backend RAG...");
+    setChatStatus("Checking menu assistant...");
 
     const response = await fetchApi("/chat", {
       method: "POST",
@@ -4423,7 +4827,7 @@ function bindEvents() {
     if (verifyButton) verifyButton.disabled = state.phoneVerification.otp.length !== 6;
   });
 
-  elements.searchInput.addEventListener("input", renderMenu);
+  elements.searchInput.addEventListener("input", debounce(renderMenu, 250));
   elements.clearCart.addEventListener("click", clearCart);
   elements.customerName.addEventListener("input", renderCart);
   elements.customerPhone.addEventListener("input", () => {
@@ -4510,6 +4914,49 @@ function bindEvents() {
       if (verifyButton) verifyButton.disabled = state.phoneVerification.otp.length !== 6;
     }
   });
+
+  elements.trackOrdersApp?.addEventListener("click", (event) => {
+    const action = event.target.closest("[data-track-action]")?.dataset.trackAction;
+    if (!action) return;
+
+    if (action === "send-otp") {
+      sendTrackOrdersOtp();
+      return;
+    }
+    if (action === "verify-otp") {
+      verifyTrackOrdersOtp();
+      return;
+    }
+    if (action === "change-phone") {
+      resetTrackOrders();
+      renderTrackOrders();
+      return;
+    }
+    if (action === "open-order") {
+      openTrackedOrder(event.target.closest(".track-order-card"));
+    }
+  });
+
+  elements.trackOrdersApp?.addEventListener("input", (event) => {
+    if (event.target.matches("#trackOrdersPhone")) {
+      const nextPhone = event.target.value;
+      if (state.trackOrders.status !== "idle" && nextPhone !== state.trackOrders.phone) {
+        resetTrackOrders();
+      }
+      state.trackOrders.phone = nextPhone;
+      renderTrackOrders();
+      document.querySelector("#trackOrdersPhone")?.focus();
+      return;
+    }
+
+    if (event.target.matches("#trackOrdersOtp")) {
+      state.trackOrders.otp = event.target.value.replace(/\D/g, "").slice(0, 6);
+      event.target.value = state.trackOrders.otp;
+      const verifyButton = elements.trackOrdersApp.querySelector("[data-track-action='verify-otp']");
+      if (verifyButton) verifyButton.disabled = state.trackOrders.otp.length !== 6;
+    }
+  });
+
   elements.chatToggle.addEventListener("click", () => {
     document.querySelector("#ai").scrollIntoView({ behavior: "smooth" });
     window.setTimeout(() => {
@@ -4767,20 +5214,22 @@ if (startTrackingPage()) {
   if (state.tableQr.enabled) {
     document.body.classList.add("table-qr-mode");
   }
-  loadPublicSettings();
   updateMenuStats();
   restoreCart();
+  const restoredCachedMenu = restorePublicMenuCache();
   renderFilters();
   renderMenu();
   renderCart();
+  renderTrackOrders();
   bindEvents();
   setupActiveNavigation();
+  loadLiveMenu({ background: restoredCachedMenu });
   setupVoiceSystem();
   startCustomerNotificationPolling();
+  loadPublicSettings();
   loadPaymentMethods();
   resolveTableQrContext();
-  loadLiveMenu();
-  window.setInterval(loadLiveMenu, 60000);
+  window.setInterval(() => loadLiveMenu({ background: true }), 60000);
   window.setInterval(loadPublicSettings, 5000);
   window.addEventListener("focus", loadPublicSettings);
 }

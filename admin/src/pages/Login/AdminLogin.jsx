@@ -13,7 +13,7 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
 
 function AdminLogin() {
-  const [email, setEmail] = useState("admin@restaurantai.com");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -21,32 +21,19 @@ function AdminLogin() {
   const { login } = useAuth();
   const navigate = useNavigate();
 
-  const handleLogin = async (e) => {
-    console.log("🚀 Login button clicked");
-
-    e.preventDefault();
-
-    console.log("Step 1: Button clicked");
-
+  const handleLogin = async (event) => {
+    event.preventDefault();
     setError("");
     setLoading(true);
 
     try {
-      console.log("Step 2: Calling login()");
-
       const result = await login(email, password);
-
-      console.log("Step 3: Login result =", result);
-
       if (result.success) {
-        console.log("Step 4: Navigating to dashboard");
         navigate("/dashboard");
       } else {
-        console.log("Step 5: Login failed");
         setError(result.message || "Login failed");
       }
-    } catch (err) {
-      console.error("Step 6: Error =", err);
+    } catch {
       setError("An error occurred during login");
     } finally {
       setLoading(false);
@@ -56,17 +43,16 @@ function AdminLogin() {
   return (
     <Container maxWidth="sm">
       <Box
-      sx={{
-    display: "flex",
-    justifyContent: "center",
-    alignItems: "center",
-    minHeight: "100vh",
-  }}
-       
+        sx={{
+          display: "flex",
+          justifyContent: "center",
+          alignItems: "center",
+          minHeight: "100vh",
+        }}
       >
         <Paper elevation={3} sx={{ p: 4, width: "100%" }}>
           <Typography variant="h3" align="center" gutterBottom>
-            🍽️ RestaurantAI
+            RestaurantAI
           </Typography>
 
           <Typography
@@ -90,8 +76,9 @@ function AdminLogin() {
               label="Email"
               type="email"
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={(event) => setEmail(event.target.value)}
               margin="normal"
+              autoComplete="username"
               required
               disabled={loading}
             />
@@ -101,8 +88,9 @@ function AdminLogin() {
               label="Password"
               type="password"
               value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              onChange={(event) => setPassword(event.target.value)}
               margin="normal"
+              autoComplete="current-password"
               required
               disabled={loading}
             />
@@ -119,19 +107,6 @@ function AdminLogin() {
               {loading ? <CircularProgress size={24} /> : "Login"}
             </Button>
           </form>
-
-          <Typography
-            variant="body2"
-            align="center"
-            color="text.secondary"
-            sx={{ mt: 2 }}
-          >
-            Demo Credentials:
-            <br />
-            Email: admin@restaurantai.com
-            <br />
-            Password: (Set after first registration)
-          </Typography>
         </Paper>
       </Box>
     </Container>

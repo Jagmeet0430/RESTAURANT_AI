@@ -10,17 +10,20 @@ $ErrorActionPreference = "Stop"
 
 function Get-Paths {
   $root = if ($InstallRoot) { [System.IO.Path]::GetFullPath($InstallRoot) } else { Split-Path -Parent $PSScriptRoot }
+  $packagedBackend = Join-Path $root "app\backend"
+  $isInstalledLayout = Test-Path (Join-Path $packagedBackend "src\server.js")
   $state = if ($StateRoot) {
     [System.IO.Path]::GetFullPath($StateRoot)
   } elseif ($env:RESTAURANTAI_STATE_ROOT) {
     [System.IO.Path]::GetFullPath($env:RESTAURANTAI_STATE_ROOT)
+  } elseif ($isInstalledLayout) {
+    Join-Path ([Environment]::GetFolderPath("CommonApplicationData")) "RestaurantAI"
   } else {
     $root
   }
 
-  $packagedBackend = Join-Path $root "app\backend"
-  $backend = if (Test-Path (Join-Path $packagedBackend "src\server.js")) { $packagedBackend } else { Join-Path $root "backend" }
-  $config = if ($StateRoot -or $env:RESTAURANTAI_STATE_ROOT) {
+  $backend = if ($isInstalledLayout) { $packagedBackend } else { Join-Path $root "backend" }
+  $config = if ($StateRoot -or $env:RESTAURANTAI_STATE_ROOT -or $isInstalledLayout) {
     Join-Path $state "config\.env"
   } elseif (Test-Path (Join-Path $root "config\.env")) {
     Join-Path $root "config\.env"
@@ -159,6 +162,10 @@ function Rotate-LogFile {
   }
 
   Move-Item -LiteralPath $Path -Destination "$Path.1" -Force
+}
+
+if ($env:RESTAURANTAI_SCRIPT_TEST_MODE -eq "1") {
+  return
 }
 
 $paths = Get-Paths

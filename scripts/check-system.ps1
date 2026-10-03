@@ -20,16 +20,19 @@ function Resolve-RestaurantRoot {
 function Get-AppPaths {
   param([string]$Root)
 
+  $packagedBackend = Join-Path $Root "app\backend"
+  $isInstalledLayout = Test-Path (Join-Path $packagedBackend "src\server.js")
   $state = if ($StateRoot) {
     [System.IO.Path]::GetFullPath($StateRoot)
   } elseif ($env:RESTAURANTAI_STATE_ROOT) {
     [System.IO.Path]::GetFullPath($env:RESTAURANTAI_STATE_ROOT)
+  } elseif ($isInstalledLayout) {
+    Join-Path ([Environment]::GetFolderPath("CommonApplicationData")) "RestaurantAI"
   } else {
     $Root
   }
 
-  $packagedBackend = Join-Path $Root "app\backend"
-  if (Test-Path (Join-Path $packagedBackend "src\server.js")) {
+  if ($isInstalledLayout) {
     return @{
       Root = $Root
       Backend = $packagedBackend
@@ -98,6 +101,10 @@ function Test-WritableDirectory {
   $probe = Join-Path $Path ".restaurantai-write-test"
   Set-Content -Path $probe -Value "ok" -Encoding ASCII
   Remove-Item -LiteralPath $probe -Force
+}
+
+if ($env:RESTAURANTAI_SCRIPT_TEST_MODE -eq "1") {
+  return
 }
 
 $root = Resolve-RestaurantRoot $InstallRoot

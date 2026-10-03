@@ -1,6 +1,6 @@
 #define MyAppName "RestaurantAI"
 #define MyAppPublisher "RestaurantAI"
-#define MyAppVersion "1.4.2"
+#define MyAppVersion "1.4.4"
 #define MyAppId "{{9A7811B0-8392-4C65-8A3E-5D7F9F86E35A}"
 #define SourceRoot "..\dist\RestaurantAI-Windows"
 #define StateRoot "{commonappdata}\RestaurantAI"

@@ -4787,6 +4787,153 @@ function startKioskMode() {
   startKioskPolling();
 }
 
+function setupCustomerOverlays() {
+  if (state.kiosk.enabled || state.tableQr.enabled) return;
+
+  document.body.classList.add("customer-overlays");
+  const trackingSection = document.querySelector("#track-orders");
+  const trackingDialog = document.createElement("dialog");
+  trackingDialog.id = "trackOrdersDialog";
+  trackingDialog.className = "customer-tracking-dialog";
+  trackingDialog.setAttribute("aria-labelledby", "trackOrdersTitle");
+  trackingSection.querySelector("h2").id = "trackOrdersTitle";
+  document.body.append(trackingDialog);
+  trackingDialog.append(trackingSection);
+
+  function closeButton(label) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "customer-overlay-close";
+    button.setAttribute("aria-label", label);
+    button.textContent = "\u00d7";
+    return button;
+  }
+
+  const trackingClose = closeButton("Close Track Orders");
+  trackingSection.prepend(trackingClose);
+  const chatPanel = elements.chatPanel;
+  const chatClose = closeButton("Close AI Assistant");
+  chatPanel.querySelector(".chat-header").append(chatClose);
+  chatPanel.setAttribute("role", "dialog");
+  chatPanel.setAttribute("aria-labelledby", "customerChatTitle");
+  chatPanel.querySelector("h3").id = "customerChatTitle";
+  elements.chatWidget.prepend(chatPanel);
+  chatPanel.hidden = true;
+  document.querySelector("#ai").hidden = true;
+
+  const trackingLinks = [...document.querySelectorAll("[data-track-entry]")];
+  const chatLinks = [...document.querySelectorAll('a[href="#ai"]'), elements.chatToggle];
+  for (const link of [...trackingLinks, ...chatLinks]) {
+    link.setAttribute("aria-haspopup", "dialog");
+    link.setAttribute("aria-expanded", "false");
+    link.setAttribute("aria-controls", trackingLinks.includes(link) ? trackingDialog.id : chatPanel.id);
+  }
+
+  let trackingOpener;
+  let chatOpener;
+  let savedOverflow;
+  let savedPadding;
+  let trackingScroll;
+
+  function positionChat() {
+    chatPanel.style.removeProperty("--customer-chat-shift");
+    if (chatPanel.hidden || window.matchMedia("(max-width: 768px)").matches) return;
+    const cart = document.querySelector(".cart-card")?.getBoundingClientRect();
+    const panel = chatPanel.getBoundingClientRect();
+    if (cart && cart.left >= panel.width + 12 && cart.left < panel.right &&
+        cart.right > panel.left && cart.top < panel.bottom && cart.bottom > panel.top) {
+      chatPanel.style.setProperty("--customer-chat-shift", `${panel.right - cart.left + 12}px`);
+    }
+  }
+
+  window.addEventListener("scroll", positionChat, { passive: true });
+  window.addEventListener("resize", positionChat);
+  if (typeof ResizeObserver !== "undefined") {
+    new ResizeObserver(positionChat).observe(document.querySelector(".cart-card"));
+  }
+
+  function closeChat(restoreFocus = true) {
+    if (chatPanel.hidden) return;
+    chatPanel.hidden = true;
+    chatLinks.forEach(link => link.setAttribute("aria-expanded", "false"));
+    if (restoreFocus) chatOpener?.focus({ preventScroll: true });
+  }
+
+  function closeTracking(restoreFocus = true) {
+    if (!trackingDialog.open) return;
+    trackingDialog.close();
+    document.body.style.overflow = savedOverflow;
+    document.body.style.paddingRight = savedPadding;
+    trackingLinks.forEach(link => link.setAttribute("aria-expanded", "false"));
+    if (restoreFocus) trackingOpener?.focus({ preventScroll: true });
+    window.scrollTo({ ...trackingScroll, behavior: "instant" });
+  }
+
+  trackingLinks.forEach(link => link.addEventListener("click", event => {
+    event.preventDefault();
+    closeChat(false);
+    if (trackingDialog.open) return;
+    trackingOpener = link;
+    trackingScroll = { left: window.scrollX, top: window.scrollY };
+    savedOverflow = document.body.style.overflow;
+    savedPadding = document.body.style.paddingRight;
+    const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth;
+    document.body.style.paddingRight = `${parseFloat(getComputedStyle(document.body).paddingRight) + scrollbarWidth}px`;
+    document.body.style.overflow = "hidden";
+    trackingDialog.showModal();
+    trackingLinks.forEach(entry => entry.setAttribute("aria-expanded", "true"));
+    (document.querySelector("#trackOrdersPhone") || trackingClose).focus({ preventScroll: true });
+    window.scrollTo({ ...trackingScroll, behavior: "instant" });
+  }));
+  trackingClose.addEventListener("click", () => closeTracking());
+  trackingDialog.addEventListener("cancel", event => {
+    event.preventDefault();
+    closeTracking();
+  });
+  trackingDialog.addEventListener("click", event => {
+    const bounds = trackingDialog.getBoundingClientRect();
+    if (event.target === trackingDialog &&
+        (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom)) {
+      closeTracking();
+    }
+  });
+
+  chatLinks.forEach(link => link.addEventListener("click", event => {
+    event.preventDefault();
+    if (!chatPanel.hidden && link === elements.chatToggle) {
+      closeChat();
+      return;
+    }
+    closeTracking(false);
+    chatOpener = link;
+    chatPanel.hidden = false;
+    positionChat();
+    chatLinks.forEach(entry => entry.setAttribute("aria-expanded", "true"));
+    // Avoid opening the mobile keyboard until the customer taps the message field.
+    (window.matchMedia("(max-width: 768px)").matches ? chatClose : elements.chatInput).focus({ preventScroll: true });
+  }));
+  chatClose.addEventListener("click", () => closeChat());
+  document.addEventListener("keydown", event => {
+    if (event.key === "Tab" && trackingDialog.open) {
+      const controls = [...trackingDialog.querySelectorAll('button:not(:disabled), input:not(:disabled), a[href], [tabindex="0"]')]
+        .filter(control => control.getClientRects().length);
+      const first = controls[0];
+      const last = controls[controls.length - 1];
+      if (!trackingDialog.contains(document.activeElement) ||
+          (event.shiftKey && document.activeElement === first) ||
+          (!event.shiftKey && document.activeElement === last)) {
+        event.preventDefault();
+        (event.shiftKey ? last : first)?.focus({ preventScroll: true });
+      }
+    }
+    if (event.key === "Escape" && !chatPanel.hidden) {
+      event.preventDefault();
+      closeChat();
+    }
+  });
+  elements.mobileCartButton?.addEventListener("click", () => closeChat(false));
+}
+
 function bindEvents() {
   elements.filters.addEventListener("click", (event) => {
     const button = event.target.closest("[data-category]");
@@ -4980,6 +5127,7 @@ function bindEvents() {
   });
 
   elements.chatToggle.addEventListener("click", () => {
+    if (!state.kiosk.enabled && !state.tableQr.enabled) return;
     document.querySelector("#ai").scrollIntoView({ behavior: "smooth" });
     window.setTimeout(() => {
       elements.chatInput.focus();
@@ -5039,7 +5187,8 @@ function bindEvents() {
 }
 
 function setupActiveNavigation() {
-  const navLinks = Array.from(document.querySelectorAll(".main-nav a[href^='#']"));
+  const navLinks = Array.from(document.querySelectorAll(".main-nav a[href^='#']"))
+    .filter(link => link.getAttribute("aria-haspopup") !== "dialog");
   const navTargets = navLinks
     .map((link) => document.querySelector(link.getAttribute("href")))
     .filter(Boolean);
@@ -5243,6 +5392,7 @@ if (startTrackingPage()) {
   renderMenu();
   renderCart();
   renderTrackOrders();
+  setupCustomerOverlays();
   bindEvents();
   setupActiveNavigation();
   loadLiveMenu({ background: restoredCachedMenu });

@@ -1,6 +1,6 @@
 {
   "name": "restaurantai-backend",
-  "version": "1.4.2",
+  "version": "1.4.4",
   "description": "RestaurantAI Backend - Express.js API Server",
   "main": "src/server.js",
   "type": "module",

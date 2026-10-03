@@ -11,6 +11,7 @@ import {
   getCustomerByEmail,
   sendCustomerOtp,
   verifyCustomerOtp,
+  getVerifiedCustomerOrders,
   addLoyaltyPoints,
   searchCustomers,
   deleteCustomer,
@@ -36,6 +37,13 @@ const otpVerifyLimiter = createRateLimiter({
   message: "Too many OTP verification attempts. Please wait a moment and try again.",
 });
 
+const verifiedOrderLookupLimiter = createRateLimiter({
+  windowMs: 60_000,
+  max: 10,
+  keyPrefix: "customers:orders:verified",
+  message: "Too many order lookup attempts. Please wait a moment and try again.",
+});
+
 // Public routes
 router.get("/search", searchCustomers);
 router.get("/phone/:phone", getCustomerByPhone);
@@ -43,6 +51,7 @@ router.get("/email/:email", getCustomerByEmail);
 router.post("/", createCustomer);
 router.post("/otp/send", otpSendLimiter, sendCustomerOtp);
 router.post("/otp/verify", otpVerifyLimiter, verifyCustomerOtp);
+router.post("/orders", verifiedOrderLookupLimiter, getVerifiedCustomerOrders);
 
 // Admin routes (requires authentication)
 router.get("/", authMiddleware, getAllCustomers);

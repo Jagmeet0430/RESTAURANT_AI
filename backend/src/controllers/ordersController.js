@@ -11,6 +11,7 @@ import {
 import { requireVerifiedPhoneToken } from "../services/otpService.js";
 import { createBillForOrder } from "../services/billingService.js";
 import { deductInventoryForOrder } from "../services/inventoryStockService.js";
+import { requestKioskReceiptAutoPrint } from "../services/kioskReceiptAutoPrintService.js";
 import { ensureOrderSecuritySchema } from "../services/orderSchemaService.js";
 import {
   normalizeOrderStatus,
@@ -340,6 +341,7 @@ export const createOrder = asyncHandler(async (req, res) => {
         const existingOrder = await client.query("SELECT * FROM orders WHERE idempotency_key = $1 LIMIT 1", [idempotencyKey]);
         if (existingOrder.rowCount > 0) {
           await client.query("COMMIT");
+          requestKioskReceiptAutoPrint(existingOrder.rows[0], { reason: "duplicate_public_order" });
           return successResponse(res, existingOrder.rows[0], "Duplicate order request ignored");
         }
       }
@@ -481,6 +483,7 @@ export const createOrder = asyncHandler(async (req, res) => {
       );
 
       await client.query("COMMIT");
+      requestKioskReceiptAutoPrint(order, { reason: "public_order_created" });
       sendOrderStatusNotification(order).catch((error) =>
         console.error("WhatsApp order confirmation failed:", error.message)
       );

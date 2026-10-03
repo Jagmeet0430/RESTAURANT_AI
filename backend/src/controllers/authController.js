@@ -34,9 +34,11 @@ export const register = asyncHandler(async (req, res) => {
     return errorResponse(res, "Invalid role", 400);
   }
 
+  const normalizedEmail = String(email).trim().toLowerCase();
+
   const existingAdmin = await pool.query(
     "SELECT * FROM admins WHERE email = $1",
-    [String(email).trim().toLowerCase()]
+    [normalizedEmail]
   );
 
   if (existingAdmin.rows.length > 0) {
@@ -50,7 +52,7 @@ export const register = asyncHandler(async (req, res) => {
     (name,email,password,role,is_active)
     VALUES ($1,$2,$3,$4,true)
     RETURNING id,name,email,role`,
-    [String(name).trim(), String(email).trim().toLowerCase(), hashedPassword, normalizedRole]
+    [String(name).trim(), normalizedEmail, hashedPassword, normalizedRole]
   );
 
   const admin = result.rows[0];
@@ -90,9 +92,12 @@ export const login = asyncHandler(async (req, res) => {
     );
   }
 
+  const normalizedEmail = String(email).trim().toLowerCase();
+  const cleanPassword = String(password);
+
   const result = await pool.query(
     "SELECT * FROM admins WHERE email = $1",
-    [String(email).trim().toLowerCase()]
+    [normalizedEmail]
   );
 
   if (result.rows.length === 0) {
@@ -113,7 +118,7 @@ export const login = asyncHandler(async (req, res) => {
     );
   }
 
-  const match = await bcrypt.compare(password, admin.password);
+  const match = await bcrypt.compare(cleanPassword, admin.password);
 
   if (!match) {
     return errorResponse(

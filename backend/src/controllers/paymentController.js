@@ -7,7 +7,7 @@ import { createBillForOrder, normalizeStaffPaymentMethod, payOrder } from "../se
 import { deductInventoryForOrder } from "../services/inventoryStockService.js";
 import { createCustomerNotification, ensureNotificationTable } from "../services/orderLifecycleService.js";
 import { requireVerifiedPhoneToken } from "../services/otpService.js";
-import { printOrderReceipt } from "../services/receiptPrinterService.js";
+import { requestKioskReceiptAutoPrint } from "../services/kioskReceiptAutoPrintService.js";
 import { ensureOrderSecuritySchema } from "../services/orderSchemaService.js";
 import { sendOrderStatusNotification } from "../services/notificationService.js";
 import {
@@ -35,29 +35,6 @@ const MAX_TOTAL_QUANTITY = Math.max(MAX_ITEM_QUANTITY, Number(process.env.MAX_TO
 const ONLINE_METHODS = new Set(["upi", "card", "netbanking", "wallet"]);
 const OFFLINE_METHODS = new Set(["cash_on_delivery", "pay_at_counter"]);
 const PUBLIC_WEBSITE_ORDER_SOURCES = new Set(["customer_web", "website"]);
-
-function requestAutomaticOrderReceipt(order) {
-  const orderSource = String(order?.order_source || "").toLowerCase();
-  if (!Number.isInteger(Number(order?.id)) || orderSource !== "kiosk") return;
-
-  printOrderReceipt(pool, Number(order.id), { source: "kiosk" })
-    .then((result) => {
-      console.info("[RECEIPT_PRINT] automatic order result", {
-        orderId: Number(order.id),
-        orderSource,
-        printed: Boolean(result?.printed),
-        skipped: Boolean(result?.skipped),
-        reason: result?.reason || "",
-      });
-    })
-    .catch((error) => {
-      console.error("[RECEIPT_PRINT] automatic order request failed", {
-        orderId: Number(order.id),
-        orderSource,
-        message: error?.message || "Unknown print error",
-      });
-    });
-}
 
 export const getPaymentMethods = (req, res) => {
   const onlineEnabled = Boolean(process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET);
@@ -701,7 +678,7 @@ export const createCashOrder = async (req, res) => {
 
     if (duplicate) {
       await client.query("COMMIT");
-      requestAutomaticOrderReceipt(order);
+      requestKioskReceiptAutoPrint(order, { reason: "duplicate_cash_order" });
       return res.status(200).json({
         success: true,
         message: "Duplicate order request ignored",
@@ -732,7 +709,7 @@ export const createCashOrder = async (req, res) => {
     });
 
     await client.query("COMMIT");
-    requestAutomaticOrderReceipt(order);
+    requestKioskReceiptAutoPrint(order, { reason: "cash_order_created" });
     sendOrderStatusNotification({ ...order, customer_name: customer.name, customer_phone: order.customer_phone }).catch((error) =>
       console.error("WhatsApp order confirmation failed:", error.message)
     );

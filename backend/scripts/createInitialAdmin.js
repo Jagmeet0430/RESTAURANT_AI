@@ -24,7 +24,7 @@ for (const key of required) {
 }
 
 const adminName = process.env.ADMIN_SETUP_NAME;
-const adminEmail = process.env.ADMIN_SETUP_EMAIL;
+const adminEmail = String(process.env.ADMIN_SETUP_EMAIL || "").trim().toLowerCase();
 const adminPassword = process.env.ADMIN_SETUP_PASSWORD;
 
 if (!adminName || !adminEmail || !adminPassword) {
@@ -54,7 +54,7 @@ try {
     await pool.query(
       `INSERT INTO admins (name, email, password, role, is_active)
        VALUES ($1, $2, $3, 'admin', true)`,
-      [adminName, adminEmail, hashedPassword]
+      [adminName.trim(), adminEmail, hashedPassword]
     );
 
     console.log("Initial admin account created.");

@@ -1,10 +1,12 @@
 // Customers Controller
 import { pool } from "../config/database.js";
 import { successResponse, errorResponse, asyncHandler } from "../utils/index.js";
-import { createPhoneOtp, verifyPhoneOtp } from "../services/otpService.js";
+import { createPhoneOtp, requireVerifiedPhoneToken, verifyPhoneOtp } from "../services/otpService.js";
 import { normalizePhoneNumber, phoneLookupCandidates } from "../utils/phoneNumber.js";
 
 const VALID_CUSTOMER_ORDER_WHERE = "COALESCE(status, '') <> 'Cancelled'";
+const ACTIVE_CUSTOMER_ORDER_STATUSES = ["confirmed", "accepted", "preparing", "ready", "out_for_delivery"];
+const RECENT_CUSTOMER_ORDER_STATUSES = ["completed", "cancelled"];
 
 const customerOrderTotalsCte = `
   WITH order_totals AS (
@@ -72,6 +74,25 @@ async function queryCustomerSummary(params = [], whereSql = "c.is_active = true"
     total_orders: Number(result.rows[0]?.total_orders || 0),
     total_spent: Number(result.rows[0]?.total_spent || 0),
     top_customer: result.rows[0]?.top_customer || null,
+  };
+}
+
+function customerTrackingUrl(trackingToken) {
+  if (!trackingToken) return null;
+  const frontendUrl = String(process.env.FRONTEND_URL || "http://localhost:5001/customer").replace(/\/+$/, "");
+  return `${frontendUrl}/track-order/${trackingToken}`;
+}
+
+function publicCustomerOrder(row) {
+  return {
+    id: row.id,
+    order_number: row.order_number,
+    order_type: row.order_type,
+    status: row.status,
+    total_amount: Number(row.total_amount || 0),
+    created_at: row.created_at,
+    tracking_token: row.tracking_token,
+    tracking_url: customerTrackingUrl(row.tracking_token),
   };
 }
 
@@ -280,6 +301,66 @@ export const verifyCustomerOtp = asyncHandler(async (req, res) => {
   } catch (error) {
     return errorResponse(res, error.message, error.statusCode || 500);
   }
+});
+
+export const getVerifiedCustomerOrders = asyncHandler(async (req, res) => {
+  const { phone, otp_verification_token } = req.body || {};
+  let normalizedPhone;
+  let phoneCandidates;
+
+  try {
+    normalizedPhone = normalizePhoneNumber(phone);
+    phoneCandidates = phoneLookupCandidates(phone);
+  } catch (error) {
+    return errorResponse(res, error.message, error.statusCode || 400);
+  }
+
+  if (!otp_verification_token) {
+    return errorResponse(res, "Phone verification token is required.", 401);
+  }
+
+  try {
+    await requireVerifiedPhoneToken(normalizedPhone, otp_verification_token, {
+      consume: false,
+    });
+  } catch (error) {
+    return errorResponse(res, error.message, error.statusCode || 401);
+  }
+
+  const orders = await pool.query(
+    `SELECT
+       o.id,
+       o.order_number,
+       o.order_type,
+       o.status,
+       o.total_amount,
+       o.created_at,
+       o.tracking_token,
+       CASE
+         WHEN LOWER(REPLACE(COALESCE(o.status, ''), ' ', '_')) = ANY($2::text[])
+         THEN 0
+         ELSE 1
+       END AS order_group
+     FROM orders o
+     JOIN customers c ON c.id = o.customer_id
+     WHERE (
+       COALESCE(o.customer_phone, c.phone) = ANY($1::text[])
+       OR c.phone = ANY($1::text[])
+     )
+       AND LOWER(REPLACE(COALESCE(o.status, ''), ' ', '_')) = ANY($3::text[])
+     ORDER BY order_group ASC, o.created_at DESC
+     LIMIT 20`,
+    [phoneCandidates, ACTIVE_CUSTOMER_ORDER_STATUSES, [...ACTIVE_CUSTOMER_ORDER_STATUSES, ...RECENT_CUSTOMER_ORDER_STATUSES]]
+  );
+
+  return successResponse(
+    res,
+    {
+      phone: normalizedPhone,
+      orders: orders.rows.map(publicCustomerOrder),
+    },
+    "Customer orders retrieved successfully"
+  );
 });
 
 // Update customer

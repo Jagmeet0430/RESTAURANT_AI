@@ -77,6 +77,17 @@ export const jwtConfig = {
   expire: process.env.JWT_EXPIRE || "7d",
 };
 
+const isProduction = (process.env.NODE_ENV || "development") === "production";
+if (isProduction) {
+  const missingSecrets = [];
+  if (!jwtConfig.secret) missingSecrets.push("JWT_SECRET");
+  if (!process.env.OTP_SECRET) missingSecrets.push("OTP_SECRET");
+
+  if (missingSecrets.length > 0) {
+    throw new Error(`Missing required production secret(s): ${missingSecrets.join(", ")}`);
+  }
+}
+
 export const fileConfig = {
   maxSize: Number(process.env.MAX_FILE_SIZE || 5242880),
 

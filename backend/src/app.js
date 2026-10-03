@@ -28,6 +28,7 @@ import cors from "cors";
 
 import { pool } from "./config/database.js";
 import { appConfig, corsConfig } from "./config/index.js";
+import { createCorsOptions } from "./config/corsPolicy.js";
 import { getDiagnostics, getReadiness } from "./services/diagnosticsService.js";
 import { logger, requestMeta } from "./utils/logger.js";
 import { authMiddleware, authorizeRoles } from "./middleware/index.js";
@@ -69,78 +70,13 @@ const app = express();
 // CORS configuration
 // ======================================================
 
-const defaultAllowedOrigins = [
-  "https://mahesh-bakery-menu.dwivedibharat969.chatgpt.site",
-  "http://localhost:5500",
-  "http://localhost:5501",
-  "http://localhost:5173",
-  "http://localhost:5174",
-  "http://127.0.0.1:5500",
-  "http://127.0.0.1:5501",
-  "http://127.0.0.1:5173",
-  "http://127.0.0.1:5174",
-];
-
-const allowedOrigins = [
-  ...new Set(
-    [
-      ...defaultAllowedOrigins,
-      ...corsConfig.origins,
-      process.env.FRONTEND_URL,
-      process.env.ADMIN_URL,
-    ].filter(Boolean)
-  ),
-];
-
-const isDevelopment = process.env.NODE_ENV !== "production";
-
-const isPrivateLanHostname = (hostname) =>
-  hostname.startsWith("192.168.") ||
-  hostname.startsWith("10.") ||
-  /^172\.(1[6-9]|2\d|3[0-1])\./.test(hostname);
-
-const expectedRuntimePorts = [
-  ...new Set([...corsConfig.lanClientPorts, String(appConfig.port)].filter(Boolean)),
-];
-
-const isExpectedClientOrigin = (origin, { allowPrivateLan = false } = {}) => {
-  if (origin === "null") {
-    return isDevelopment;
-  }
-
-  try {
-    const { hostname, port, protocol } = new URL(origin);
-    const isHttp = protocol === "http:" || protocol === "https:";
-    const isExpectedPort = expectedRuntimePorts.includes(port);
-    const isLocalHost = hostname === "localhost" || hostname === "127.0.0.1";
-    const isPrivateLan = isPrivateLanHostname(hostname);
-
-    return isHttp && isExpectedPort && (isLocalHost || (allowPrivateLan && isPrivateLan));
-  } catch {
-    return false;
-  }
-};
-
-const isAllowedLocalRuntimeOrigin = (origin) =>
-  (isDevelopment || appConfig.mode === "local") &&
-  isExpectedClientOrigin(origin, {
-    allowPrivateLan: corsConfig.allowLanOrigins,
-  });
-
-const corsOptions = {
-  origin(origin, callback) {
-    if (!origin || allowedOrigins.includes(origin) || isAllowedLocalRuntimeOrigin(origin)) {
-      return callback(null, true);
-    }
-
-    logger.warn("Blocked CORS origin", { origin });
-    return callback(new Error(`CORS blocked origin: ${origin}`));
-  },
-  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization", "Accept", "Idempotency-Key"],
-  credentials: true,
-  optionsSuccessStatus: 204,
-};
+const corsOptions = createCorsOptions({
+  appConfig,
+  corsConfig,
+  frontendUrl: process.env.FRONTEND_URL,
+  adminUrl: process.env.ADMIN_URL,
+  onRejected: (origin) => logger.warn("Blocked CORS origin", { origin }),
+});
 
 // CORS must be before routes
 app.use(cors(corsOptions));

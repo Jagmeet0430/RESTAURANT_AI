@@ -26,6 +26,10 @@ function programDataRoot() {
     return path.resolve(process.env.RESTAURANTAI_PRINTER_STATE_ROOT);
   }
 
+  if (process.env.RESTAURANTAI_STATE_ROOT) {
+    return path.resolve(process.env.RESTAURANTAI_STATE_ROOT);
+  }
+
   if (process.platform === "win32" && process.env.ProgramData) {
     return path.join(process.env.ProgramData, "RestaurantAI");
   }
@@ -54,6 +58,19 @@ async function readJsonFile(filePath, fallback) {
   }
 }
 
+async function readPrinterConfigFile(configPath) {
+  try {
+    return JSON.parse(await fs.readFile(configPath, "utf8"));
+  } catch (error) {
+    if (error.code === "ENOENT") {
+      logger.warn("Printer configuration file is missing", { configPath });
+    } else {
+      logger.warn("Could not read printer configuration file", { configPath, error });
+    }
+    return DEFAULT_PRINTER_CONFIG;
+  }
+}
+
 async function writeJsonFile(filePath, payload) {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
   const tempPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
@@ -79,8 +96,19 @@ export async function getPrinterConfig() {
   const configPath = getPrinterConfigPath();
   return {
     configPath,
-    config: cleanPrinterConfig(await readJsonFile(configPath, DEFAULT_PRINTER_CONFIG)),
+    config: cleanPrinterConfig(await readPrinterConfigFile(configPath)),
   };
+}
+
+function normalizePrintSource(value = "") {
+  const normalized = String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+
+  if (normalized === "customer_kiosk" || normalized === "self_order_kiosk") return "kiosk";
+  return normalized;
 }
 
 function printStorePath() {
@@ -366,6 +394,7 @@ async function spoolReceiptText({ receipt, config, duplicate = false }) {
 
 export async function printOrderReceipt(client, orderId, { source = "manual", force = false, duplicate = false } = {}) {
   const parsedOrderId = Number(orderId);
+  const normalizedSource = normalizePrintSource(source);
   if (!Number.isInteger(parsedOrderId) || parsedOrderId < 1) {
     const error = new Error("Invalid order ID");
     error.statusCode = 400;
@@ -400,7 +429,7 @@ export async function printOrderReceipt(client, orderId, { source = "manual", fo
       };
     }
 
-    if (source === "kiosk" && !config.autoPrintKioskOrders) {
+    if (normalizedSource === "kiosk" && !config.autoPrintKioskOrders) {
       return { printed: false, skipped: true, reason: "kiosk_auto_print_disabled", configPath };
     }
 
@@ -420,7 +449,7 @@ export async function printOrderReceipt(client, orderId, { source = "manual", fo
 
     await markPrintAttempt(parsedOrderId, {
       result: "attempting",
-      source,
+      source: normalizedSource,
       printerName: config.printerName,
       attemptedAt: new Date().toISOString(),
     });
@@ -435,7 +464,7 @@ export async function printOrderReceipt(client, orderId, { source = "manual", fo
       const result = await spoolReceiptText({ receipt, config, duplicate });
       await markPrintAttempt(parsedOrderId, {
         result: "printed",
-        source,
+        source: normalizedSource,
         printerName: config.printerName,
         paperWidth: config.paperWidth,
         copies: config.copies,
@@ -444,7 +473,7 @@ export async function printOrderReceipt(client, orderId, { source = "manual", fo
       });
       logger.info("[RECEIPT_PRINT] success recorded", {
         orderId: parsedOrderId,
-        source,
+        source: normalizedSource,
         printerName: config.printerName,
         exitCode: result.exitCode,
         stdout: result.stdout,
@@ -454,12 +483,12 @@ export async function printOrderReceipt(client, orderId, { source = "manual", fo
     } catch (error) {
       await markPrintAttempt(parsedOrderId, {
         result: "failed",
-        source,
+        source: normalizedSource,
         printerName: config.printerName,
         failedAt: new Date().toISOString(),
         error: error.message,
       });
-      logger.error("Thermal receipt print failed", { orderId: parsedOrderId, source, error });
+      logger.error("Thermal receipt print failed", { orderId: parsedOrderId, source: normalizedSource, error });
       return { printed: false, skipped: false, failed: true, message: error.message, printerName: config.printerName };
     }
   } finally {

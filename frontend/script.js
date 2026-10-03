@@ -1007,7 +1007,12 @@ function publicMenuCachePayload(items) {
 function normalizeMenuItems(items) {
   return (Array.isArray(items) ? items : [])
     .map(normalizeApiMenuItem)
-    .filter((item) => item.name && Number.isFinite(item.price));
+    .filter((item) => item.name && Number.isFinite(item.price))
+    .filter((item) => {
+      if (state.kiosk.enabled || state.tableQr.enabled) return true;
+      // Offline smoke-test categories are not part of the public restaurant menu.
+      return !/^OFFLINE_KITCHEN_TEST_\d+_CATEGORY$/i.test(String(item.category).trim());
+    });
 }
 
 function readPublicMenuCache() {

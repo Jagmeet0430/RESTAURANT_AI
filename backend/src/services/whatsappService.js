@@ -1,3 +1,7 @@
+import { maskPhoneNumber } from "../utils/phoneNumber.js";
+import { isWhatsAppEnabled, validateWhatsAppConfiguration } from "../config/messagingConfig.js";
+import { sendTwilioMessage } from "./twilioMessageService.js";
+
 const providerName = () => String(process.env.WHATSAPP_PROVIDER || "mock").toLowerCase();
 
 function whatsappNumber(phone) {
@@ -5,6 +9,8 @@ function whatsappNumber(phone) {
 }
 
 export async function sendWhatsAppMessage({ to, body, templateName, templateLanguage = "en" }) {
+  if (!isWhatsAppEnabled()) return { provider: null, providerMessageId: null, deliveryStatus: "disabled" };
+  validateWhatsAppConfiguration();
   const provider = providerName();
 
   if (provider === "meta") {
@@ -44,6 +50,8 @@ export async function sendWhatsAppMessage({ to, body, templateName, templateLang
 
     if (!response.ok) {
       const error = new Error(data.error?.message || "Meta WhatsApp send failed");
+      error.code = data.error?.code;
+      error.providerStatus = response.status;
       error.temporary = response.status >= 500 || response.status === 429;
       throw error;
     }
@@ -60,45 +68,10 @@ export async function sendWhatsAppMessage({ to, body, templateName, templateLang
       throw Object.assign(new Error("Twilio WhatsApp credentials are not configured"), { temporary: false });
     }
 
-    const auth = Buffer.from(`${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`).toString("base64");
-    const form = new URLSearchParams({
-      From: process.env.TWILIO_WHATSAPP_NUMBER,
-      To: `whatsapp:${to}`,
-      Body: body,
-    });
-
-    const response = await fetch(
-      `https://api.twilio.com/2010-04-01/Accounts/${process.env.TWILIO_ACCOUNT_SID}/Messages.json`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Basic ${auth}`,
-          "Content-Type": "application/x-www-form-urlencoded",
-        },
-        body: form,
-      }
-    );
-    const data = await response.json().catch(() => ({}));
-
-    if (!response.ok) {
-      const error = new Error(data.message || "Twilio WhatsApp send failed");
-      error.temporary = response.status >= 500 || response.status === 429;
-      throw error;
-    }
-
-    return {
-      provider,
-      providerMessageId: data.sid || null,
-      deliveryStatus: data.status || "sent",
-    };
+    return sendTwilioMessage({ to: `whatsapp:${to}`, body, from: process.env.TWILIO_WHATSAPP_NUMBER });
   }
 
-  if (process.env.NODE_ENV === "production") {
-    throw Object.assign(new Error("WHATSAPP_PROVIDER must be meta or twilio in production"), { temporary: false });
-  }
-
-  const safeBody = String(body || "").replace(/\b\d{6}\b/g, "******");
-  console.log(`WhatsApp mock message to ${to}: ${safeBody}`);
+  console.log(`WhatsApp mock message to ${maskPhoneNumber(to)} (content omitted)`);
   return {
     provider: "mock",
     providerMessageId: `mock-${Date.now()}`,

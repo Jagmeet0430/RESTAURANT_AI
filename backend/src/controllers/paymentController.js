@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 
 import { getRazorpayClient } from "../config/razorpay.js";
 import { pool } from "../config/database.js";
+import { publicOrderOtpRequired } from "../config/publicOrderConfig.js";
 import { authMiddleware, authorizeRoles } from "../middleware/index.js";
 import { createBillForOrder, normalizeStaffPaymentMethod, payOrder } from "../services/billingService.js";
 import { deductInventoryForOrder } from "../services/inventoryStockService.js";
@@ -185,7 +186,7 @@ async function enforcePublicWebsiteOrderRules(client, { orderSource, orderType, 
     throw error;
   }
 
-  if (!otpToken) {
+  if (publicOrderOtpRequired() && !otpToken) {
     const error = new Error("Please verify your phone number before placing the order.");
     error.statusCode = 401;
     throw error;

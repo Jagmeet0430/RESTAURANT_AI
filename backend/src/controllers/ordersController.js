@@ -1,5 +1,6 @@
 // Orders Controller
 import { pool } from "../config/database.js";
+import { publicOrderOtpRequired } from "../config/publicOrderConfig.js";
 import { successResponse, errorResponse, asyncHandler } from "../utils/index.js";
 import {
   ORDER_VISIBILITY_MINUTES,
@@ -71,7 +72,7 @@ async function enforcePublicWebsiteOrderRules(client, { orderSource, orderType, 
     throw error;
   }
 
-  if (!otpToken) {
+  if (publicOrderOtpRequired() && !otpToken) {
     const error = new Error("Please verify your phone number before placing the order.");
     error.statusCode = 401;
     throw error;

@@ -2,7 +2,8 @@ import crypto from "node:crypto";
 
 import { pool } from "../config/database.js";
 import { normalizePhoneNumber } from "../utils/phoneNumber.js";
-import { sendWhatsAppMessage } from "./whatsappService.js";
+import { sendOtpMessage } from "./otpDeliveryService.js";
+import { logOtpSendFailure } from "./otpDiagnostics.js";
 
 const OTP_LENGTH = 6;
 const OTP_EXPIRY_MINUTES = Number(process.env.OTP_EXPIRY_MINUTES || 5);
@@ -81,8 +82,20 @@ export function normalizePhone(phone = "") {
   return normalizePhoneNumber(phone);
 }
 
-export async function createPhoneOtp(phone, { req = null } = {}) {
+export async function createPhoneOtp(phone, { req = null, deliveryChannel } = {}) {
+  const diagnostic = { phone, stage: "normalize_phone", sensitiveValues: [], channel: deliveryChannel };
+  try {
+    return await issuePhoneOtp(phone, req, diagnostic, deliveryChannel);
+  } catch (error) {
+    if (diagnostic.loggedError !== error) logOtpSendFailure(error, diagnostic);
+    throw error;
+  }
+}
+
+async function issuePhoneOtp(phone, req, diagnostic, deliveryChannel) {
   const normalizedPhone = normalizePhoneNumber(phone);
+  diagnostic.phone = normalizedPhone;
+  diagnostic.stage = "phone_verifications_select";
 
   const recent = await pool.query(
     `SELECT COUNT(*)::int AS count,
@@ -94,6 +107,7 @@ export async function createPhoneOtp(phone, { req = null } = {}) {
     [normalizedPhone]
   );
 
+  diagnostic.stage = "rate_limit";
   const blockedUntil = recent.rows[0]?.blocked_until ? new Date(recent.rows[0].blocked_until) : null;
   if (blockedUntil && blockedUntil.getTime() > Date.now()) {
     const error = new Error("Too many OTP attempts. Please try again later.");
@@ -111,18 +125,22 @@ export async function createPhoneOtp(phone, { req = null } = {}) {
 
   const requestCount = Number(recent.rows[0]?.count || 0);
   if (requestCount >= OTP_MAX_REQUESTS) {
+    diagnostic.stage = "phone_verifications_block_insert";
     await pool.query(
       `INSERT INTO phone_verifications
          (phone_number, otp_hash, expires_at, request_count, blocked_until, ip_address, user_agent)
        VALUES ($1, $2, NOW(), $3, NOW() + INTERVAL '15 minutes', $4, $5)`,
       [normalizedPhone, "blocked", requestCount + 1, clientIp(req), String(req?.headers?.["user-agent"] || "").slice(0, 500)]
     );
+    diagnostic.stage = "rate_limit";
     const error = new Error("Maximum OTP requests reached. Please try again after 15 minutes.");
     error.statusCode = 429;
     throw error;
   }
 
   const otp = generateOtp();
+  diagnostic.sensitiveValues.push(otp);
+  diagnostic.stage = "phone_verifications_insert";
   const result = await pool.query(
     `INSERT INTO phone_verifications
        (phone_number, otp_hash, expires_at, request_count, ip_address, user_agent)
@@ -139,12 +157,19 @@ export async function createPhoneOtp(phone, { req = null } = {}) {
   );
 
   try {
-    await sendWhatsAppMessage({
+    diagnostic.stage = "provider_send";
+    await sendOtpMessage({
+      channel: deliveryChannel,
       to: normalizedPhone,
       body: `Your MAHESH order verification OTP is ${otp}. It expires in ${OTP_EXPIRY_MINUTES} minutes.`,
     });
   } catch (error) {
+    // Record delivery failure before cleanup, which can fail independently.
+    logOtpSendFailure(error, diagnostic);
+    diagnostic.loggedError = error;
+    diagnostic.stage = "phone_verifications_cleanup";
     await pool.query("DELETE FROM phone_verifications WHERE id = $1", [result.rows[0].id]);
+    diagnostic.stage = "provider_send";
     throw error;
   }
 

@@ -1,11 +1,14 @@
 import dotenv from "dotenv";
 import path from "path";
+import { validateWhatsAppConfiguration } from "./messagingConfig.js";
 
 dotenv.config(
   process.env.RESTAURANTAI_ENV_FILE || process.env.RESTAURANTAI_ENV_PATH
     ? { path: process.env.RESTAURANTAI_ENV_FILE || process.env.RESTAURANTAI_ENV_PATH }
     : undefined
 );
+
+validateWhatsAppConfiguration();
 
 const parseBoolean = (value, defaultValue = false) => {
   if (value === undefined || value === null || value === "") {

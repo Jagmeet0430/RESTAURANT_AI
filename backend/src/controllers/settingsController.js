@@ -1,5 +1,6 @@
 import bcrypt from "bcryptjs";
 import { pool } from "../config/database.js";
+import { publicOrderOtpRequired } from "../config/publicOrderConfig.js";
 import { asyncHandler, errorResponse, successResponse } from "../utils/index.js";
 
 const SETTINGS_KEY = "restaurant";
@@ -102,7 +103,7 @@ function publicSettings(settings) {
   return publicFields.reduce((publicData, field) => {
     publicData[field] = settings[field];
     return publicData;
-  }, {});
+  }, { public_order_otp_required: publicOrderOtpRequired() });
 }
 
 function validateSettings(settings) {

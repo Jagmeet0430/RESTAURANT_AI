@@ -3,7 +3,7 @@ import { createPhoneOtp, verifyPhoneOtp } from "../services/otpService.js";
 
 export const sendWhatsAppOtp = asyncHandler(async (req, res) => {
   try {
-    const otp = await createPhoneOtp(req.body.phone, { req });
+    const otp = await createPhoneOtp(req.body.phone, { req, deliveryChannel: "whatsapp" });
     return successResponse(
       res,
       otp,

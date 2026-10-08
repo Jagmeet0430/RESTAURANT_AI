@@ -2,6 +2,7 @@ import { pool } from "../config/database.js";
 import { maskPhoneNumber } from "../utils/phoneNumber.js";
 import { normalizeOrderStatus } from "./orderStatusService.js";
 import { sendWhatsAppMessage } from "./whatsappService.js";
+import { isWhatsAppEnabled } from "../config/messagingConfig.js";
 
 function frontendUrl() {
   return String(process.env.FRONTEND_URL || "http://localhost:5001/customer").replace(/\/$/, "");
@@ -77,6 +78,7 @@ async function createNotificationRecord({ order, body, retryOf = null }) {
 }
 
 export async function sendOrderStatusNotification(order) {
+  if (!isWhatsAppEnabled()) return null;
   if (!order.customer_phone || !order.tracking_token) return null;
 
   const body = messageForOrderStatus(order);
@@ -110,6 +112,7 @@ export async function sendOrderStatusNotification(order) {
 }
 
 export async function retryWhatsAppNotification(orderId) {
+  if (!isWhatsAppEnabled()) return null;
   const failed = await pool.query(
     `SELECT *
      FROM whatsapp_notifications

@@ -2,6 +2,7 @@
 import { pool } from "../config/database.js";
 import { successResponse, errorResponse, asyncHandler } from "../utils/index.js";
 import { createPhoneOtp, requireVerifiedPhoneToken, verifyPhoneOtp } from "../services/otpService.js";
+import { logOtpSendFailure } from "../services/otpDiagnostics.js";
 import { normalizePhoneNumber, phoneLookupCandidates } from "../utils/phoneNumber.js";
 
 const VALID_CUSTOMER_ORDER_WHERE = "COALESCE(status, '') <> 'Cancelled'";
@@ -281,11 +282,15 @@ export const sendCustomerOtp = asyncHandler(async (req, res) => {
         expires_at: otp.expires_at,
         resend_after_seconds: otp.resend_after_seconds,
       },
-      "OTP sent to WhatsApp"
+      "OTP sent"
     );
   } catch (error) {
     if (error.retryAfter) res.set("Retry-After", String(error.retryAfter));
-    return errorResponse(res, error.message, error.statusCode || 500);
+    logOtpSendFailure(error, { phone: req.body?.phone, stage: "controller" });
+    const status = error.statusCode || 500;
+    return errorResponse(res, status >= 500
+      ? "Unable to send OTP right now. Please try again."
+      : error.message, status);
   }
 });
 

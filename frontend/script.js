@@ -173,6 +173,7 @@ const state = {
   confirmation: null,
   orderSuccess: null,
   checkoutStep: "cart",
+  publicOrderOtpRequired: true,
   paymentMethod: "pay_at_counter",
   mobileCartOpen: false,
   phoneVerification: {
@@ -555,7 +556,14 @@ async function loadPublicSettings() {
     }
 
     const payload = await response.json();
+    const otpRequired = payload.data?.public_order_otp_required !== false;
+    const otpRequirementChanged = state.publicOrderOtpRequired !== otpRequired;
+    state.publicOrderOtpRequired = otpRequired;
     applyPublicSettings(payload.data || {});
+    if (otpRequirementChanged && !state.kiosk.enabled && !state.tableQr.enabled) {
+      if (!otpRequired && state.checkoutStep === "phone") state.checkoutStep = "details";
+      renderCart();
+    }
   } catch (error) {
     console.warn("Public restaurant settings unavailable:", error);
   }
@@ -609,7 +617,7 @@ function normalizeIndianPhoneForClient(phone = "") {
 }
 
 function publicWebsiteOrderRequiresOtp() {
-  return !state.kiosk.enabled && !state.tableQr.enabled;
+  return !state.kiosk.enabled && !state.tableQr.enabled && state.publicOrderOtpRequired !== false;
 }
 
 function isPhoneVerifiedFor(phone) {
@@ -1975,6 +1983,7 @@ function phoneVerificationMarkup({ compact = false } = {}) {
 
 function renderPhoneVerification() {
   if (!elements.phoneVerification) return;
+  elements.phoneVerification.hidden = !publicWebsiteOrderRequiresOtp();
   elements.phoneVerification.innerHTML = phoneVerificationMarkup();
 }
 
@@ -2770,7 +2779,7 @@ async function loadCustomerNotifications({ announce = false } = {}) {
   const phone = elements.customerPhone.value.trim() || localStorage.getItem(CUSTOMER_PHONE_STORAGE_KEY) || "";
   if (!phone) return;
   // This optional order-notification feed is unrelated to sending or verifying OTP.
-  if (publicWebsiteOrderRequiresOtp() && !isPhoneVerifiedFor(phone)) return;
+  if (!state.kiosk.enabled && !state.tableQr.enabled && !isPhoneVerifiedFor(phone)) return;
 
   try {
     const notifications = await requestJson(`/notifications/phone/${encodeURIComponent(phone)}`);

@@ -21,6 +21,7 @@ import app from "./app.js";
 import { appConfig } from "./config/index.js";
 import { pool, testConnection } from "./config/database.js";
 import { startOrderLifecycleWorker } from "./services/orderLifecycleService.js";
+import { startCloudOrderSyncWorker } from "./services/cloudOrderSyncService.js";
 import { logger } from "./utils/logger.js";
 
 const PORT = appConfig.port;
@@ -28,6 +29,7 @@ const HOST = appConfig.host;
 const sockets = new Set();
 let isShuttingDown = false;
 let orderLifecycleWorker = null;
+let cloudOrderSyncWorker = null;
 
 const isPrivateIpv4 = (address) =>
   address.startsWith("10.") ||
@@ -76,6 +78,7 @@ const server = app.listen(PORT, HOST, async () => {
 
   if (connected) {
     orderLifecycleWorker = startOrderLifecycleWorker();
+    cloudOrderSyncWorker = startCloudOrderSyncWorker();
     logger.info("RestaurantAI backend ready");
   } else {
     logger.warn("RestaurantAI backend is listening but not ready because database connection failed");
@@ -110,6 +113,7 @@ const closeServer = (signal, onClosed = () => process.exit(0)) => {
 
     finished = true;
     try {
+      await cloudOrderSyncWorker?.stop();
       await pool.end();
       logger.info("PostgreSQL pool closed");
     } catch (error) {

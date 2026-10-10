@@ -62,6 +62,7 @@ import counterSaleRoutes from "./routes/counterSaleRoutes.js";
 import adminOrderRoutes from "./routes/adminOrderRoutes.js";
 import whatsappWebhookRoutes from "./routes/whatsappWebhookRoutes.js";
 import receiptPrinterRoutes from "./routes/receiptPrinterRoutes.js";
+import cloudSyncRoutes from "./routes/cloudSyncRoutes.js";
 import { handleWebhook } from "./controllers/paymentController.js";
 
 const app = express();
@@ -134,6 +135,7 @@ app.use("/api/counter-sales", counterSaleRoutes);
 app.use("/api/admin/orders", adminOrderRoutes);
 app.use("/api/webhooks/whatsapp", whatsappWebhookRoutes);
 app.use("/api/receipt-printer", receiptPrinterRoutes);
+app.use("/api/sync", cloudSyncRoutes);
 
 /*
  * Keep these aliases only if your frontend is already calling them.

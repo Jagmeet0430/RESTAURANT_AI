@@ -15,7 +15,10 @@ export function normalizeQrToken(value = "") {
 
 export function normalizeOrderSource(value = "", fallback = "customer_web") {
   const normalized = String(value || fallback).trim().toLowerCase().replace(/[^a-z0-9_]/g, "_");
-  if (["customer_web", "kiosk", "table_qr", "pos"].includes(normalized)) return normalized;
+  if (normalized === "customer_web" && String(process.env.RESTAURANTAI_MODE || "online").trim().toLowerCase() !== "local") {
+    return "website";
+  }
+  if (["website", "customer_web", "kiosk", "table_qr", "pos"].includes(normalized)) return normalized;
   return fallback;
 }
 

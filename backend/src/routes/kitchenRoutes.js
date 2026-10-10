@@ -62,6 +62,7 @@ router.get("/orders", authMiddleware, kitchenRoles, async (req, res) => {
                LOWER(COALESCE(o.payment_method, '')) LIKE 'razorpay%'
                OR (
                  LOWER(COALESCE(o.payment_method, '')) = 'pay at counter'
+                 AND COALESCE(o.order_source, '') <> 'website'
                  AND COALESCE(o.order_source, '') <> 'table_qr'
                  AND COALESCE(o.special_instructions, '') NOT LIKE '%Source: Kiosk%'
                )

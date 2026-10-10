@@ -177,7 +177,7 @@ function OrderCard({ order, lane, onViewDetails, onStatusChange, onMarkPaid }) {
             variant={needsCounterPayment ? "outlined" : "contained"}
             endIcon={<ArrowForwardIcon />}
             onClick={() => onStatusChange(order.id, lane.next)}
-            disabled={needsCounterPayment}
+            disabled={needsCounterPayment && order.order_source !== "website"}
             sx={{ textTransform: "none", fontWeight: 800 }}
           >
             {lane.next}

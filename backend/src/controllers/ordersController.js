@@ -48,7 +48,7 @@ const requiresPaymentBeforeKitchen = (order) => {
   const method = String(order.payment_method || "").toLowerCase();
   const paymentStatus = String(order.payment_status || "").toLowerCase();
 
-  return paymentStatus !== "paid" && (method.startsWith("razorpay") || method === "pay at counter");
+  return paymentStatus !== "paid" && (method.startsWith("razorpay") || (method === "pay at counter" && order.order_source !== "website"));
 };
 
 function clientIp(req) {
@@ -540,7 +540,7 @@ export const updateOrderStatus = asyncHandler(async (req, res) => {
 
   // Check if order exists
   const existing = await pool.query(
-    "SELECT id, status, customer_id, order_number, payment_method, payment_status FROM orders WHERE id = $1",
+    "SELECT id, status, customer_id, order_number, payment_method, payment_status, order_source FROM orders WHERE id = $1",
     [id]
   );
   if (existing.rows.length === 0) {
@@ -723,6 +723,7 @@ export const getOrdersByStatus = asyncHandler(async (req, res) => {
            o.payment_method LIKE 'Razorpay%'
            OR (
              o.payment_method = 'Pay at Counter'
+             AND COALESCE(o.order_source, '') <> 'website'
              AND COALESCE(o.order_source, '') <> 'table_qr'
              AND COALESCE(o.special_instructions, '') NOT LIKE '%Source: Kiosk%'
            )

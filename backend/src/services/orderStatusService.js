@@ -151,7 +151,8 @@ export async function updateOrderStatusWithHistory({
     customer_phone: updated.rows[0].customer_phone || order.customer_phone_fallback,
   };
 
-  if (notify) {
+  // Imported orders notify from the cloud after sync, avoiding duplicate sends.
+  if (notify && !order.cloud_order_id) {
     setImmediate(() => {
       sendOrderStatusNotification(updatedOrder).catch((error) => {
         console.error("WhatsApp notification failed:", error.message);

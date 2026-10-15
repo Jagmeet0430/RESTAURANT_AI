@@ -20,6 +20,7 @@ const lanes = [
   { status: "Accepted", title: "Accepted", color: "#0284c7", bg: "#eff6ff", next: "Preparing" },
   { status: "Preparing", title: "Preparing", color: "#4f46e5", bg: "#eef2ff", next: "Ready" },
   { status: "Ready", title: "Ready", color: "#059669", bg: "#ecfdf5", next: "Completed" },
+  { status: "Pending", title: "Pending", color: "#64748b", bg: "#f8fafc" },
   { status: "Out for Delivery", title: "Out for delivery", color: "#0f766e", bg: "#f0fdfa", next: "Completed" },
   { status: "Completed", title: "Completed", color: "#16a34a", bg: "#f0fdf4" },
   { status: "Cancelled", title: "Cancelled", color: "#dc2626", bg: "#fef2f2" },
@@ -195,7 +196,7 @@ function OrderBoard({ orders, onViewDetails, onStatusChange, onMarkPaid }) {
   }, {});
 
   orders.forEach((order) => {
-  const status = order.status || "Confirmed";
+    const status = order.status || "Confirmed";
     if (!grouped[status]) grouped[status] = [];
     grouped[status].push(order);
   });

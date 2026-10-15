@@ -166,7 +166,7 @@ export const getAllOrders = asyncHandler(async (req, res) => {
     params.push(date);
   }
 
-  query += ` GROUP BY o.id, c.id, wn.delivery_status, wn.error_message ORDER BY o.created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
+  query += ` GROUP BY o.id, c.id, wn.delivery_status, wn.error_message ORDER BY o.created_at DESC, o.id DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
   params.push(limit, offset);
 
   const result = await pool.query(query, params);

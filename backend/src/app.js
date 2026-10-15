@@ -32,6 +32,7 @@ import { createCorsOptions } from "./config/corsPolicy.js";
 import { getDiagnostics, getReadiness } from "./services/diagnosticsService.js";
 import { logger, requestMeta } from "./utils/logger.js";
 import { authMiddleware, authorizeRoles } from "./middleware/index.js";
+import { liveOrderCache } from "./middleware/liveOrderCache.js";
 
 // Routes
 import authRoutes from "./routes/authRoutes.js";
@@ -67,6 +68,9 @@ import { handleWebhook } from "./controllers/paymentController.js";
 
 const app = express();
 
+app.use(express.json({ limit: "6mb" }));
+app.use(express.urlencoded({ extended: true, limit: "6mb" }));
+
 // ======================================================
 // CORS configuration
 // ======================================================
@@ -84,9 +88,6 @@ app.use(cors(corsOptions));
 
 // Explicitly handle browser preflight requests
 app.options(/.*/, cors(corsOptions));
-
-app.use(express.json({ limit: "6mb" }));
-app.use(express.urlencoded({ extended: true, limit: "6mb" }));
 
 // ======================================================
 // Database access
@@ -111,7 +112,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api/auth/whatsapp", whatsappAuthRoutes);
 app.use("/api/categories", categoriesRoutes);
 app.use("/api/menu", menuRoutes);
-app.use("/api/orders", ordersRoutes);
+app.use("/api/orders", liveOrderCache, ordersRoutes);
 app.use("/api/customers", customersRoutes);
 app.use("/api/kitchen", kitchenRoutes);
 app.use("/api/coupons", couponsRoutes);
@@ -132,7 +133,7 @@ app.use("/api/tables", tablesRoutes);
 app.use("/api/bills", billsRoutes);
 app.use("/api/barcodes", barcodeRoutes);
 app.use("/api/counter-sales", counterSaleRoutes);
-app.use("/api/admin/orders", adminOrderRoutes);
+app.use("/api/admin/orders", liveOrderCache, adminOrderRoutes);
 app.use("/api/webhooks/whatsapp", whatsappWebhookRoutes);
 app.use("/api/receipt-printer", receiptPrinterRoutes);
 app.use("/api/sync", cloudSyncRoutes);
@@ -143,6 +144,53 @@ app.use("/api/sync", cloudSyncRoutes);
  */
 app.use("/api/chat", aiAssistantRoutes);
 app.use("/chat", aiAssistantRoutes);
+
+app.get("/api/health", async (req, res) => {
+  let database = "disconnected";
+
+  try {
+    await pool.query("SELECT 1");
+    database = "connected";
+  } catch (error) {
+    logger.warn("Health database check failed", { error });
+  }
+
+  res.status(200).json({
+    success: true,
+    status: "ok",
+    mode: appConfig.mode,
+    database,
+    timestamp: new Date().toISOString(),
+  });
+});
+
+app.get("/api/ready", async (req, res) => {
+  const readiness = await getReadiness();
+  return res.status(readiness.ready ? 200 : 503).json({
+    success: readiness.ready,
+    status: readiness.ready ? "ready" : "not_ready",
+    checks: readiness.checks,
+    timestamp: readiness.timestamp,
+  });
+});
+
+app.get(
+  "/api/diagnostics",
+  authMiddleware,
+  authorizeRoles(["admin"]),
+  async (req, res, next) => {
+    try {
+      return res.status(200).json(await getDiagnostics());
+    } catch (error) {
+      return next(error);
+    }
+  }
+);
+
+// No API request may fall through to a static file or SPA route.
+app.use("/api", (req, res) => {
+  res.status(404).json({ success: false, message: "API route not found" });
+});
 
 // ======================================================
 // Customer frontend
@@ -199,52 +247,8 @@ app.get(["/customer", "/customer/*"], (req, res) => {
 });
 
 // ======================================================
-// Health check
-// ======================================================
-
-app.get("/api/health", async (req, res) => {
-  let database = "disconnected";
-
-  try {
-    await pool.query("SELECT 1");
-    database = "connected";
-  } catch (error) {
-    logger.warn("Health database check failed", { error });
-  }
-
-  res.status(200).json({
-    success: true,
-    status: "ok",
-    mode: appConfig.mode,
-    database,
-    timestamp: new Date().toISOString(),
-  });
-});
-
-app.get("/api/ready", async (req, res) => {
-  const readiness = await getReadiness();
-  return res.status(readiness.ready ? 200 : 503).json({
-    success: readiness.ready,
-    status: readiness.ready ? "ready" : "not_ready",
-    checks: readiness.checks,
-    timestamp: readiness.timestamp,
-  });
-});
-
-app.get(
-  "/api/diagnostics",
-  authMiddleware,
-  authorizeRoles(["admin"]),
-  async (req, res, next) => {
-    try {
-      return res.status(200).json(await getDiagnostics());
-    } catch (error) {
-      return next(error);
-    }
-  }
-);
-
 // Root route
+// ======================================================
 app.get("/", (req, res) => {
   res.status(200).json({
     success: true,

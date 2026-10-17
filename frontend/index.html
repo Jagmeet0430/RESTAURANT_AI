@@ -10,6 +10,10 @@
     />
     <link rel="stylesheet" href="styles.css?v=customer-overlays-1" />
     <script src="config.js?v=canonical-api-1"></script>
+    <script type="module">
+      import { injectSpeedInsights } from 'https://cdn.jsdelivr.net/npm/@vercel/speed-insights@1/dist/index.mjs';
+      injectSpeedInsights();
+    </script>
   </head>
   <body>
     <header class="site-header">

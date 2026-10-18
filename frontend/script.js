@@ -174,6 +174,9 @@ const state = {
   orderSuccess: null,
   checkoutStep: "cart",
   publicOrderOtpRequired: true,
+  publicPricing: null,
+  publicQuote: null,
+  pendingPublicOrder: null,
   paymentMethod: "pay_at_counter",
   mobileCartOpen: false,
   phoneVerification: {
@@ -309,7 +312,7 @@ function apiUrl(path) {
 }
 
 async function fetchApi(path, options = {}) {
-  const { timeoutMs = 0, ...fetchOptions } = options;
+  const { timeoutMs = 30000, ...fetchOptions } = options;
   const controller =
     timeoutMs > 0 && !fetchOptions.signal && typeof AbortController !== "undefined"
       ? new AbortController()
@@ -539,38 +542,41 @@ function applyPublicSettings(settings) {
 }
 
 async function loadPublicSettings() {
+  if (loadPublicSettings.pending) return;
   if (!state.restaurantSettings) {
     applyPublicSettings(loadCachedPublicSettings());
   }
 
+  loadPublicSettings.pending = true;
   try {
-    const response = await fetchApi(`/settings/public?t=${Date.now()}`, {
+    const settings = await requestJson(`/settings/public?t=${Date.now()}`, {
       cache: "no-store",
       headers: {
         Accept: "application/json",
       },
     });
 
-    if (!response.ok) {
-      throw new Error("Settings API unavailable");
-    }
-
-    const payload = await response.json();
-    const otpRequired = payload.data?.public_order_otp_required !== false;
+    const otpRequired = settings.public_order_otp_required !== false;
     const otpRequirementChanged = state.publicOrderOtpRequired !== otpRequired;
     state.publicOrderOtpRequired = otpRequired;
-    applyPublicSettings(payload.data || {});
+    const pricingChanged = JSON.stringify(state.publicPricing) !== JSON.stringify(settings.public_order_pricing || null);
+    state.publicPricing = settings.public_order_pricing || null;
+    applyPublicSettings(settings);
+    if (pricingChanged && !state.kiosk.enabled && !state.tableQr.enabled) renderCart();
     if (otpRequirementChanged && !state.kiosk.enabled && !state.tableQr.enabled) {
       if (!otpRequired && state.checkoutStep === "phone") state.checkoutStep = "details";
       renderCart();
     }
   } catch (error) {
     console.warn("Public restaurant settings unavailable:", error);
+  } finally {
+    loadPublicSettings.pending = false;
   }
 }
 
 function formatPrice(value) {
-  return `Rs. ${Number(value || 0).toFixed(0)}`;
+  const amount = Number(value || 0);
+  return `Rs. ${amount.toFixed(!state.kiosk.enabled && !state.tableQr.enabled && !Number.isInteger(amount) ? 2 : 0)}`;
 }
 
 function saveCart() {
@@ -660,22 +666,22 @@ function trackOrdersEnabled() {
   return !state.kiosk.enabled && !state.tableQr.enabled;
 }
 
-async function requestPhoneOtp(phone) {
+async function requestPhoneOtp(phone, purpose = 'checkout') {
   try {
     return await requestJson("/customers/otp/send", {
       method: "POST",
-      body: JSON.stringify({ phone: normalizeIndianPhoneForClient(phone) }),
+      body: JSON.stringify({ phone: normalizeIndianPhoneForClient(phone), purpose }),
     });
   } catch (error) {
     throw otpRequestError(error, "send");
   }
 }
 
-async function requestPhoneOtpVerification(phone, otp) {
+async function requestPhoneOtpVerification(phone, otp, purpose = 'checkout') {
   try {
     return await requestJson("/customers/otp/verify", {
       method: "POST",
-      body: JSON.stringify({ phone: normalizeIndianPhoneForClient(phone), otp: String(otp).trim() }),
+      body: JSON.stringify({ phone: normalizeIndianPhoneForClient(phone), otp: String(otp).trim(), purpose }),
     });
   } catch (error) {
     throw otpRequestError(error, "verify");
@@ -717,6 +723,11 @@ function paymentMethodLabel(method = selectedPaymentMethod()) {
 
 function updatePlaceOrderButtonText() {
   if (!elements.placeOrder) return;
+  if (state.isSubmittingOrder || state.pendingPublicOrder) {
+    elements.placeOrder.textContent = state.isSubmittingOrder ? 'Placing order...' : 'Check order';
+    elements.placeOrder.disabled = state.isSubmittingOrder;
+    return;
+  }
   if (!state.cart.length || state.checkoutStep !== "payment") {
     elements.placeOrder.textContent = "Proceed to payment";
     return;
@@ -929,6 +940,22 @@ function restoreCart() {
   }
 }
 
+function restorePendingPublicOrder() {
+  if (state.kiosk.enabled || state.tableQr.enabled) return;
+  try {
+    const pending = JSON.parse(sessionStorage.getItem('restaurantai_pending_public_order') || 'null');
+    if (!pending?.payload?.idempotency_key || !Array.isArray(pending.cart) || !pending.customer) return;
+    state.pendingPublicOrder = pending;
+    state.orderIdempotencyKey = pending.payload.idempotency_key;
+    state.cart = pending.cart;
+    state.publicQuote = pending.quote;
+    state.checkoutStep = 'payment';
+    elements.customerName.value = pending.customer.name;
+    elements.customerPhone.value = pending.customer.phone;
+    elements.orderType.value = pending.payload.order_type === 'dine_in' ? 'Dine-in' : 'Pickup';
+  } catch { /* Leave an unreadable reference untouched for manual support. */ }
+}
+
 function escapeHtml(value) {
   return String(value)
     .replaceAll("&", "&amp;")
@@ -1135,18 +1162,13 @@ async function refreshLiveMenu({ background = false } = {}) {
   }
 
   try {
-    const response = await fetchApi("/menu?available=true", {
+    const payload = await requestJson("/menu?available=true", {
       headers: {
         Accept: "application/json",
       },
       ...(canUsePublicMenuCache() ? { timeoutMs: PUBLIC_MENU_REQUEST_TIMEOUT_MS } : {}),
     });
 
-    if (!response.ok) {
-      throw new Error("Menu unavailable");
-    }
-
-    const payload = await response.json();
     const apiItems = Array.isArray(payload) ? payload : Array.isArray(payload?.data) ? payload.data : [];
     const availableItems = normalizeMenuItems(apiItems);
 
@@ -1627,6 +1649,7 @@ function addToCart(itemId, button) {
 }
 
 function addItemToCart(item, quantity = 1) {
+  if (publicCartLocked()) return;
   if (tableQrOrderingBlocked()) {
     showToast("Table QR unavailable", state.tableQr.error || "Please ask restaurant staff for a fresh QR code.", "warning");
     return;
@@ -1660,6 +1683,7 @@ function addItemToCart(item, quantity = 1) {
 }
 
 function changeQty(itemId, delta) {
+  if (publicCartLocked()) return;
   const existing = state.cart.find((item) => item.id === itemId);
   if (!existing) return;
 
@@ -1681,6 +1705,7 @@ function changeQty(itemId, delta) {
 }
 
 function removeCartItem(itemId) {
+  if (publicCartLocked()) return;
   const existing = state.cart.find((item) => item.id === itemId);
   if (!existing) return;
 
@@ -1690,6 +1715,7 @@ function removeCartItem(itemId) {
   }
 
   window.setTimeout(() => {
+    if (publicCartLocked()) return;
     state.cart = state.cart.filter((item) => item.id !== itemId);
     saveCart();
     renderCart();
@@ -1702,9 +1728,35 @@ function removeCartItem(itemId) {
 function cartTotals() {
   const count = state.cart.reduce((sum, item) => sum + item.qty, 0);
   const subtotal = state.cart.reduce((sum, item) => sum + item.price * item.qty, 0);
-  const tax = Math.round(subtotal * GST_RATE * 100) / 100;
-  const packing = subtotal > 0 ? PACKING_CHARGE : 0;
-  return { count, subtotal, tax, packing, total: subtotal + tax + packing };
+  const isPublic = !state.kiosk.enabled && !state.tableQr.enabled;
+  if (isPublic && state.publicQuote?.key === publicQuoteKey()) return { count, ...state.publicQuote.totals };
+  const tax = Math.round(subtotal * (isPublic ? Number(state.publicPricing?.gst_rate || 0) : GST_RATE) * 100) / 100;
+  const packing = isPublic
+    ? (subtotal > 0 && currentOrderTypeLabel() !== 'Dine-in' ? Number(state.publicPricing?.packing_charge || 0) : 0)
+    : subtotal > 0 ? PACKING_CHARGE : 0;
+  return { count, subtotal, tax, packing, total: isPublic ? Number((subtotal + tax + packing).toFixed(2)) : subtotal + tax + packing };
+}
+
+function publicQuoteKey() {
+  return JSON.stringify([state.cart.map(item => [item.id, item.qty]), orderTypePayloadValue()]);
+}
+
+async function refreshPublicQuote() {
+  if (state.kiosk.enabled || state.tableQr.enabled || !state.cart.length) return;
+  const key = publicQuoteKey();
+  const totals = await requestJson('/payments/quote', { method: 'POST', body: JSON.stringify({
+    items: state.cart.map(item => ({ menu_id: item.id, quantity: item.qty })), order_type: orderTypePayloadValue(),
+  }) });
+  if (key !== publicQuoteKey()) throw new Error('Your cart changed. Please review the total again.');
+  state.publicQuote = { key, totals: { subtotal: Number(totals.subtotal), tax: Number(totals.tax),
+    packing: Number(totals.delivery_charge), total: Number(totals.total) } };
+}
+
+function publicCartLocked() {
+  if (state.kiosk.enabled || state.tableQr.enabled) return false;
+  if (!state.isSubmittingOrder && !state.pendingPublicOrder) return false;
+  showToast('Order being checked', 'Check the pending order before changing your cart.', 'warning');
+  return true;
 }
 
 function currentOrderTypeLabel() {
@@ -1763,6 +1815,7 @@ function renderCart() {
   elements.cartSubtotal.textContent = formatPrice(subtotal);
   elements.cartTax.textContent = formatPrice(tax);
   elements.cartPacking.textContent = formatPrice(packing);
+  if (!state.kiosk.enabled && !state.tableQr.enabled) elements.cartPacking.parentElement.hidden = packing === 0;
   elements.cartTotal.textContent = formatPrice(total);
   updateMobileCartButton();
   const countChanged = renderCart.previousCount !== undefined && renderCart.previousCount !== count;
@@ -1819,7 +1872,7 @@ function renderCart() {
               <span><b>Payment</b><strong>${escapeHtml(snapshot.paymentMethod || "Pay at Restaurant Counter")}</strong></span>
               <span><b>Subtotal</b><strong>${formatPrice(subtotal)}</strong></span>
               <span><b>GST</b><strong>${formatPrice(tax)}</strong></span>
-              <span><b>Packing</b><strong>${formatPrice(packing)}</strong></span>
+              ${packing || state.kiosk.enabled || state.tableQr.enabled ? `<span><b>Packing</b><strong>${formatPrice(packing)}</strong></span>` : ''}
               <span class="success-table-total"><b>Grand total</b><strong>${formatPrice(total)}</strong></span>
             </div>`
           : "";
@@ -1899,6 +1952,7 @@ function renderCart() {
 }
 
 function clearCart() {
+  if (publicCartLocked()) return;
   if (!state.cart.length) {
     showToast("Cart is already empty", "Add items from the menu to start an order.", "info");
     return;
@@ -1911,6 +1965,15 @@ function clearCart() {
   }
 
   if (!window.confirm(state.tableQr.enabled ? "Clear this order?" : "Clear your order?")) {
+    return;
+  }
+
+  if (!state.tableQr.enabled) {
+    state.cart = [];
+    state.checkoutStep = 'cart';
+    state.publicQuote = null;
+    state.orderIdempotencyKey = '';
+    saveCart(); renderCart(); renderMenu();
     return;
   }
 
@@ -1988,6 +2051,7 @@ function renderPhoneVerification() {
 }
 
 async function sendPhoneOtp() {
+  if (['sending', 'verifying'].includes(state.phoneVerification.status)) return;
   const phone = elements.customerPhone.value.trim();
   if (!phone) {
     showToast("Phone required", "Enter your phone number before requesting OTP.", "warning");
@@ -2023,6 +2087,7 @@ async function sendPhoneOtp() {
 }
 
 async function verifyPhoneOtpForCheckout() {
+  if (['sending', 'verifying'].includes(state.phoneVerification.status)) return;
   const phone = elements.customerPhone.value.trim();
   const otp = state.phoneVerification.otp.trim();
   if (!phone || !/^\d{6}$/.test(otp)) {
@@ -2200,6 +2265,7 @@ function renderTrackOrders() {
 }
 
 async function sendTrackOrdersOtp() {
+  if (['sending', 'verifying', 'loading'].includes(state.trackOrders.status)) return;
   const phone = trackOrdersPhone();
   if (!phone) {
     state.trackOrders.error = "Enter your phone number before requesting OTP.";
@@ -2218,7 +2284,7 @@ async function sendTrackOrdersOtp() {
   renderTrackOrders();
 
   try {
-    const result = await requestPhoneOtp(phone);
+    const result = await requestPhoneOtp(phone, 'tracking');
     const resendSeconds = Number(result.resend_after_seconds || PHONE_VERIFICATION_RESEND_FALLBACK_SECONDS);
     state.trackOrders.status = "sent";
     state.trackOrders.phone = result.phone || phone;
@@ -2258,6 +2324,7 @@ async function loadVerifiedCustomerOrders() {
       : "";
     state.trackOrders.error = "";
   } catch (error) {
+    if (error.status === 401) state.trackOrders.token = '';
     state.trackOrders.status = state.trackOrders.token ? "verified" : "sent";
     state.trackOrders.orders = [];
     state.trackOrders.error = friendlyNetworkError(error);
@@ -2269,6 +2336,7 @@ async function loadVerifiedCustomerOrders() {
 }
 
 async function verifyTrackOrdersOtp() {
+  if (['sending', 'verifying', 'loading'].includes(state.trackOrders.status)) return;
   const phone = trackOrdersPhone();
   const otp = state.trackOrders.otp.trim();
   if (!phone || !/^\d{6}$/.test(otp)) {
@@ -2285,7 +2353,7 @@ async function verifyTrackOrdersOtp() {
   renderTrackOrders();
 
   try {
-    const result = await requestPhoneOtpVerification(phone, otp);
+    const result = await requestPhoneOtpVerification(phone, otp, 'tracking');
     state.trackOrders.phone = result.phone || phone;
     state.trackOrders.token = result.verification_token || "";
     state.trackOrders.otp = "";
@@ -2309,13 +2377,22 @@ async function verifyTrackOrdersOtp() {
 function openTrackedOrder(card) {
   const trackingUrl = card?.dataset?.trackUrl || "";
   const trackingToken = card?.dataset?.trackToken || "";
-  if (trackingUrl) {
+  if (trackingToken) {
+    window.location.href = customerTrackingUrl(trackingToken);
+    return;
+  }
+  if (trackingUrl && new URL(trackingUrl, location.origin).origin === location.origin) {
     window.location.href = trackingUrl;
     return;
   }
   if (trackingToken) {
     window.location.href = `track-order/${encodeURIComponent(trackingToken)}`;
   }
+}
+
+function customerTrackingUrl(token) {
+  const prefix = /^\/customer(?:\/|$)/.test(location.pathname) ? '/customer' : '';
+  return `${location.origin}${prefix}/track-order/${encodeURIComponent(token)}`;
 }
 
 function updateMobileCartButton() {
@@ -2330,11 +2407,25 @@ function updateMobileCartButton() {
     <b>${formatPrice(total)}</b>
   `;
   document.body.classList.toggle("has-mobile-cart", shouldShow);
-  document.body.classList.toggle("mobile-cart-open", state.mobileCartOpen && shouldShow);
+  document.body.classList.toggle("mobile-cart-open", state.mobileCartOpen && (shouldShow || Boolean(state.confirmation)));
 }
 
 function setMobileCartOpen(isOpen) {
-  state.mobileCartOpen = Boolean(isOpen && state.cart.length && !state.kiosk.enabled);
+  const wasOpen = state.mobileCartOpen;
+  state.mobileCartOpen = Boolean(isOpen && (state.cart.length || state.confirmation) && !state.kiosk.enabled);
+  if (!state.tableQr.enabled && state.mobileCartOpen !== wasOpen) {
+    if (state.mobileCartOpen) {
+      state.cartScrollY = window.scrollY;
+      document.body.style.setProperty('--cart-scroll-y', `-${state.cartScrollY}px`);
+      document.dispatchEvent(new Event('customer-cart-open'));
+      history.pushState({ ...history.state, restaurantaiCart: true }, '');
+    } else {
+      document.body.classList.remove('mobile-cart-open');
+      document.body.style.removeProperty('--cart-scroll-y');
+      window.scrollTo(0, state.cartScrollY || 0);
+      if (history.state?.restaurantaiCart) history.back();
+    }
+  }
   if (elements.mobileCartBackdrop) elements.mobileCartBackdrop.hidden = !state.mobileCartOpen;
   if (elements.mobileCartSheet) {
     elements.mobileCartSheet.hidden = !state.mobileCartOpen;
@@ -2378,6 +2469,7 @@ function checkoutStepMarkup() {
     return `
       <div class="mobile-checkout-step">
         <div class="mobile-cart-lines">${mobileCartLinesMarkup()}</div>
+        ${!state.tableQr.enabled ? `<button class="secondary-btn full-width" type="button" data-mobile-action="clear-cart" ${state.isSubmittingOrder || state.pendingPublicOrder ? 'disabled' : ''}>Clear cart</button>` : ''}
         <div class="cart-total-line"><span>Subtotal</span><strong>${formatPrice(subtotal)}</strong></div>
         <button class="primary-btn full-width" type="button" data-mobile-action="order-type" ${state.cart.length ? "" : "disabled"}>Continue to checkout</button>
       </div>
@@ -2432,12 +2524,13 @@ function checkoutStepMarkup() {
       <div class="mobile-totals">
         <div><span>Subtotal</span><strong>${formatPrice(subtotal)}</strong></div>
         <div><span>GST</span><strong>${formatPrice(tax)}</strong></div>
-        <div><span>Packing</span><strong>${formatPrice(packing)}</strong></div>
+        ${packing || state.tableQr.enabled ? `<div><span>Packing</span><strong>${formatPrice(packing)}</strong></div>` : ''}
         <div class="grand-total"><span>Total</span><strong>${formatPrice(total)}</strong></div>
       </div>
       <button class="primary-btn full-width" type="button" data-mobile-action="place-order" ${state.isSubmittingOrder ? "disabled" : ""}>
-        ${state.isSubmittingOrder ? "Placing order..." : "Place order"}
+        ${state.isSubmittingOrder ? "Placing order..." : state.pendingPublicOrder ? 'Check order' : "Place order"}
       </button>
+      ${state.pendingPublicOrder ? '<p role="status">Your order is not yet confirmed. Check order before trying again. Your cart is saved.</p>' : ''}
     </div>
   `;
 }
@@ -2446,8 +2539,33 @@ function renderMobileCart() {
   if (!elements.mobileCartSheet) return;
   updateMobileCartButton();
 
+  if (!state.kiosk.enabled && !state.tableQr.enabled && !state.cart.length && state.confirmation && state.mobileCartOpen) {
+    const receipt = state.confirmation;
+    elements.mobileCartSheet.innerHTML = `
+      <div class="mobile-cart-sheet-handle" aria-hidden="true"></div>
+      <div class="mobile-cart-sheet-head"><strong>Order confirmed</strong>
+        <button type="button" data-mobile-action="close" aria-label="Close receipt">x</button></div>
+      <div class="mobile-checkout-step">
+        ${elements.cartItems.innerHTML}
+        <div class="mobile-totals">
+          <div><span>Subtotal</span><strong>${formatPrice(receipt.totals.subtotal)}</strong></div>
+          <div><span>GST</span><strong>${formatPrice(receipt.totals.tax)}</strong></div>
+          ${receipt.totals.packing ? `<div><span>Packing</span><strong>${formatPrice(receipt.totals.packing)}</strong></div>` : ''}
+          <div class="grand-total"><span>Total</span><strong>${formatPrice(receipt.totals.total)}</strong></div>
+        </div>
+        ${receipt.trackingUrl ? `<a class="primary-btn full-width" href="${escapeHtml(receipt.trackingUrl)}">Track this order</a>` : ''}
+      </div>`;
+    return;
+  }
+
   if (!state.cart.length || state.kiosk.enabled) {
-    state.mobileCartOpen = false;
+    if (state.mobileCartOpen) {
+      state.mobileCartOpen = false;
+      document.body.classList.remove('mobile-cart-open');
+      document.body.style.removeProperty('--cart-scroll-y');
+      window.scrollTo(0, state.cartScrollY || 0);
+      if (!state.tableQr.enabled && history.state?.restaurantaiCart) history.back();
+    }
     if (elements.mobileCartBackdrop) elements.mobileCartBackdrop.hidden = true;
     elements.mobileCartSheet.hidden = true;
     elements.mobileCartSheet.setAttribute("aria-hidden", "true");
@@ -2469,28 +2587,43 @@ function renderMobileCart() {
     </div>
     ${checkoutStepMarkup()}
   `;
+  if (!state.tableQr.enabled && (state.isSubmittingOrder || state.pendingPublicOrder) && state.checkoutStep === 'payment') {
+    elements.mobileCartSheet.querySelectorAll('input, [data-mobile-order-type]').forEach(control => { control.disabled = true; });
+  }
 }
 
 async function requestJson(path, options = {}) {
-  const response = await fetchApi(path, {
-    ...options,
-    headers: {
-      Accept: "application/json",
-      ...(options.body ? { "Content-Type": "application/json" } : {}),
-      ...options.headers,
-    },
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  options.signal?.addEventListener('abort', abort, { once: true });
+  if (options.signal?.aborted) controller.abort();
+  let timer;
+  const deadline = new Promise((_, reject) => {
+    timer = window.setTimeout(() => {
+      controller.abort();
+      reject(Object.assign(new Error('The restaurant is taking longer to respond. Please try again.'), { code: 'REQUEST_TIMEOUT' }));
+    }, options.timeoutMs > 0 ? options.timeoutMs : 30000);
   });
-  const payload = await response.json().catch(() => ({}));
-
-  if (!response.ok) {
-    const error = new Error(response.status >= 500
-      ? "Unable to connect right now. Please try again."
-      : friendlyNetworkError({ message: payload.message || "Request failed" }));
-    error.status = response.status;
-    throw error;
+  try {
+    return await Promise.race([deadline, (async () => {
+      const response = await fetchApi(path, {
+        ...options, timeoutMs: 0, signal: controller.signal,
+        headers: { Accept: 'application/json', ...(options.body ? { 'Content-Type': 'application/json' } : {}), ...options.headers },
+      });
+      let payload;
+      try { payload = await response.json(); }
+      catch { throw Object.assign(new Error('Unable to read the response. Please try again.'), { status: response.status >= 400 ? response.status : undefined }); }
+      if (!response.ok || payload.success === false) {
+        throw Object.assign(new Error(response.status >= 500
+          ? 'Unable to connect right now. Please try again.'
+          : friendlyNetworkError({ message: payload.message || 'Request failed' })), { status: response.status });
+      }
+      return payload.data ?? payload;
+    })()]);
+  } finally {
+    window.clearTimeout(timer);
+    options.signal?.removeEventListener('abort', abort);
   }
-
-  return payload.data || payload;
 }
 
 async function findOrCreateCustomer({ name, phone }) {
@@ -2554,7 +2687,10 @@ function buildPaymentPayload(customer) {
 
 function ensureOrderIdempotencyKey() {
   if (!state.orderIdempotencyKey) {
-    const random = crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const bytes = crypto.getRandomValues(new Uint8Array(16));
+    bytes[6] = (bytes[6] & 15) | 64; bytes[8] = (bytes[8] & 63) | 128;
+    const hex = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
+    const random = `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`;
     state.orderIdempotencyKey = `web-${random}`;
   }
   return state.orderIdempotencyKey;
@@ -2563,8 +2699,13 @@ function ensureOrderIdempotencyKey() {
 function buildConfirmationSnapshot({ order, paymentData, customer, message }) {
   const orderLabel = order?.order_number || paymentData?.order_number || paymentData?.order_id || order?.id || "";
   const tokenNumber = order?.token_number || paymentData?.token_number || "";
-  const trackingUrl = order?.tracking_url || paymentData?.tracking_url || "";
+  const trackingToken = order?.tracking_token || paymentData?.tracking_token;
+  const trackingUrl = !state.kiosk.enabled && !state.tableQr.enabled && trackingToken
+    ? customerTrackingUrl(trackingToken) : order?.tracking_url || paymentData?.tracking_url || "";
   const totals = cartTotals();
+  if (!state.kiosk.enabled && !state.tableQr.enabled && order?.total_amount != null) {
+    Object.assign(totals, { subtotal: Number(order.subtotal), tax: Number(order.tax), packing: Number(order.delivery_charge), total: Number(order.total_amount) });
+  }
   const tableNumber = order?.table_number || paymentData?.table_number || state.tableQr.table?.table_number || "";
   const orderSource = order?.order_source || paymentData?.order_source || tableQrOrderSource();
   const orderTokenLabel = tokenNumber ? `#${tokenNumber}` : orderLabel;
@@ -2600,13 +2741,17 @@ function buildConfirmationSnapshot({ order, paymentData, customer, message }) {
 function completeOrderSuccess({ order, paymentData, message, customer }) {
   const snapshot = buildConfirmationSnapshot({ order, paymentData, customer, message });
   const orderLabel = order?.order_number || paymentData?.order_number || paymentData?.order_id || order?.id || "";
-  const trackingUrl = order?.tracking_url || paymentData?.tracking_url || "";
+  const trackingUrl = snapshot.trackingUrl;
   state.confirmation = snapshot;
   state.cart = [];
   state.orderSuccess = orderLabel
     ? `Order ${orderLabel} was sent to the restaurant.${trackingUrl ? ` Track it here: ${trackingUrl}` : ""}`
     : message || "Your order was sent to the restaurant.";
   state.orderIdempotencyKey = "";
+  if (!state.kiosk.enabled && !state.tableQr.enabled) {
+    state.pendingPublicOrder = null;
+    sessionStorage.removeItem('restaurantai_pending_public_order');
+  }
   resetPhoneVerification();
   saveCart();
   renderCart();
@@ -2681,6 +2826,39 @@ async function handleOnlinePayment(customer) {
 }
 
 async function handleOfflinePayment(customer) {
+  if (!state.kiosk.enabled && !state.tableQr.enabled) {
+    const pending = state.pendingPublicOrder;
+    if (pending) {
+      const result = await requestJson('/payments/order-outcome', { method: 'POST', body: JSON.stringify({
+        idempotency_key: pending.payload.idempotency_key, phone: pending.customer.phone,
+        otp_verification_token: state.phoneVerification.token || pending.payload.otp_verification_token,
+      }) });
+      if (result.order) return result;
+      if (state.phoneVerification.token) {
+        pending.payload.otp_verification_token = state.phoneVerification.token;
+        sessionStorage.setItem('restaurantai_pending_public_order', JSON.stringify(pending));
+      }
+      // A user-initiated retry reuses the original payload/key, even if the first request is still running.
+    } else {
+      const payload = buildPaymentPayload(customer);
+      state.pendingPublicOrder = { payload, customer, cart: state.cart, quote: state.publicQuote };
+      try { sessionStorage.setItem('restaurantai_pending_public_order', JSON.stringify(state.pendingPublicOrder)); }
+      catch {
+        state.pendingPublicOrder = null;
+        throw new Error('Unable to safely save your order reference in this browser. Please allow session storage and try again.');
+      }
+    }
+    try {
+      return await requestJson('/payments/cash-order', { method: 'POST', body: JSON.stringify(state.pendingPublicOrder.payload) });
+    } catch (error) {
+      if (!pending && error.status >= 400 && error.status < 500) {
+        state.pendingPublicOrder = null;
+        state.orderIdempotencyKey = '';
+        sessionStorage.removeItem('restaurantai_pending_public_order');
+      }
+      throw error;
+    }
+  }
   return requestJson("/payments/cash-order", {
     method: "POST",
     body: JSON.stringify(buildPaymentPayload(customer)),
@@ -2782,7 +2960,9 @@ async function loadCustomerNotifications({ announce = false } = {}) {
   if (!state.kiosk.enabled && !state.tableQr.enabled && !isPhoneVerifiedFor(phone)) return;
 
   try {
-    const notifications = await requestJson(`/notifications/phone/${encodeURIComponent(phone)}`);
+    const notifications = await requestJson(`/notifications/phone/${encodeURIComponent(normalizeIndianPhoneForClient(phone))}`, {
+      headers: { Authorization: `Bearer ${state.phoneVerification.token}` },
+    });
     if (!Array.isArray(notifications) || notifications.length === 0) return;
 
     const seenIds = seenNotificationIds();
@@ -2847,7 +3027,7 @@ async function placeOrder() {
     return;
   }
 
-  if (publicWebsiteOrderRequiresOtp() && !isPhoneVerifiedFor(phone)) {
+  if (!state.pendingPublicOrder && publicWebsiteOrderRequiresOtp() && !isPhoneVerifiedFor(phone)) {
     state.checkoutStep = "phone";
     showToast("Phone verification required", "Verify your phone with OTP before placing this order.", "warning");
     renderCart();
@@ -2877,10 +3057,19 @@ async function placeOrder() {
   elements.placeOrder.disabled = true;
   elements.placeOrder.textContent = state.tableQr.enabled ? "Placing order..." : "Sending...";
   state.isSubmittingOrder = true;
+  renderMobileCart();
 
   try {
+    if (!state.pendingPublicOrder) {
+      const priorTotal = cartTotals().total;
+      await refreshPublicQuote();
+      if (!state.kiosk.enabled && !state.tableQr.enabled && Math.abs(priorTotal - cartTotals().total) > 0.001) {
+        showToast('Total updated', 'Please review the current total and place your order again.', 'info');
+        return;
+      }
+    }
     saveCustomerPhone(phone);
-    const customer = await findOrCreateCustomer({ name, phone });
+    const customer = state.pendingPublicOrder?.customer || await findOrCreateCustomer({ name, phone });
     if (isOnlinePayment()) {
       const result = await handleOnlinePayment(customer);
       completeOrderSuccess({
@@ -2896,26 +3085,30 @@ async function placeOrder() {
         message: "Your order was sent to the restaurant.",
         customer,
       });
-      if (order?.order?.tracking_token || order?.tracking_url) {
-        state.mobileCartOpen = false;
-      }
       showToast(order.notification?.title || "Order saved", order.notification?.message || state.orderSuccess, "success");
     }
 
-    await loadCustomerNotifications({ announce: false });
+    void loadCustomerNotifications({ announce: false });
   } catch (error) {
     const message = error.message || "Please try again.";
-    if (/razorpay environment variables are missing/i.test(message)) {
+    if (error.status === 401 && !state.kiosk.enabled && !state.tableQr.enabled) {
+      if (state.pendingPublicOrder) elements.customerPhone.value = state.pendingPublicOrder.customer.phone;
+      resetPhoneVerification({ keepPhone: true });
+      state.checkoutStep = 'phone';
+      showToast('Please verify again', 'Verify your phone to continue or check your pending order.', 'warning');
+    } else if (/razorpay environment variables are missing/i.test(message)) {
       state.onlinePaymentsEnabled = false;
       applyPaymentAvailability();
       showToast("Online payment not configured", "Choose Pay at Restaurant Counter for now.", "warning");
     } else {
-      showToast("Unable to place order", message, "warning");
+      showToast(state.pendingPublicOrder ? 'Order not yet confirmed' : 'Unable to place order',
+        state.pendingPublicOrder ? 'Your cart is saved. Use Check order to find out whether it reached the restaurant before retrying.' : message, 'warning');
     }
   } finally {
     state.isSubmittingOrder = false;
     elements.placeOrder.disabled = false;
     updatePlaceOrderButtonText();
+    renderCart();
   }
 }
 
@@ -4872,6 +5065,7 @@ function setupCustomerOverlays() {
     chatLinks.forEach(link => link.setAttribute("aria-expanded", "false"));
     if (restoreFocus) chatOpener?.focus({ preventScroll: true });
   }
+  document.addEventListener('customer-cart-open', () => closeChat(false));
 
   function closeTracking(restoreFocus = true) {
     if (!trackingDialog.open) return;
@@ -4914,6 +5108,7 @@ function setupCustomerOverlays() {
 
   chatLinks.forEach(link => link.addEventListener("click", event => {
     event.preventDefault();
+    if (state.mobileCartOpen) return;
     if (!chatPanel.hidden && link === elements.chatToggle) {
       closeChat();
       return;
@@ -4949,6 +5144,12 @@ function setupCustomerOverlays() {
 }
 
 function bindEvents() {
+  window.addEventListener('popstate', () => {
+    if (!state.tableQr.enabled && state.mobileCartOpen && !history.state?.restaurantaiCart) setMobileCartOpen(false);
+  });
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && !state.tableQr.enabled && state.mobileCartOpen) setMobileCartOpen(false);
+  });
   elements.filters.addEventListener("click", (event) => {
     const button = event.target.closest("[data-category]");
     if (!button) return;
@@ -5071,10 +5272,14 @@ function bindEvents() {
 
     const action = event.target.closest("[data-mobile-action]")?.dataset.mobileAction;
     if (!action) return;
+    if (action === 'clear-cart') { clearCart(); return; }
     if (action === "order-type") state.checkoutStep = "order_type";
     if (action === "phone") state.checkoutStep = "phone";
     if (action === "details") state.checkoutStep = "details";
-    if (action === "payment") state.checkoutStep = "payment";
+    if (action === "payment") {
+      state.checkoutStep = "payment";
+      refreshPublicQuote().then(renderCart).catch(error => showToast('Unable to calculate total', error.message, 'warning'));
+    }
     if (action === "place-order") placeOrder();
     renderCart();
   });
@@ -5088,6 +5293,9 @@ function bindEvents() {
       elements.customerPhone.value = event.target.value;
       if (!isPhoneVerifiedFor(elements.customerPhone.value)) resetPhoneVerification({ keepPhone: true });
       saveCustomerPhone(elements.customerPhone.value);
+      const sendButton = elements.mobileCartSheet.querySelector('[data-otp-send]');
+      if (sendButton) sendButton.disabled = !elements.customerPhone.value.trim() ||
+        ['sending', 'verifying'].includes(state.phoneVerification.status) || state.phoneVerification.resendAt > Date.now();
       return;
     }
     if (event.target.matches("[data-otp-input]")) {
@@ -5313,6 +5521,7 @@ function renderTrackingShell() {
         <div id="trackingTimeline" class="tracking-timeline"></div>
         <div id="trackingItems" class="tracking-items"></div>
         <p id="trackingUpdated" class="tracking-updated"></p>
+        <button id="trackingRetry" class="secondary-btn" type="button" hidden>Retry</button>
       </div>
     </section>
   `;
@@ -5325,6 +5534,7 @@ function statusText(status) {
 }
 
 function renderTrackedOrder(data) {
+  if (!data || !Array.isArray(data.timeline)) return;
   const title = document.querySelector("#trackingTitle");
   const meta = document.querySelector("#trackingMeta");
   const timeline = document.querySelector("#trackingTimeline");
@@ -5370,23 +5580,40 @@ function startTrackingPage() {
   if (!token) return false;
 
   renderTrackingShell();
-  loadTrackedOrder(token).catch((error) => {
-    document.querySelector("#trackingTitle").textContent = "Tracking link unavailable";
-    document.querySelector("#trackingMeta").textContent = error.message || "Please check the link and try again.";
-  });
-
-  try {
-    const source = new EventSource(apiUrl(`/orders/track/${encodeURIComponent(token)}/events`));
-    source.addEventListener("order", (event) => {
-      renderTrackedOrder(JSON.parse(event.data));
-    });
-    source.onerror = () => {
-      source.close();
-      window.setInterval(() => loadTrackedOrder(token).catch(() => {}), 15000);
-    };
-  } catch {
-    window.setInterval(() => loadTrackedOrder(token).catch(() => {}), 15000);
-  }
+  let source, poll, loading = false;
+  const retry = document.querySelector('#trackingRetry');
+  const stop = () => { source?.close(); window.clearInterval(poll); };
+  const refresh = async () => {
+    if (loading) return;
+    loading = true; retry.disabled = true;
+    try {
+      await loadTrackedOrder(token);
+      retry.hidden = true;
+    } catch (error) {
+      document.querySelector('#trackingTitle').textContent = 'Tracking unavailable';
+      document.querySelector('#trackingMeta').textContent = friendlyNetworkError(error);
+      retry.hidden = false;
+      if ([400, 401, 404].includes(error.status)) stop();
+      throw error;
+    } finally { loading = false; retry.disabled = false; }
+  };
+  const start = async () => {
+    stop();
+    try {
+      await refresh();
+      const fallback = () => { source?.close(); window.clearInterval(poll); poll = window.setInterval(() => refresh().catch(() => {}), 15000); };
+      try {
+        source = new EventSource(apiUrl(`/orders/track/${encodeURIComponent(token)}/events`));
+        source.addEventListener('order', event => {
+          try { renderTrackedOrder(JSON.parse(event.data)); } catch { fallback(); }
+        });
+        source.onerror = fallback;
+      } catch { fallback(); }
+    } catch { /* The retry control remains available; invalid links do not open a stream. */ }
+  };
+  retry.addEventListener('click', start);
+  window.addEventListener('pagehide', stop, { once: true });
+  void start();
 
   return true;
 }
@@ -5401,6 +5628,7 @@ if (startTrackingPage()) {
   }
   updateMenuStats();
   restoreCart();
+  restorePendingPublicOrder();
   const restoredCachedMenu = restorePublicMenuCache();
   renderFilters();
   renderMenu();

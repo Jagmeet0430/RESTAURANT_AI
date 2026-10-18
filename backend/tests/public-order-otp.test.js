@@ -9,6 +9,7 @@ const client = {
   async query(sql, values = []) {
     const query = sql.replace(/\s+/g, " ").trim();
     if (/^(BEGIN|COMMIT|ROLLBACK)$/.test(query)) return result();
+    if (query.startsWith('SELECT pg_advisory_xact_lock')) return result();
     if (query.startsWith("CREATE TABLE IF NOT EXISTS app_settings")) return result();
     if (query.startsWith("SELECT value FROM app_settings")) return result([{ value: { public_order_otp_required: false } }]);
     if (query.includes("FROM customers WHERE id")) return result([fixture.customer]);
@@ -115,7 +116,8 @@ test("public checkout OTP feature flag", async t => {
         assert.equal(fixture.orders.length, 1);
         assert.equal(fixture.orders[0].phone_verified, false);
         assert.equal(fixture.orders[0].customer_phone, "+919876543210");
-        assert.equal(fixture.orders[0].total_amount, 220);
+        assert.equal(fixture.orders[0].total_amount, 210);
+        assert.equal(fixture.orders[0].delivery_charge, 0);
         assert.equal(fixture.orders[0].subtotal, 200);
         assert.equal(fixture.tokenChecks, 0);
         assert.equal(fixture.limitChecks, 1);
@@ -158,12 +160,19 @@ test("public checkout OTP feature flag", async t => {
       await t.test(`${name}: kiosk and table QR do not acquire an OTP requirement`, async () => {
         for (const flag of ["true", "false"]) {
           for (const source of ["kiosk", "table_qr"]) {
-            reset(flag);
+            reset(flag, source === 'kiosk' ? 'local' : 'online');
             assert.equal((await invoke(controller, body({ order_source: source, table_token: source === "table_qr" ? "fixture" : null }))).status, 201);
             assert.equal(fixture.tokenChecks, 0);
             assert.equal(fixture.limitChecks, 0);
             if (source === "table_qr") assert.equal(fixture.orders[0].order_type, "dine_in");
           }
+        }
+      });
+      await t.test(`${name}: a cloud client cannot claim a local-only or tokenless QR exemption`, async () => {
+        for (const source of ['kiosk', 'pos', 'table_qr']) {
+          reset('true');
+          assert.equal((await invoke(controller, body({ order_source: source }))).status, source === 'table_qr' ? 400 : 403);
+          assert.equal(fixture.orders.length, 0);
         }
       });
     }

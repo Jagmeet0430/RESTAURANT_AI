@@ -15,7 +15,11 @@ const pool = { query: async (sql, values) => {
   if (sql.includes('DELETE FROM phone_verifications')) { record = null; return { rows: [] }; }
   if (sql.includes('SELECT id, phone_number')) return { rows: record ? [record] : [], rowCount: record ? 1 : 0 };
   if (sql.includes('SET failed_attempts')) { record.failed_attempts++; return { rows: [] }; }
-  if (sql.includes('SET verified_at')) { record.verified_at = new Date(); record.verification_token_hash = values[0]; return { rows: [] }; }
+  if (sql.includes('SET verified_at')) {
+    if (record.verified_at) return { rows: [], rowCount: 0 };
+    record.verified_at = new Date(); record.verification_token_hash = values[0];
+    return { rows: [{ id: record.id }], rowCount: 1 };
+  }
   throw new Error('Unexpected database operation in fixture');
 } };
 mock.module('../src/config/database.js', { namedExports: { pool } });

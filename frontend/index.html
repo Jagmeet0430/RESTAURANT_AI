@@ -8,7 +8,14 @@
       name="description"
       content="MAHESH customer website for fresh bakery items, pizzas, chaat, Chinese snacks, pastries, and quick ordering."
     />
-    <link rel="stylesheet" href="styles.css?v=customer-overlays-1" />
+    <script>
+      if (/\/track-order\//.test(location.pathname)) {
+        const base = document.createElement('base');
+        base.href = location.pathname.startsWith('/customer/') ? '/customer/' : '/';
+        document.head.appendChild(base);
+      }
+    </script>
+    <link rel="stylesheet" href="styles.css?v=public-checkout-security-2" />
     <script src="config.js?v=canonical-api-1"></script>
   </head>
   <body>
@@ -414,6 +421,6 @@
     </section>
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
-    <script src="script.js?v=public-order-otp-flag-1"></script>
+    <script src="script.js?v=public-checkout-security-2"></script>
   </body>
 </html>

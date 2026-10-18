@@ -4,6 +4,8 @@ import {
   createCashOrder,
   createPaymentOrder,
   getPaymentMethods,
+  quotePublicOrder,
+  recoverPublicOrder,
   markOrderPaid,
   verifyPayment,
 } from "../controllers/paymentController.js";
@@ -25,6 +27,8 @@ const verifyLimiter = createRateLimiter({
 });
 
 router.get("/methods", getPaymentMethods);
+router.post("/quote", verifyLimiter, quotePublicOrder);
+router.post("/order-outcome", verifyLimiter, recoverPublicOrder);
 router.post("/create-order", createOrderLimiter, createPaymentOrder);
 router.post("/verify", verifyLimiter, verifyPayment);
 router.post("/cash-order", createOrderLimiter, createCashOrder);

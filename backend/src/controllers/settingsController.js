@@ -1,6 +1,8 @@
 import bcrypt from "bcryptjs";
 import { pool } from "../config/database.js";
 import { publicOrderOtpRequired } from "../config/publicOrderConfig.js";
+import { DEFAULT_GST_RATE, calculateOrderTotals } from '../services/orderTotalsService.js';
+import { normalizeOrderSource } from '../services/tableQrService.js';
 import { asyncHandler, errorResponse, successResponse } from "../utils/index.js";
 
 const SETTINGS_KEY = "restaurant";
@@ -103,7 +105,10 @@ function publicSettings(settings) {
   return publicFields.reduce((publicData, field) => {
     publicData[field] = settings[field];
     return publicData;
-  }, { public_order_otp_required: publicOrderOtpRequired() });
+  }, { public_order_otp_required: publicOrderOtpRequired(), public_order_pricing: {
+    gst_rate: DEFAULT_GST_RATE,
+    packing_charge: calculateOrderTotals({ subtotal: 1, orderSource: normalizeOrderSource('customer_web') }).packing,
+  } });
 }
 
 function validateSettings(settings) {

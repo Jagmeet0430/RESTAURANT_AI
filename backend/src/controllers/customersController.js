@@ -273,7 +273,7 @@ export const createCustomer = asyncHandler(async (req, res) => {
 
 export const sendCustomerOtp = asyncHandler(async (req, res) => {
   try {
-    const otp = await createPhoneOtp(req.body.phone, { req });
+    const otp = await createPhoneOtp(req.body.phone, { req, purpose: req.body.purpose });
 
     return successResponse(
       res,
@@ -299,12 +299,13 @@ export const verifyCustomerOtp = asyncHandler(async (req, res) => {
     const verification = await verifyPhoneOtp({
       phone: req.body.phone,
       otp: req.body.otp,
+      purpose: req.body.purpose,
       req,
     });
 
     return successResponse(res, verification, "Phone number verified successfully");
   } catch (error) {
-    return errorResponse(res, error.message, error.statusCode || 500);
+    return errorResponse(res, error.statusCode && error.statusCode < 500 ? error.message : 'Unable to verify OTP right now. Please try again.', error.statusCode || 500);
   }
 });
 
@@ -327,6 +328,7 @@ export const getVerifiedCustomerOrders = asyncHandler(async (req, res) => {
   try {
     await requireVerifiedPhoneToken(normalizedPhone, otp_verification_token, {
       consume: false,
+      purpose: 'tracking',
     });
   } catch (error) {
     return errorResponse(res, error.message, error.statusCode || 401);
@@ -349,8 +351,7 @@ export const getVerifiedCustomerOrders = asyncHandler(async (req, res) => {
      FROM orders o
      JOIN customers c ON c.id = o.customer_id
      WHERE (
-       COALESCE(o.customer_phone, c.phone) = ANY($1::text[])
-       OR c.phone = ANY($1::text[])
+       COALESCE(NULLIF(o.customer_phone, ''), c.phone) = ANY($1::text[])
      )
        AND LOWER(REPLACE(COALESCE(o.status, ''), ' ', '_')) = ANY($3::text[])
      ORDER BY order_group ASC, o.created_at DESC

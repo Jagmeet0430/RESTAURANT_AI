@@ -65,13 +65,13 @@ test("cloud-to-local order sync with two disposable PostgreSQL databases", { tim
     }
     Object.assign(process.env, { RESTAURANTAI_MODE: "online", NODE_ENV: "test", WHATSAPP_ENABLED: "false",
       JWT_SECRET: "isolated-cloud-sync-test-secret", PUBLIC_ORDER_OTP_REQUIRED: "false" });
-    mock.module("../src/config/database.js", { namedExports: { pool: {
+    mock.module("../src/config/database.js", { exports: { pool: {
       query: (...args) => (context.getStore() || local).query(...args),
       connect: (...args) => (context.getStore() || local).connect(...args),
     } } });
     // Exercise kiosk order creation without accessing the installed printer or
     // its ProgramData print ledger from this disposable database fixture.
-    mock.module("../src/services/kioskReceiptAutoPrintService.js", { namedExports: { requestKioskReceiptAutoPrint: () => {} } });
+    mock.module("../src/services/kioskReceiptAutoPrintService.js", { exports: { requestKioskReceiptAutoPrint: () => {} } });
     const { createCloudSyncRouter } = await import("../src/routes/cloudSyncRoutes.js");
     const { createCloudOrderSyncWorker } = await import("../src/services/cloudOrderSyncService.js");
     const { importCloudOrder } = await import("../src/services/cloudOrderImportService.js");
@@ -97,10 +97,14 @@ test("cloud-to-local order sync with two disposable PostgreSQL databases", { tim
     const base = `http://127.0.0.1:${server.address().port}`;
     const auth = jwt.sign({ id: 1, role: "admin" }, process.env.JWT_SECRET);
     const api = async (path, body, method = "POST", token = auth) => {
+      const previousMode = process.env.RESTAURANTAI_MODE;
+      if (path === '/local-order' || path === '/api/orders') process.env.RESTAURANTAI_MODE = 'local';
+      try {
       const response = await fetch(base + path, { method: body === undefined ? "GET" : method,
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
       return { status: response.status, body: await response.json() };
+      } finally { process.env.RESTAURANTAI_MODE = previousMode; }
     };
     let offline = false, loseAck = false, loseStatus = false, slow = false, active = 0, maxActive = 0;
     const config = cloudSyncConfig({ CLOUD_SYNC_ENABLED: "true", CLOUD_SYNC_SECRET: secret,
@@ -145,7 +149,8 @@ test("cloud-to-local order sync with two disposable PostgreSQL databases", { tim
       imported = await localOrder(original.id);
       assert.ok(imported);
       assert.equal(imported.order_source, "website");
-      assert.equal(Number(imported.total_amount), 199);
+      assert.equal(Number(imported.total_amount), 189);
+      assert.equal(Number(imported.delivery_charge), 0);
       assert.equal(new Date(imported.created_at).getTime(), new Date(original.created_at).getTime());
       assert.equal(imported.cloud_synced_at, null, "lost ACK response remains retryable locally");
       assert.equal((await local.query("SELECT menu_id FROM order_items WHERE order_id=$1", [imported.id])).rows[0].menu_id, 77);
@@ -259,10 +264,13 @@ test("cloud-to-local order sync with two disposable PostgreSQL databases", { tim
       await worker.tick();
       const paid = await localOrder(next.id);
       assert.equal(paid.payment_status, "Paid");
-      assert.equal(Number(paid.total_amount), 199);
+      assert.equal(Number(paid.total_amount), 189);
       assert.equal((await local.query("SELECT payment_status FROM bills WHERE order_id=$1", [paid.id])).rows[0].payment_status, "Paid");
       for (const source of ["kiosk", "table_qr", "pos"]) {
-        const excluded = await websiteOrder({ order_source: source });
+        // Historical non-website cloud rows remain excluded, even though new
+        // browser requests can no longer claim a local-channel exemption.
+        const excluded = await websiteOrder();
+        await cloud.query('UPDATE orders SET order_source=$1 WHERE id=$2', [source, excluded.id]);
         await worker.tick();
         assert.equal(await localOrder(excluded.id), undefined);
       }

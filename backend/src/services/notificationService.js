@@ -18,13 +18,15 @@ export function messageForOrderStatus(order) {
   const customerName = String(order.customer_name || "Customer").split(/\s+/)[0];
 
   if (status === "confirmed") {
-    return `Hello ${customerName}, your order #${orderNumber} has been confirmed. Total: Rs.${Number(order.total_amount || 0).toFixed(0)}. Order type: ${order.order_type || "pickup"}. Track your order here: ${trackingUrl(order)}`;
+    return `Hello ${customerName}, your order #${orderNumber} has been confirmed. Total: Rs.${Number(order.total_amount || 0).toFixed(2)}. Order type: ${order.order_type || "pickup"}. Track your order here: ${trackingUrl(order)}`;
   }
   if (status === "accepted") return `Your order #${orderNumber} has been accepted by the restaurant.`;
   if (status === "preparing") return `Your order #${orderNumber} is now being prepared.`;
   if (status === "ready") {
     return String(order.order_type || "").toLowerCase() === "delivery"
       ? `Your order #${orderNumber} is ready and will soon be sent for delivery.`
+      : String(order.order_type || '').toLowerCase() === 'dine_in'
+      ? `Your dine-in order #${orderNumber} is ready.`
       : `Your order #${orderNumber} is ready for pickup.`;
   }
   if (status === "out_for_delivery") return `Your order #${orderNumber} is out for delivery.`;
@@ -99,13 +101,16 @@ export async function sendOrderStatusNotification(order) {
     );
     return updated.rows[0];
   } catch (error) {
+    // Provider error bodies may contain phone numbers, message text or credentials.
+    console.warn('Order notification failed', { provider: recordInfo.record.provider, orderId: order.id,
+      temporary: Boolean(error.temporary) });
     const updated = await pool.query(
       `UPDATE whatsapp_notifications
        SET delivery_status = $1,
            error_message = $2
        WHERE id = $3
        RETURNING *`,
-      [error.temporary ? "retryable_failed" : "failed", error.message, recordInfo.record.id]
+      [error.temporary ? "retryable_failed" : "failed", 'Message provider could not accept the notification.', recordInfo.record.id]
     );
     return updated.rows[0];
   }

@@ -2511,6 +2511,45 @@ input {
     background: #d1d5db;
   }
 
+  body:not(.kiosk-mode):not(.table-qr-mode).mobile-cart-open {
+    position: fixed;
+    top: var(--cart-scroll-y, 0);
+    width: 100%;
+    overflow: hidden;
+  }
+
+  body:not(.kiosk-mode):not(.table-qr-mode).mobile-cart-open .chat-widget {
+    display: none !important;
+    pointer-events: none;
+  }
+
+  body:not(.kiosk-mode):not(.table-qr-mode).mobile-cart-open .toast {
+    top: max(12px, env(safe-area-inset-top));
+    bottom: auto;
+    right: 12px;
+    max-width: calc(100% - 24px);
+  }
+
+  body:not(.kiosk-mode):not(.table-qr-mode) .mobile-cart-sheet:not([hidden]) {
+    max-height: min(85dvh, 720px);
+    grid-template-rows: auto auto minmax(0, 1fr);
+    overflow: hidden;
+  }
+
+  body:not(.kiosk-mode):not(.table-qr-mode) .mobile-checkout-step {
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    overflow-wrap: anywhere;
+    padding-bottom: 4px;
+  }
+
+  body:not(.kiosk-mode):not(.table-qr-mode) .mobile-checkout-step > .primary-btn {
+    position: sticky;
+    bottom: 0;
+    min-height: 48px;
+  }
+
   body:not(.kiosk-mode) .mobile-cart-sheet-head {
     display: flex;
     gap: 12px;

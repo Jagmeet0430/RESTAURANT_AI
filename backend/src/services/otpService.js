@@ -20,8 +20,13 @@ function hmac(value) {
   return crypto.createHmac("sha256", otpSecret()).update(String(value)).digest("hex");
 }
 
-function hashOtp(phone, otp) {
-  return hmac(`${phone}:${otp}`);
+function verificationPurpose(value = 'checkout') {
+  if (!['checkout', 'tracking'].includes(value)) throw Object.assign(new Error('Invalid verification purpose.'), { statusCode: 400 });
+  return value;
+}
+
+function hashOtp(phone, otp, purpose) {
+  return hmac(`${purpose}:${phone}:${otp}`);
 }
 
 function hashToken(token) {
@@ -36,11 +41,12 @@ function signPayload(payload) {
   return crypto.createHmac("sha256", otpSecret()).update(payload).digest("base64url");
 }
 
-function createSignedToken({ phone, verificationId }) {
+function createSignedToken({ phone, verificationId, purpose = 'checkout' }) {
   const payload = Buffer.from(
     JSON.stringify({
       phone,
       verificationId,
+      purpose,
       jti: crypto.randomBytes(18).toString("base64url"),
       exp: Date.now() + OTP_TOKEN_EXPIRY_MINUTES * 60 * 1000,
     })
@@ -50,8 +56,8 @@ function createSignedToken({ phone, verificationId }) {
 }
 
 function readSignedToken(token) {
-  const [payload, signature] = String(token || "").split(".");
-  if (!payload || !signature) return null;
+  const [payload, signature, extra] = String(token || "").split(".");
+  if (!payload || !signature || extra !== undefined) return null;
 
   const expected = signPayload(payload);
   const receivedBuffer = Buffer.from(signature);
@@ -63,7 +69,7 @@ function readSignedToken(token) {
 
   try {
     const parsed = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
-    if (Number(parsed.exp || 0) <= Date.now()) return null;
+    if (!Number.isFinite(parsed.exp) || parsed.exp <= Date.now()) return null;
     return parsed;
   } catch {
     return null;
@@ -82,17 +88,17 @@ export function normalizePhone(phone = "") {
   return normalizePhoneNumber(phone);
 }
 
-export async function createPhoneOtp(phone, { req = null, deliveryChannel } = {}) {
+export async function createPhoneOtp(phone, { req = null, deliveryChannel, purpose = 'checkout' } = {}) {
   const diagnostic = { phone, stage: "normalize_phone", sensitiveValues: [], channel: deliveryChannel };
   try {
-    return await issuePhoneOtp(phone, req, diagnostic, deliveryChannel);
+    return await issuePhoneOtp(phone, req, diagnostic, deliveryChannel, verificationPurpose(purpose));
   } catch (error) {
     if (diagnostic.loggedError !== error) logOtpSendFailure(error, diagnostic);
     throw error;
   }
 }
 
-async function issuePhoneOtp(phone, req, diagnostic, deliveryChannel) {
+async function issuePhoneOtp(phone, req, diagnostic, deliveryChannel, purpose) {
   const normalizedPhone = normalizePhoneNumber(phone);
   diagnostic.phone = normalizedPhone;
   diagnostic.stage = "phone_verifications_select";
@@ -148,7 +154,7 @@ async function issuePhoneOtp(phone, req, diagnostic, deliveryChannel) {
      RETURNING id, phone_number, expires_at`,
     [
       normalizedPhone,
-      hashOtp(normalizedPhone, otp),
+      hashOtp(normalizedPhone, otp, purpose),
       OTP_EXPIRY_MINUTES,
       requestCount + 1,
       clientIp(req),
@@ -180,7 +186,8 @@ async function issuePhoneOtp(phone, req, diagnostic, deliveryChannel) {
   };
 }
 
-export async function verifyPhoneOtp({ phone, otp, req = null }) {
+export async function verifyPhoneOtp({ phone, otp, req = null, purpose = 'checkout' }) {
+  purpose = verificationPurpose(purpose);
   const normalizedPhone = normalizePhoneNumber(phone);
   const cleanOtp = String(otp || "").trim();
 
@@ -194,7 +201,7 @@ export async function verifyPhoneOtp({ phone, otp, req = null }) {
     `SELECT id, phone_number, otp_hash, failed_attempts, expires_at, verified_at, blocked_until
      FROM phone_verifications
      WHERE phone_number = $1
-     ORDER BY created_at DESC
+     ORDER BY created_at DESC, id DESC
      LIMIT 1`,
     [normalizedPhone]
   );
@@ -215,14 +222,7 @@ export async function verifyPhoneOtp({ phone, otp, req = null }) {
   }
 
   if (record.verified_at) {
-    const token = createSignedToken({ phone: normalizedPhone, verificationId: record.id });
-    await pool.query(
-      `UPDATE phone_verifications
-       SET verification_token_hash = $1, updated_at = CURRENT_TIMESTAMP
-       WHERE id = $2`,
-      [hashToken(token), record.id]
-    );
-    return { phone: normalizedPhone, verification_token: token };
+    throw Object.assign(new Error('This OTP has already been verified. Request a new code.'), { statusCode: 400 });
   }
 
   if (new Date(record.expires_at).getTime() <= Date.now()) {
@@ -237,19 +237,17 @@ export async function verifyPhoneOtp({ phone, otp, req = null }) {
     throw error;
   }
 
-  if (hashOtp(normalizedPhone, cleanOtp) !== record.otp_hash) {
-    const nextAttempts = Number(record.failed_attempts) + 1;
+  if (hashOtp(normalizedPhone, cleanOtp, purpose) !== record.otp_hash) {
     await pool.query(
       `UPDATE phone_verifications
        SET failed_attempts = failed_attempts + 1,
-           blocked_until = CASE WHEN $2 >= $3 THEN NOW() + INTERVAL '15 minutes' ELSE blocked_until END,
-           ip_address = COALESCE($4, ip_address),
-           user_agent = COALESCE($5, user_agent),
+           blocked_until = CASE WHEN failed_attempts + 1 >= $2 THEN NOW() + INTERVAL '15 minutes' ELSE blocked_until END,
+           ip_address = COALESCE($3, ip_address),
+           user_agent = COALESCE($4, user_agent),
            updated_at = CURRENT_TIMESTAMP
        WHERE id = $1`,
       [
         record.id,
-        nextAttempts,
         OTP_MAX_ATTEMPTS,
         clientIp(req),
         String(req?.headers?.["user-agent"] || "").slice(0, 500) || null,
@@ -260,15 +258,18 @@ export async function verifyPhoneOtp({ phone, otp, req = null }) {
     throw error;
   }
 
-  const token = createSignedToken({ phone: normalizedPhone, verificationId: record.id });
-  await pool.query(
+  const token = createSignedToken({ phone: normalizedPhone, verificationId: record.id, purpose });
+  const verified = await pool.query(
     `UPDATE phone_verifications
      SET verified_at = COALESCE(verified_at, CURRENT_TIMESTAMP),
          verification_token_hash = $1,
          updated_at = CURRENT_TIMESTAMP
-     WHERE id = $2`,
-    [hashToken(token), record.id]
+     WHERE id = $2 AND verified_at IS NULL AND expires_at > NOW()
+       AND failed_attempts < $3 AND (blocked_until IS NULL OR blocked_until <= NOW())
+     RETURNING id`,
+    [hashToken(token), record.id, OTP_MAX_ATTEMPTS]
   );
+  if (!verified.rowCount) throw Object.assign(new Error('OTP expired or already used. Request a new code.'), { statusCode: 400 });
 
   return { phone: normalizedPhone, verification_token: token };
 }
@@ -283,16 +284,12 @@ export function verifyPhoneVerificationToken(phone, token) {
   return payload.phone === normalizePhoneNumber(phone);
 }
 
-export async function requireVerifiedPhoneToken(phone, token, { client = pool, consume = true, largeOrder = false } = {}) {
+export async function requireVerifiedPhoneToken(phone, token, { client = pool, consume = true, purpose = 'checkout', allowConsumed = false } = {}) {
   const normalizedPhone = normalizePhoneNumber(phone);
   const payload = readSignedToken(token);
 
-  if (!payload || payload.phone !== normalizedPhone) {
-    const error = new Error(
-      largeOrder
-        ? "Large orders require WhatsApp OTP verification before checkout."
-        : "Please verify your WhatsApp number before placing the order."
-    );
+  if (!payload || payload.phone !== normalizedPhone || payload.purpose !== verificationPurpose(purpose)) {
+    const error = new Error('Phone verification is invalid or expired. Please verify again.');
     error.statusCode = 401;
     throw error;
   }
@@ -315,19 +312,20 @@ export async function requireVerifiedPhoneToken(phone, token, { client = pool, c
     throw error;
   }
 
-  if (result.rows[0].token_used_at) {
+  if (result.rows[0].token_used_at && (consume || !allowConsumed)) {
     const error = new Error("Phone verification token was already used. Please verify again.");
     error.statusCode = 401;
     throw error;
   }
 
   if (consume) {
-    await client.query(
+    const consumed = await client.query(
       `UPDATE phone_verifications
        SET token_used_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-       WHERE id = $1 AND token_used_at IS NULL`,
+       WHERE id = $1 AND token_used_at IS NULL RETURNING id`,
       [result.rows[0].id]
     );
+    if (!consumed.rowCount) throw Object.assign(new Error('Phone verification was already used. Please verify again.'), { statusCode: 401 });
   }
 
   return true;

@@ -9,6 +9,7 @@ export async function sendTwilioMessage({ to, body, from, messagingServiceSid })
       method: "POST",
       headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/x-www-form-urlencoded" },
       body: form,
+      signal: AbortSignal.timeout(15000),
     }
   );
   const data = await response.json().catch(() => ({}));
@@ -19,5 +20,5 @@ export async function sendTwilioMessage({ to, body, from, messagingServiceSid })
     error.temporary = response.status >= 500 || response.status === 429;
     throw error;
   }
-  return { provider: "twilio", providerMessageId: data.sid || null, deliveryStatus: data.status || "sent" };
+  return { provider: "twilio", providerMessageId: data.sid || null, deliveryStatus: data.status || "accepted" };
 }

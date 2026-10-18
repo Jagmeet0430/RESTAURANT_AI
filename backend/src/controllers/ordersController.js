@@ -31,6 +31,7 @@ import {
   ensureTableQrSchema,
   generateDailyTokenNumber,
   normalizeOrderSource,
+  validatePublicOrderSource,
   resolveTableForOrder,
 } from "../services/tableQrService.js";
 import { generateTrackingToken } from "../utils/trackingToken.js";
@@ -349,6 +350,7 @@ export const createOrder = asyncHandler(async (req, res) => {
 
       const table = await resolveTableForOrder(client, table_token);
       const normalizedOrderSource = normalizeOrderSource(order_source, table ? "table_qr" : "customer_web");
+      validatePublicOrderSource(normalizedOrderSource, table);
       const requestedOrderType = String(order_type || orderType || "").trim().toLowerCase().replace(/\s+/g, "_");
       const normalizedOrderType = table ? "dine_in" : normalizeOrderType(order_type || orderType);
       const contextualInstructions = appendOrderContextInstructions(special_instructions, {
@@ -389,6 +391,7 @@ export const createOrder = asyncHandler(async (req, res) => {
       const totals = calculateOrderTotals({
         subtotal,
         orderType: normalizedOrderType,
+        orderSource: normalizedOrderSource,
         gstRate: DEFAULT_GST_RATE,
         packingCharge: DEFAULT_PACKING_CHARGE,
         discount: 0,

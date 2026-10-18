@@ -34,7 +34,7 @@ export const createCustomerNotification = async ({
 
     return result.rows[0];
   } catch (error) {
-    console.error("Customer notification failed:", error.message);
+    console.error("Customer notification failed", { code: /^[A-Z0-9_]{1,40}$/.test(error.code || '') ? error.code : 'UNKNOWN' });
     return null;
   }
 };

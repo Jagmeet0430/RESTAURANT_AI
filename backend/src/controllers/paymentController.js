@@ -22,6 +22,7 @@ import {
   ensureTableQrSchema,
   generateDailyTokenNumber,
   normalizeOrderSource,
+  validatePublicOrderSource,
   resolveTableForOrder,
 } from "../services/tableQrService.js";
 import { generateTrackingToken } from "../utils/trackingToken.js";
@@ -113,6 +114,43 @@ function publicTotals(totals) {
     total: totals.total,
   };
 }
+
+// Quote and recovery never create an order or consume phone verification.
+export const quotePublicOrder = async (req, res) => {
+  try {
+    const totals = await calculateOrderAmount(pool, req.body.items, {
+      orderType: normalizeOrderType(req.body.order_type),
+      orderSource: normalizeOrderSource('customer_web'),
+    });
+    return res.json({ success: true, data: publicTotals(totals) });
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({ success: false,
+      message: error.statusCode ? error.message : 'Unable to calculate your order. Please try again.' });
+  }
+};
+
+export const recoverPublicOrder = async (req, res) => {
+  try {
+    const key = String(req.body.idempotency_key || '');
+    // Only browser-generated random capabilities may be used for public recovery.
+    if (!/^web-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(key)) {
+      return res.status(400).json({ success: false, message: 'Invalid order reference.' });
+    }
+    const phone = normalizePhoneNumber(req.body.phone);
+    if (publicOrderOtpRequired()) await requireVerifiedPhoneToken(phone, req.body.otp_verification_token,
+      { consume: false, allowConsumed: true });
+    const result = await pool.query(
+      `SELECT id, order_number, token_number, tracking_token, order_type, order_source,
+              subtotal, tax, delivery_charge, discount, total_amount, payment_status, payment_method
+       FROM orders WHERE idempotency_key = $1 AND customer_phone = $2
+         AND order_source IN ('website', 'customer_web') LIMIT 1`, [key, phone]);
+    res.set?.('Cache-Control', 'no-store');
+    return res.json({ success: true, data: { order: result.rows[0] || null } });
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({ success: false,
+      message: error.statusCode ? error.message : 'Unable to check your order. Please try again.' });
+  }
+};
 
 async function generateOrderNumber(client) {
   const result = await client.query("SELECT COUNT(*) AS count FROM orders");
@@ -210,7 +248,7 @@ async function enforcePublicWebsiteOrderRules(client, { orderSource, orderType, 
   }
 }
 
-async function calculateOrderAmount(client, items, { orderType = "pickup" } = {}) {
+async function calculateOrderAmount(client, items, { orderType = "pickup", orderSource = null } = {}) {
   const normalizedItems = normalizeItems(items);
   const menuIds = normalizedItems.map((item) => item.menuId);
 
@@ -256,6 +294,7 @@ async function calculateOrderAmount(client, items, { orderType = "pickup" } = {}
   const totals = calculateOrderTotals({
     subtotal,
     orderType,
+    orderSource,
     gstRate: DEFAULT_GST_RATE,
     packingCharge: DEFAULT_PACKING_CHARGE,
     discount: 0,
@@ -314,6 +353,7 @@ async function insertOrderWithItems(client, {
   const cleanIdempotencyKey = String(idempotencyKey || req?.get?.("Idempotency-Key") || "").trim().slice(0, 120) || null;
 
   if (cleanIdempotencyKey) {
+    await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [cleanIdempotencyKey]);
     const existingOrder = await client.query(
       `SELECT *
        FROM orders
@@ -323,6 +363,9 @@ async function insertOrderWithItems(client, {
     );
 
     if (existingOrder.rowCount > 0) {
+      if (Number(existingOrder.rows[0].customer_id) !== Number(customerId)) {
+        throw Object.assign(new Error('Order reference is already in use.'), { statusCode: 409 });
+      }
       return {
         duplicate: true,
         customer: await requireCustomer(client, existingOrder.rows[0].customer_id),
@@ -343,6 +386,7 @@ async function insertOrderWithItems(client, {
   const customer = await requireCustomer(client, customerId);
   const table = await resolveTableForOrder(client, tableToken);
   const normalizedOrderSource = normalizeOrderSource(orderSource, table ? "table_qr" : "customer_web");
+  validatePublicOrderSource(normalizedOrderSource, table);
   const requestedOrderType = String(orderType || "").trim().toLowerCase().replace(/\s+/g, "_");
   const normalizedOrderType = table ? "dine_in" : normalizeOrderType(orderType);
   const contextualInstructions = appendOrderContextInstructions(specialInstructions, {
@@ -350,7 +394,7 @@ async function insertOrderWithItems(client, {
     table,
   });
   const normalizedPhone = normalizePhoneNumber(customer.phone);
-  const totals = await calculateOrderAmount(client, items, { orderType: normalizedOrderType });
+  const totals = await calculateOrderAmount(client, items, { orderType: normalizedOrderType, orderSource: normalizedOrderSource });
   let phoneVerified = false;
   await enforcePublicWebsiteOrderRules(client, {
     orderSource: normalizedOrderSource,
@@ -700,16 +744,17 @@ export const createCashOrder = async (req, res) => {
       [order.id, customer.id, offlineMethod, totals.total]
     );
 
-    const notification = await createCustomerNotification({
-      client,
+    await client.query("COMMIT");
+    // Optional notifications must not poison the order transaction or delay its response.
+    const notification = null;
+    void createCustomerNotification({
+      client: pool,
       customerId: customer.id,
       orderId: order.id,
       type: "order_placed",
       title: "Order placed",
       message: `Order ${order.order_number} was placed. Please pay ${orderPaymentLabel(offlineMethod).toLowerCase()}.`,
-    });
-
-    await client.query("COMMIT");
+    }).catch(() => console.warn('Customer order notification unavailable'));
     requestKioskReceiptAutoPrint(order, { reason: "cash_order_created" });
     sendOrderStatusNotification({ ...order, customer_name: customer.name, customer_phone: order.customer_phone }).catch((error) =>
       console.error("WhatsApp order confirmation failed:", error.message)

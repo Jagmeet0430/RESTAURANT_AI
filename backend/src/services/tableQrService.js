@@ -22,6 +22,16 @@ export function normalizeOrderSource(value = "", fallback = "customer_web") {
   return fallback;
 }
 
+export function validatePublicOrderSource(source, table) {
+  const local = String(process.env.RESTAURANTAI_MODE || 'online').trim().toLowerCase() === 'local';
+  if (!local && ['kiosk', 'pos'].includes(source)) {
+    throw Object.assign(new Error('This ordering channel is available only at the restaurant.'), { statusCode: 403 });
+  }
+  if (source === 'table_qr' && !table) {
+    throw Object.assign(new Error('A valid table QR code is required for this order.'), { statusCode: 400 });
+  }
+}
+
 export async function ensureTableQrSchema(client = pool) {
   await client.query(`
     CREATE TABLE IF NOT EXISTS restaurant_tables (

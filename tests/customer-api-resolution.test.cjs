@@ -132,8 +132,8 @@ test('checkout sends and verifies normalized OTP without any notification lookup
   assert.equal(c.run('state.phoneVerification.token'), 'test-token');
   assert.equal(c.run('state.checkoutStep'), 'details');
   assert.deepEqual(c.calls.map(call => ({ url: call.url, method: call.init.method, body: JSON.parse(call.init.body) })), [
-    { url: production + '/customers/otp/send', method: 'POST', body: { phone: '+919876543210' } },
-    { url: production + '/customers/otp/verify', method: 'POST', body: { phone: '+919876543210', otp: '123456' } },
+    { url: production + '/customers/otp/send', method: 'POST', body: { phone: '+919876543210', purpose: 'checkout' } },
+    { url: production + '/customers/otp/verify', method: 'POST', body: { phone: '+919876543210', otp: '123456', purpose: 'checkout' } },
   ]);
 });
 

@@ -160,7 +160,7 @@ function kioskSecondsParam(queryKey, configKey, fallback, minimum) {
   return Number.isFinite(value) ? Math.max(minimum, value) : fallback;
 }
 
-const KIOSK_IDLE_TIMEOUT_MS = kioskSecondsParam("kioskIdleSeconds", "idleTimeoutSeconds", 120, 30) * 1000;
+const KIOSK_IDLE_TIMEOUT_MS = kioskSecondsParam("kioskIdleSeconds", "idleTimeoutSeconds", 60, 30) * 1000;
 const KIOSK_IDLE_GRACE_MS = kioskSecondsParam("kioskIdleGraceSeconds", "idleGraceSeconds", 15, 5) * 1000;
 const KIOSK_CONFIRMATION_RESET_SECONDS = kioskSecondsParam("kioskResetSeconds", "confirmationResetSeconds", 25, 5);
 const KIOSK_NAME_MAX_LENGTH = 40;
@@ -229,6 +229,10 @@ const state = {
     idleWarning: false,
     idleTimer: null,
     idleGraceTimer: null,
+    idleCountdown: null,
+    idleDeadline: 0,
+    pendingOrder: null,
+    startLockUntil: 0,
     resetTimer: null,
     resetInterval: null,
     resetRemaining: 0,
@@ -576,7 +580,7 @@ async function loadPublicSettings() {
 
 function formatPrice(value) {
   const amount = Number(value || 0);
-  return `Rs. ${amount.toFixed(!state.kiosk.enabled && !state.tableQr.enabled && !Number.isInteger(amount) ? 2 : 0)}`;
+  return `Rs. ${amount.toFixed(!state.tableQr.enabled && !Number.isInteger(amount) ? 2 : 0)}`;
 }
 
 function saveCart() {
@@ -1209,9 +1213,11 @@ async function refreshLiveMenu({ background = false } = {}) {
       state.selectedCategory = "All";
     }
 
-    state.cart = state.cart.filter((cartItem) =>
-      menuItems.some((menuItem) => menuItem.id === cartItem.id)
-    );
+    if (!state.kiosk.enabled || !kioskResetBlocked()) {
+      state.cart = state.cart.filter((cartItem) =>
+        menuItems.some((menuItem) => menuItem.id === cartItem.id)
+      );
+    }
     saveCart();
 
     updateMenuStats();
@@ -1733,8 +1739,8 @@ function cartTotals() {
   const tax = Math.round(subtotal * (isPublic ? Number(state.publicPricing?.gst_rate || 0) : GST_RATE) * 100) / 100;
   const packing = isPublic
     ? (subtotal > 0 && currentOrderTypeLabel() !== 'Dine-in' ? Number(state.publicPricing?.packing_charge || 0) : 0)
-    : subtotal > 0 ? PACKING_CHARGE : 0;
-  return { count, subtotal, tax, packing, total: isPublic ? Number((subtotal + tax + packing).toFixed(2)) : subtotal + tax + packing };
+    : !state.kiosk.enabled && subtotal > 0 ? PACKING_CHARGE : 0;
+  return { count, subtotal, tax, packing, total: Number((subtotal + tax + packing).toFixed(2)) };
 }
 
 function publicQuoteKey() {
@@ -2855,6 +2861,21 @@ async function handleOfflinePayment(customer) {
         state.pendingPublicOrder = null;
         state.orderIdempotencyKey = '';
         sessionStorage.removeItem('restaurantai_pending_public_order');
+      }
+      throw error;
+    }
+  }
+  if (state.kiosk.enabled) {
+    const recovering = Boolean(state.kiosk.pendingOrder);
+    state.kiosk.pendingOrder ||= { customer, payload: buildPaymentPayload(customer) };
+    try {
+      return await requestJson('/payments/cash-order', {
+        method: 'POST', body: JSON.stringify(state.kiosk.pendingOrder.payload),
+      });
+    } catch (error) {
+      // A lost response may follow a committed order. Keep its exact payload/key for retry.
+      if (!recovering && error.status >= 400 && error.status < 500 && ![408, 409].includes(error.status)) {
+        state.kiosk.pendingOrder = null;
       }
       throw error;
     }
@@ -4072,6 +4093,11 @@ function kioskActiveOrderScreen() {
   return ["order_type", "menu", "details", "payment", "review"].includes(state.kiosk.screen);
 }
 
+function kioskResetBlocked() {
+  return state.isSubmittingOrder || Boolean(state.kiosk.pendingOrder) ||
+    Boolean(state.pendingPublicOrder) || state.kiosk.printingReceiptOrderIds.size > 0;
+}
+
 function handleKioskContextMenu(event) {
   if (!state.kiosk.enabled) return;
   event.preventDefault();
@@ -4096,8 +4122,11 @@ function handleKioskOrientationChange() {
 function clearKioskIdleTimers() {
   window.clearTimeout(state.kiosk.idleTimer);
   window.clearTimeout(state.kiosk.idleGraceTimer);
+  window.clearInterval(state.kiosk.idleCountdown);
   state.kiosk.idleTimer = null;
   state.kiosk.idleGraceTimer = null;
+  state.kiosk.idleCountdown = null;
+  state.kiosk.idleDeadline = 0;
   updateKioskTimerDebug();
 }
 
@@ -4111,20 +4140,30 @@ function clearKioskConfirmationTimers() {
 }
 
 function scheduleKioskIdleTimer() {
-  if (!state.kiosk.enabled || !kioskActiveOrderScreen()) return;
-
   clearKioskIdleTimers();
+  if (!state.kiosk.enabled || !kioskActiveOrderScreen() || kioskResetBlocked()) return;
   state.kiosk.idleTimer = window.setTimeout(() => {
+    state.kiosk.idleTimer = null;
+    if (kioskResetBlocked() || !kioskActiveOrderScreen()) return;
+    if (!state.cart.length) { resetKioskSession(); return; }
+    state.kiosk.clearConfirm = false;
     state.kiosk.idleWarning = true;
+    state.kiosk.idleDeadline = Date.now() + KIOSK_IDLE_GRACE_MS;
     renderKiosk();
-    state.kiosk.idleGraceTimer = window.setTimeout(resetKioskSession, KIOSK_IDLE_GRACE_MS);
+    state.kiosk.idleCountdown = window.setInterval(() => {
+      const countdown = document.querySelector('#kioskIdleCountdown');
+      if (countdown) countdown.textContent = String(Math.max(0, Math.ceil((state.kiosk.idleDeadline - Date.now()) / 1000)));
+    }, 1000);
+    state.kiosk.idleGraceTimer = window.setTimeout(() => {
+      if (!resetKioskSession()) continueKioskSession();
+    }, KIOSK_IDLE_GRACE_MS);
     updateKioskTimerDebug();
   }, KIOSK_IDLE_TIMEOUT_MS);
   updateKioskTimerDebug();
 }
 
 function resetKioskActivity() {
-  if (!state.kiosk.enabled || !kioskActiveOrderScreen() || state.kiosk.idleWarning) return;
+  if (!state.kiosk.enabled || !kioskActiveOrderScreen() || state.kiosk.idleWarning || kioskResetBlocked()) return;
   scheduleKioskIdleTimer();
 }
 
@@ -4139,20 +4178,22 @@ function startKioskConfirmationTimer() {
   clearKioskConfirmationTimers();
   state.kiosk.resetRemaining = KIOSK_CONFIRMATION_RESET_SECONDS;
   renderKiosk();
-
+  let deadline = 0;
   state.kiosk.resetInterval = window.setInterval(() => {
-    state.kiosk.resetRemaining = Math.max(0, state.kiosk.resetRemaining - 1);
+    if (kioskResetBlocked()) { deadline = 0; return; }
+    if (!deadline) deadline = Date.now() + state.kiosk.resetRemaining * 1000;
+    state.kiosk.resetRemaining = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
     const countdown = document.querySelector("#kioskCountdown");
     if (countdown) {
       countdown.textContent = `${state.kiosk.resetRemaining}s`;
     }
+    if (!state.kiosk.resetRemaining) resetKioskSession();
   }, 1000);
-
-  state.kiosk.resetTimer = window.setTimeout(resetKioskSession, KIOSK_CONFIRMATION_RESET_SECONDS * 1000);
   updateKioskTimerDebug();
 }
 
 function resetKioskSession() {
+  if (!state.kiosk.enabled || kioskResetBlocked()) return false;
   clearKioskIdleTimers();
   clearKioskConfirmationTimers();
   state.cart = [];
@@ -4171,15 +4212,25 @@ function resetKioskSession() {
   state.kiosk.customerName = "";
   state.kiosk.customerPhone = "";
   state.kiosk.submissionError = "";
+  state.kiosk.pendingOrder = null;
+  state.kiosk.startLockUntil = 0;
   state.kiosk.idleWarning = false;
   state.kiosk.clearConfirm = false;
   state.kiosk.keyboard.activeField = "";
   state.kiosk.keyboard.nameCaps = true;
+  resetPhoneVerification();
+  resetTrackOrders();
+  if (elements.customerName) elements.customerName.value = '';
+  if (elements.customerPhone) elements.customerPhone.value = '';
+  state.publicQuote = null;
+  state.lastRecommendedItems = [];
   saveCart();
   renderKiosk();
+  return true;
 }
 
 function setKioskScreen(screen) {
+  if (kioskResetBlocked()) return;
   state.kiosk.screen = screen;
   state.kiosk.submissionError = "";
   state.kiosk.clearConfirm = false;
@@ -4275,7 +4326,7 @@ function renderKioskHeader() {
       </div>
       ${
         state.kiosk.screen !== "welcome" && state.kiosk.screen !== "confirmation"
-          ? `<button class="kiosk-ghost-btn" type="button" data-kiosk-action="start-over">Start over</button>`
+          ? `<button class="kiosk-ghost-btn" type="button" data-kiosk-action="start-over" ${kioskResetBlocked() ? 'disabled' : ''}>Start over</button>`
           : ""
       }
     </header>
@@ -4284,13 +4335,15 @@ function renderKioskHeader() {
 
 function renderKioskWelcome() {
   return `
-    <section class="kiosk-welcome">
-      <div class="kiosk-welcome-copy">
+    <section class="kiosk-welcome kiosk-attract" aria-labelledby="kioskAttractTitle">
+      <img class="kiosk-attract-photo" src="assets/hero-food.png" alt="" draggable="false" />
+      <div class="kiosk-attract-copy">
         <span class="kiosk-eyebrow">Self-order kiosk</span>
-        <h1>${escapeHtml(kioskRestaurantName())}</h1>
-        <p>Browse the live menu, place your order, and pay at the restaurant counter.</p>
-        <button class="kiosk-primary-btn" type="button" data-kiosk-action="start">Start order</button>
+        <h1 id="kioskAttractTitle"><span>ORDER</span><span>HERE</span><span>PLEASE</span></h1>
+        <img class="kiosk-attract-hand" src="assets/kiosk-touch.svg" alt="" draggable="false" />
+        <p>Touch anywhere to start your order</p>
       </div>
+      <button class="kiosk-attract-start" type="button" data-kiosk-action="start" aria-label="Start order"></button>
     </section>
   `;
 }
@@ -4636,9 +4689,9 @@ function renderKioskReview() {
         ${kioskTotalsMarkup(totals)}
         ${state.kiosk.submissionError ? `<div class="kiosk-error">${escapeHtml(state.kiosk.submissionError)}</div>` : ""}
         <button class="kiosk-primary-btn" type="button" data-kiosk-action="place-order" ${state.isSubmittingOrder ? "disabled" : ""}>
-          ${state.isSubmittingOrder ? "Placing order..." : "Place Order"}
+          ${state.isSubmittingOrder ? "Placing order..." : state.kiosk.pendingOrder ? "Check order" : "Place Order"}
         </button>
-        <button class="kiosk-secondary-btn" type="button" data-kiosk-action="payment" ${state.isSubmittingOrder ? "disabled" : ""}>Back</button>
+        <button class="kiosk-secondary-btn" type="button" data-kiosk-action="payment" ${kioskResetBlocked() ? "disabled" : ""}>Back</button>
       </aside>
     </section>
   `;
@@ -4663,8 +4716,8 @@ function renderKioskConfirmation() {
         <div><span>Packing</span><strong>${formatPrice(totals.packing)}</strong></div>
         <div class="kiosk-receipt-total"><span>Grand total</span><strong>${formatPrice(totals.total)}</strong></div>
       </div>
-      <button class="kiosk-primary-btn" type="button" data-kiosk-action="new-order">START NEW ORDER</button>
-      <span class="kiosk-countdown">Resetting in <b id="kioskCountdown">${state.kiosk.resetRemaining || KIOSK_CONFIRMATION_RESET_SECONDS}s</b></span>
+      <button class="kiosk-primary-btn" type="button" data-kiosk-action="new-order" ${kioskResetBlocked() ? 'disabled' : ''}>START NEW ORDER</button>
+      <span class="kiosk-countdown">${kioskResetBlocked() ? 'Finishing receipt request...' : `Resetting in <b id="kioskCountdown">${state.kiosk.resetRemaining || KIOSK_CONFIRMATION_RESET_SECONDS}s</b>`}</span>
     </section>
   `;
 }
@@ -4688,12 +4741,12 @@ function renderKioskOverlay() {
   if (state.kiosk.idleWarning) {
     return `
       <div class="kiosk-modal-backdrop">
-        <div class="kiosk-modal kiosk-idle-dialog">
-          <h2>Are you still there?</h2>
-          <p>This kiosk will reset soon to protect your order details.</p>
+        <div class="kiosk-modal kiosk-idle-dialog" role="dialog" aria-modal="true" aria-labelledby="kioskIdleTitle">
+          <h2 id="kioskIdleTitle">Are you still ordering?</h2>
+          <p>Starting over in <b id="kioskIdleCountdown">${Math.max(0, Math.ceil((state.kiosk.idleDeadline - Date.now()) / 1000))}</b> seconds.</p>
           <div>
-            <button class="kiosk-primary-btn" type="button" data-kiosk-action="continue-session">Continue</button>
-            <button class="kiosk-secondary-btn" type="button" data-kiosk-action="new-order">Cancel</button>
+            <button class="kiosk-primary-btn" type="button" data-kiosk-action="continue-session">Continue ordering</button>
+            <button class="kiosk-secondary-btn" type="button" data-kiosk-action="new-order">Start over</button>
           </div>
         </div>
       </div>
@@ -4730,7 +4783,11 @@ function renderKiosk() {
     </div>
   `;
 
-  restoreKioskActiveFieldFocus();
+  if (state.kiosk.idleWarning) {
+    document.querySelector('.kiosk-idle-dialog button')?.focus({ preventScroll: true });
+  } else {
+    restoreKioskActiveFieldFocus();
+  }
 }
 
 function validateKioskDetails() {
@@ -4764,15 +4821,16 @@ async function placeKioskOrder() {
     renderKiosk();
     return;
   }
-  if (!validateKioskDetails()) return;
+  if (!state.kiosk.pendingOrder && !validateKioskDetails()) return;
 
   state.isSubmittingOrder = true;
   state.kiosk.submissionError = "";
   state.paymentMethod = "pay_at_counter";
+  clearKioskIdleTimers();
   renderKiosk();
 
   try {
-    const customer = await findOrCreateCustomer({
+    const customer = state.kiosk.pendingOrder?.customer || await findOrCreateCustomer({
       name: state.kiosk.customerName,
       phone: state.kiosk.customerPhone,
     });
@@ -4784,6 +4842,7 @@ async function placeKioskOrder() {
       kioskEnabled: state.kiosk.enabled,
       tableQrEnabled: state.tableQr.enabled,
     });
+    state.kiosk.pendingOrder = null;
     completeOrderSuccess({
       order,
       message: "Your kiosk order was sent to the restaurant.",
@@ -4791,16 +4850,32 @@ async function placeKioskOrder() {
     });
     state.kiosk.screen = "confirmation";
     state.isSubmittingOrder = false;
+    const printing = requestKioskReceiptPrint(order);
     startKioskConfirmationTimer();
-    requestKioskReceiptPrint(order);
+    await printing;
+    if (state.kiosk.screen === 'confirmation') renderKiosk();
   } catch (error) {
     state.isSubmittingOrder = false;
-    state.kiosk.submissionError = `We could not place this order. Nothing was cleared. ${friendlyNetworkError(error)} Please try again.`;
+    state.kiosk.submissionError = state.kiosk.pendingOrder
+      ? 'Your order is not yet confirmed. Tap Check order to safely retry the same order, or ask the counter team for help. Nothing has been cleared.'
+      : `We could not place this order. Nothing was cleared. ${friendlyNetworkError(error)} Please try again.`;
+    scheduleKioskIdleTimer();
     renderKiosk();
   }
 }
 
 function handleKioskClick(event) {
+  if (state.kiosk.screen === 'welcome') {
+    state.kiosk.startLockUntil = Date.now() + 450;
+    setKioskScreen('order_type');
+    return;
+  }
+  if (Date.now() < state.kiosk.startLockUntil || state.isSubmittingOrder) return;
+  if (kioskResetBlocked()) {
+    if (state.kiosk.pendingOrder && event.target.closest('[data-kiosk-action="place-order"]')) placeKioskOrder();
+    return;
+  }
+  if (state.kiosk.idleWarning && !event.target.closest('.kiosk-idle-dialog')) return;
   const keyboardButton = event.target.closest("[data-kiosk-key-action]");
   if (keyboardButton) {
     handleKioskKeyboardAction(keyboardButton.dataset.kioskKeyAction, keyboardButton.dataset.kioskKey || "");
@@ -4882,6 +4957,7 @@ function handleKioskClick(event) {
 }
 
 function handleKioskInput(event) {
+  if (kioskResetBlocked() || state.kiosk.idleWarning) return;
   if (event.target.id === "kioskSearchInput") {
     state.kiosk.searchQuery = event.target.value;
     renderKiosk();
@@ -4913,6 +4989,7 @@ function restoreKioskActiveFieldFocus() {
   if (!state.kiosk.enabled || state.kiosk.screen !== "details" || !state.kiosk.keyboard.activeField) return;
 
   window.requestAnimationFrame(() => {
+    if (state.kiosk.idleWarning || state.kiosk.screen !== 'details') return;
     const input = document.querySelector(`[data-kiosk-field="${state.kiosk.keyboard.activeField}"]`);
     input?.focus({ preventScroll: true });
     input?.scrollIntoView({ block: "nearest", inline: "nearest" });
@@ -4925,6 +5002,7 @@ function updateKioskTimerDebug() {
     settingsRefreshTimerCount: state.kiosk.settingsRefreshTimer ? 1 : 0,
     idleTimerCount: state.kiosk.idleTimer ? 1 : 0,
     idleGraceTimerCount: state.kiosk.idleGraceTimer ? 1 : 0,
+    idleCountdownCount: state.kiosk.idleCountdown ? 1 : 0,
     confirmationIntervalCount: state.kiosk.resetInterval ? 1 : 0,
     confirmationResetTimerCount: state.kiosk.resetTimer ? 1 : 0,
   };
@@ -4957,9 +5035,18 @@ function bindKioskEvents() {
   main?.addEventListener("click", handleKioskClick);
   main?.addEventListener("input", handleKioskInput);
   main?.addEventListener("focusin", handleKioskFocus);
-  ["pointerdown", "keydown", "touchstart"].forEach((eventName) => {
+  main?.addEventListener('keydown', event => {
+    if (!state.kiosk.idleWarning || event.key !== 'Tab') return;
+    const buttons = [...document.querySelectorAll('.kiosk-idle-dialog button')];
+    event.preventDefault();
+    const index = buttons.indexOf(document.activeElement);
+    buttons[(index + (event.shiftKey ? -1 : 1) + buttons.length) % buttons.length]?.focus();
+  });
+  // User gestures only: programmatic scroll restoration and background refresh are not activity.
+  ["pointerdown", "keydown", "touchstart", "touchmove", "wheel"].forEach((eventName) => {
     window.addEventListener(eventName, resetKioskActivity, { passive: true });
   });
+  window.addEventListener('pointermove', event => { if (event.buttons) resetKioskActivity(); }, { passive: true });
   document.addEventListener("contextmenu", handleKioskContextMenu);
   document.addEventListener("mousedown", handleKioskMouseDown);
   document.addEventListener("dragstart", handleKioskDragStart);

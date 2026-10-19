@@ -27,6 +27,7 @@ import StorefrontIcon from "@mui/icons-material/Storefront";
 import VerifiedUserIcon from "@mui/icons-material/VerifiedUser";
 import { PageHeader, StatCard, StatGrid } from "../../components/common/PageKit";
 import { settingsService } from "../../services/settings";
+import PrinterSettings from './PrinterSettings';
 
 const STORAGE_KEY = "restaurantai_settings";
 
@@ -636,7 +637,7 @@ function Settings() {
             <Card>
               <CardContent>
                 <Typography variant="h6" sx={{ mb: 0.5, fontWeight: 900 }}>
-                  Receipt Printing
+                  Browser Receipt Preferences
                 </Typography>
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
                   Configure browser printing for standard Windows thermal printer drivers.
@@ -677,12 +678,14 @@ function Settings() {
                   fullWidth
                   variant="outlined"
                   startIcon={<LocalPrintshopIcon />}
-                  onClick={() => navigate("/receipt/test/preview?print=1")}
+                  onClick={() => navigate("/receipt/test/preview")}
                 >
-                  Print Test Receipt
+                  Receipt Preview
                 </Button>
               </CardContent>
             </Card>
+
+            <Paper variant="outlined" sx={{ p: 2 }}><PrinterSettings /></Paper>
 
             <Card>
               <CardContent>

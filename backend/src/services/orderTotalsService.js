@@ -63,16 +63,75 @@ export function calculateOrderTotals({
 export function receiptTotalsFromRow(row = {}) {
   const subtotal = money(row.subtotal);
   const tax = money(row.tax ?? row.gst_amount);
-  const { cgst, sgst } = splitTaxAmount(tax);
+  // Only transaction-saved metadata may describe a different tax treatment.
+  // Current settings must never reprice an old bill. Legacy checkout was 5% exclusive.
+  const snapshot = row.receipt_settings?.tax_snapshot || {};
+  const savedRate = value => value != null && Number.isFinite(Number(value)) && Number(value) >= 0 ? Number(value) : null;
+  const inclusive = snapshot.price_mode === 'inclusive';
+  const displaySubtotal = money(subtotal - (inclusive ? tax : 0));
+  const discount = money(row.discount);
+  const packing = money(row.delivery_charge);
+  const grandTotal = money(row.total_amount);
+  const roundOff = money(snapshot.round_off ?? row.round_off);
+  const charges = (Array.isArray(snapshot.charges) ? snapshot.charges : [])
+    .filter(entry => entry && typeof entry.label === 'string' && Number.isFinite(Number(entry.amount)))
+    .map(entry => ({ label: entry.label, amount: money(entry.amount) }));
+  let taxLines = [];
+  const components = snapshot.components;
+  if (Array.isArray(components) && components.length &&
+      components.every(entry => entry && typeof entry.label === 'string' &&
+        Number.isFinite(Number(entry.amount)) && Number(entry.amount) >= 0) &&
+      money(components.reduce((sum, entry) => sum + Number(entry.amount), 0)) === tax) {
+    taxLines = components.map(entry => ({ label: entry.label, amount: money(entry.amount),
+      rate: savedRate(entry.rate) }));
+  } else if (!components && snapshot.treatment === 'inter_state') {
+    taxLines = [{ label: 'IGST', amount: tax, rate: savedRate(snapshot.rate) }];
+  } else if (!components && (snapshot.treatment === 'intra_state' ||
+      (!snapshot.treatment && !inclusive && money(subtotal * DEFAULT_GST_RATE) === tax))) {
+    const split = splitTaxAmount(tax);
+    const rate = savedRate(snapshot.rate) ?? (!snapshot.treatment ? DEFAULT_GST_RATE : null);
+    taxLines = [
+      { label: 'SGST', amount: split.sgst, rate: rate == null ? null : Number(rate) / 2 },
+      { label: 'CGST', amount: split.cgst, rate: rate == null ? null : Number(rate) / 2 },
+    ];
+  } else if (tax) {
+    taxLines = [{ label: 'GST/Tax', amount: tax, rate: null }];
+  }
+  taxLines = tax ? taxLines : [];
+  const componentAmount = label => money(taxLines.filter(entry => entry.label === label).reduce((sum, entry) => sum + entry.amount, 0));
+  const componentRate = label => taxLines.find(entry => entry.label === label)?.rate ?? null;
+  const adjustment = money(grandTotal - money(displaySubtotal - discount + tax + packing + roundOff +
+    charges.reduce((sum, entry) => sum + entry.amount, 0)));
+  const summaryLines = [];
+  if (inclusive) summaryLines.push({ label: 'Included GST', amount: -tax });
+  summaryLines.push({ label: inclusive ? 'Subtotal (excl. GST)' : 'Subtotal', amount: displaySubtotal });
+  if (discount) summaryLines.push({ label: 'Discount', amount: -discount });
+  if (snapshot.taxable_subtotal != null) summaryLines.push({ label: 'Taxable value', amount: money(snapshot.taxable_subtotal), informational: true });
+  if (snapshot.exempt_subtotal != null) summaryLines.push({ label: 'Exempt value', amount: money(snapshot.exempt_subtotal), informational: true });
+  for (const entry of taxLines) {
+    const rate = entry.rate == null ? '' : ` ${Number((Number(entry.rate) * 100).toFixed(4))}%`;
+    summaryLines.push({ label: entry.label + rate, amount: entry.amount });
+  }
+  if (packing) summaryLines.push({ label: 'Packing', amount: packing });
+  summaryLines.push(...charges, { label: 'Round off', amount: roundOff });
+  if (adjustment) summaryLines.push({ label: 'Saved adjustment', amount: adjustment });
   return {
     subtotal,
-    discount: money(row.discount),
+    discount,
     tax,
-    cgst,
-    sgst,
-    cgst_rate: DEFAULT_GST_RATE / 2,
-    sgst_rate: DEFAULT_GST_RATE / 2,
-    packing: money(row.delivery_charge),
-    grand_total: money(row.total_amount),
+    cgst: componentAmount('CGST'),
+    sgst: componentAmount('SGST'),
+    igst: componentAmount('IGST'),
+    cgst_rate: componentRate('CGST'),
+    sgst_rate: componentRate('SGST'),
+    packing,
+    grand_total: grandTotal,
+    display_subtotal: displaySubtotal,
+    prices_include_tax: inclusive,
+    round_off: roundOff,
+    adjustment,
+    charges,
+    tax_lines: taxLines,
+    summary_lines: summaryLines,
   };
 }

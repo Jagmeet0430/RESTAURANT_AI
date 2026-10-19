@@ -3,8 +3,10 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import { randomUUID } from "node:crypto";
 
 import { getOrderReceipt, getTestReceipt } from "./billingService.js";
+import { receiptTotalsFromRow } from "./orderTotalsService.js";
 import { logger } from "../utils/logger.js";
 
 const execFileAsync = promisify(execFile);
@@ -17,6 +19,12 @@ const DEFAULT_PRINTER_CONFIG = {
   paperWidth: "80mm",
   copies: 1,
   autoPrintKioskOrders: true,
+  kitchenPrinterName: "",
+  printMode: "windows_driver",
+  fontScale: 1,
+  lineSpacing: 1,
+  logoPrinting: false,
+  autoCut: "driver",
 };
 
 const printLocks = new Set();
@@ -60,7 +68,7 @@ async function readJsonFile(filePath, fallback) {
 
 async function readPrinterConfigFile(configPath) {
   try {
-    return JSON.parse(await fs.readFile(configPath, "utf8"));
+    return JSON.parse((await fs.readFile(configPath, "utf8")).replace(/^\uFEFF/, ''));
   } catch (error) {
     if (error.code === "ENOENT") {
       logger.warn("Printer configuration file is missing", { configPath });
@@ -78,7 +86,7 @@ async function writeJsonFile(filePath, payload) {
   await fs.rename(tempPath, filePath);
 }
 
-function cleanPrinterConfig(raw = {}) {
+export function cleanPrinterConfig(raw = {}) {
   const paperWidth = String(raw.paperWidth || DEFAULT_PRINTER_CONFIG.paperWidth).toLowerCase();
   const copies = Number(raw.copies || DEFAULT_PRINTER_CONFIG.copies);
 
@@ -89,6 +97,13 @@ function cleanPrinterConfig(raw = {}) {
     copies: Number.isInteger(copies) && copies > 0 && copies <= 5 ? copies : DEFAULT_PRINTER_CONFIG.copies,
     autoPrintKioskOrders:
       raw.autoPrintKioskOrders === undefined ? DEFAULT_PRINTER_CONFIG.autoPrintKioskOrders : Boolean(raw.autoPrintKioskOrders),
+    charactersPerLine: receiptCharacterWidth(raw),
+    kitchenPrinterName: String(raw.kitchenPrinterName || '').trim(),
+    printMode: raw.printMode || 'windows_driver',
+    fontScale: Number(raw.fontScale || 1),
+    lineSpacing: Number(raw.lineSpacing || 1),
+    logoPrinting: Boolean(raw.logoPrinting),
+    autoCut: raw.autoCut || 'driver',
   };
 }
 
@@ -159,11 +174,12 @@ function candidatePrintScriptPaths() {
   ].filter(Boolean);
 }
 
-async function resolvePrintScriptPath() {
+export async function resolvePrintScriptPath(scriptName = 'print-receipt.ps1') {
   for (const candidate of candidatePrintScriptPaths()) {
+    const scriptPath = scriptName === 'print-receipt.ps1' ? candidate : path.join(path.dirname(candidate), scriptName);
     try {
-      await fs.access(candidate);
-      return candidate;
+      await fs.access(scriptPath);
+      return scriptPath;
     } catch {
       // Try the next packaged/dev location.
     }
@@ -188,8 +204,10 @@ function center(text, width) {
 function row(left, right, width) {
   const leftText = String(left || "");
   const rightText = String(right || "");
-  const gap = Math.max(1, width - leftText.length - rightText.length);
-  return `${leftText.slice(0, Math.max(0, width - rightText.length - 1))}${" ".repeat(gap)}${rightText}`;
+  if (leftText.length + rightText.length + 1 > width) {
+    return [...wrap(leftText, width), ...wrap(rightText, width).map(line => line.padStart(width))].join('\r\n');
+  }
+  return leftText + ' '.repeat(width - leftText.length - rightText.length) + rightText;
 }
 
 function wrap(text, width) {
@@ -197,7 +215,11 @@ function wrap(text, width) {
   const lines = [];
   let line = "";
 
-  for (const word of words) {
+  for (let word of words) {
+    if (word.length > width) {
+      if (line) { lines.push(line); line = ''; }
+      while (word.length > width) { lines.push(word.slice(0, width)); word = word.slice(width); }
+    }
     if (!line) {
       line = word;
     } else if (`${line} ${word}`.length <= width) {
@@ -210,6 +232,26 @@ function wrap(text, width) {
 
   if (line) lines.push(line);
   return lines.length ? lines : [""];
+}
+
+export function receiptCharacterWidth(config = {}) {
+  const value = Number(config.charactersPerLine);
+  return Number.isInteger(value) && value >= 24 && value <= 64 ? value : config.paperWidth === '58mm' ? 28 : 42;
+}
+
+function itemTable(receipt, width) {
+  const rows = (receipt.items || []).map(item => [String(item.name || 'Item'),
+    String(item.quantity ?? item.qty ?? 0), money(item.unit_price ?? item.price),
+    money(item.total_price ?? item.line_total)]);
+  const cells = ['Item', 'Qty', 'Rate', 'Amount'];
+  const widths = [0, 3, 6, 6];
+  for (let column = 1; column < 4; column++) {
+    widths[column] = Math.max(widths[column], ...rows.map(row => row[column].length));
+  }
+  widths[0] = width - widths.slice(1).reduce((sum, value) => sum + value, 0) - 3;
+  if (widths[0] < 3) throw new Error('Receipt character width is too narrow for the saved numeric values');
+  return [{ type: 'table', cells, widths, style: 'bold' },
+    ...rows.map(cells => ({ type: 'table', cells, widths, style: 'normal' }))];
 }
 
 function labelOrderType(value) {
@@ -236,11 +278,14 @@ function receiptDate(value) {
 
 export function buildThermalReceiptLayout(receipt, config = {}, { duplicate = false } = {}) {
   const restaurant = receipt.restaurant || {};
-  const totals = receipt.totals || {};
+  const savedTotals = receipt.totals || {};
+  const totals = savedTotals.summary_lines ? savedTotals : receiptTotalsFromRow({
+    subtotal: savedTotals.subtotal, tax: savedTotals.tax, discount: savedTotals.discount,
+    delivery_charge: savedTotals.packing, total_amount: savedTotals.grand_total ?? savedTotals.total_amount,
+  });
   const restaurantName =
     restaurant.restaurant_name || restaurant.restaurantName || restaurant.name || "Restaurant";
   const footer = restaurant.footer_text || restaurant.footer || restaurant.receiptFooter || "Thank you!";
-  const orderIdentifier = receipt.order_number || receipt.bill_number || receipt.source_id || "";
   const layout = [
     { type: "text", text: restaurantName, align: "center", style: "header" },
   ];
@@ -248,13 +293,14 @@ export function buildThermalReceiptLayout(receipt, config = {}, { duplicate = fa
   if (duplicate) layout.push({ type: "text", text: "DUPLICATE / REPRINT", align: "center", style: "bold" });
   if (restaurant.address) layout.push({ type: "text", text: restaurant.address, align: "center", style: "normal" });
   if (restaurant.phone) layout.push({ type: "text", text: `Phone: ${restaurant.phone}`, align: "center", style: "normal" });
-  if (restaurant.gstin || restaurant.gst) {
-    layout.push({ type: "text", text: `GSTIN: ${restaurant.gstin || restaurant.gst}`, align: "center", style: "normal" });
+  const gstin = String(restaurant.gstin || restaurant.gst || '').trim().toUpperCase();
+  if (/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/.test(gstin)) {
+    layout.push({ type: "text", text: `GSTIN: ${gstin}`, align: "center", style: "normal" });
   }
 
   layout.push({ type: "rule" });
-  layout.push({ type: "text", text: "Order:", align: "left", style: "bold" });
-  layout.push({ type: "text", text: String(orderIdentifier), align: "left", style: "normal" });
+  if (receipt.bill_number) layout.push({ type: 'pair', left: 'Bill', right: String(receipt.bill_number), style: 'bold' });
+  layout.push({ type: 'pair', left: 'Order', right: String(receipt.order_number || receipt.source_id || ''), style: 'normal' });
   if (receipt.token_number) {
     layout.push({ type: "text", text: `TOKEN: ${receipt.token_number}`, align: "center", style: "token" });
   }
@@ -273,31 +319,18 @@ export function buildThermalReceiptLayout(receipt, config = {}, { duplicate = fa
   }
   layout.push({ type: "rule" });
 
-  for (const item of receipt.items || []) {
-    const qty = Number(item.quantity || item.qty || 0);
-    const unit = Number(item.unit_price || item.price || 0);
-    const total = Number(item.total_price || item.line_total || qty * unit || 0);
-    layout.push({ type: "text", text: item.name || "Item", align: "left", style: "bold" });
-    layout.push({
-      type: "pair",
-      left: `${qty} x Rs. ${money(unit)}`,
-      right: `Rs. ${money(total)}`,
-      style: "normal",
-    });
-    layout.push({ type: "spacer", points: 2 });
-  }
+  if (totals.prices_include_tax) layout.push({ type: 'text', text: 'Item prices include GST', align: 'left', style: 'small' });
+  layout.push(...itemTable(receipt, receiptCharacterWidth(config)));
 
   layout.push({ type: "rule" });
-  layout.push({ type: "pair", left: "Subtotal", right: `Rs. ${money(totals.subtotal)}`, style: "normal" });
-  layout.push({ type: "pair", left: "GST", right: `Rs. ${money(totals.tax)}`, style: "normal" });
-  layout.push({ type: "pair", left: "Packing", right: `Rs. ${money(totals.packing)}`, style: "normal" });
-  if (Number(totals.discount || 0) > 0) {
-    layout.push({ type: "pair", left: "Discount", right: `-Rs. ${money(totals.discount)}`, style: "normal" });
+  layout.push({ type: 'pair', left: 'Total Quantity', right: String((receipt.items || []).reduce((sum, item) => sum + Number(item.quantity ?? item.qty ?? 0), 0)), style: 'bold' });
+  for (const entry of totals.summary_lines) {
+    layout.push({ type: 'pair', left: entry.label, right: `Rs. ${money(entry.amount)}`, style: 'normal' });
   }
   layout.push({ type: "rule" });
   layout.push({
     type: "pair",
-    left: "TOTAL",
+    left: "Grand Total",
     right: `Rs. ${money(totals.grand_total ?? totals.total_amount)}`,
     style: "total",
   });
@@ -305,17 +338,16 @@ export function buildThermalReceiptLayout(receipt, config = {}, { duplicate = fa
   layout.push({ type: "text", text: `Payment: ${receipt.payment_method || "Pay at Counter"}`, align: "left", style: "normal" });
   layout.push({ type: "text", text: `Status: ${receipt.payment_status || "Pending"}`, align: "left", style: "normal" });
   layout.push({ type: "rule" });
-  layout.push({ type: "text", text: footer, align: "center", style: "bold" });
-  if (!/visit again/i.test(footer)) {
-    layout.push({ type: "text", text: "Please visit again.", align: "center", style: "normal" });
-  }
-  layout.push({ type: "text", text: "Powered by RestaurantAI", align: "center", style: "small" });
+  if (!/^thank\s*you[!.]?$/i.test(footer.trim())) layout.push({ type: 'text', text: footer, align: 'center', style: 'normal' });
+  layout.push({ type: 'text', text: 'Thank You', align: 'center', style: 'bold' });
+  layout.push({ type: 'text', text: 'Please visit again', align: 'center', style: 'normal' });
+  layout.push({ type: 'text', text: 'Powered by Algosophix', align: 'center', style: 'small' });
 
   return layout;
 }
 
 export function buildThermalReceiptText(receipt, config = {}, options = {}) {
-  const width = config.paperWidth === "58mm" ? 28 : 42;
+  const width = receiptCharacterWidth(config);
   const rule = "-".repeat(width);
   const lines = [];
 
@@ -324,6 +356,13 @@ export function buildThermalReceiptText(receipt, config = {}, options = {}) {
       lines.push(rule);
     } else if (entry.type === "spacer") {
       lines.push("");
+    } else if (entry.type === 'table') {
+      const cells = entry.cells.map((value, index) => wrap(value, entry.widths[index]));
+      for (let line = 0; line < Math.max(...cells.map(cell => cell.length)); line++) {
+        lines.push(cells.map((cell, index) => index === 0
+          ? (cell[line] || '').padEnd(entry.widths[index])
+          : (cell[line] || '').padStart(entry.widths[index])).join(' '));
+      }
     } else if (entry.type === "pair") {
       lines.push(row(entry.left, entry.right, width));
     } else {
@@ -335,16 +374,19 @@ export function buildThermalReceiptText(receipt, config = {}, options = {}) {
   return lines.join("\r\n");
 }
 
-async function spoolReceiptText({ receipt, config, duplicate = false }) {
+export async function spoolReceiptText({ receipt, config, duplicate = false }) {
+  if (config.printMode && config.printMode !== 'windows_driver') throw new Error('Unsupported printer mode');
   const scriptPath = await resolvePrintScriptPath();
   logger.info("[RECEIPT_PRINT] print script resolved", { scriptPath });
   const jobDir = runtimePath("receipt-print-jobs");
   await fs.mkdir(jobDir, { recursive: true });
-  const jobPath = path.join(jobDir, `receipt-${receipt.source_type}-${receipt.source_id}-${Date.now()}.json`);
+  const jobPath = path.join(jobDir, `receipt-${randomUUID()}.json`);
   const job = {
     printerName: config.printerName,
     paperWidth: config.paperWidth,
     copies: config.copies,
+    fontScale: config.fontScale || 1,
+    lineSpacing: config.lineSpacing || 1,
     layout: buildThermalReceiptLayout(receipt, config, { duplicate }),
     text: buildThermalReceiptText(receipt, config, { duplicate }),
   };
@@ -479,7 +521,8 @@ export async function printOrderReceipt(client, orderId, { source = "manual", fo
         stdout: result.stdout,
         stderr: result.stderr,
       });
-      return { printed: true, skipped: false, printerName: config.printerName, paperWidth: config.paperWidth, copies: config.copies };
+      // Keep the legacy boolean for kiosk deduplication; physical output is not confirmed.
+      return { printed: true, queued: true, status: 'queued', confirmed: false, skipped: false, printerName: config.printerName, paperWidth: config.paperWidth, copies: config.copies };
     } catch (error) {
       await markPrintAttempt(parsedOrderId, {
         result: "failed",

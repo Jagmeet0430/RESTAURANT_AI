@@ -3,5 +3,11 @@
   "printerName": "PASTE_WINDOWS_PRINTER_NAME_HERE",
   "paperWidth": "80mm",
   "copies": 1,
-  "autoPrintKioskOrders": true
+  "autoPrintKioskOrders": true,
+  "kitchenPrinterName": "",
+  "printMode": "windows_driver",
+  "fontScale": 1,
+  "lineSpacing": 1,
+  "logoPrinting": false,
+  "autoCut": "driver"
 }

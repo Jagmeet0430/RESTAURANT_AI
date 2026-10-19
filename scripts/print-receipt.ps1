@@ -5,7 +5,8 @@ param(
   [ValidateSet("80mm", "58mm")]
   [string]$PaperWidth = "80mm",
   [int]$Copies = 0,
-  [string]$Text = ""
+  [string]$Text = "",
+  [string]$PreviewPath = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -21,7 +22,7 @@ function Get-DefaultConfigPath {
 function Read-JsonFile {
   param([string]$Path)
   if ($Path -and (Test-Path -LiteralPath $Path)) {
-    return (Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json)
+    return (Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json)
   }
   return $null
 }
@@ -66,11 +67,16 @@ if (-not $Text) {
 }
 
 $layout = @()
+$fontScale = if ($job -and $job.fontScale) { [double]$job.fontScale } else { 1.0 }
+$lineSpacing = if ($job -and $job.lineSpacing) { [double]$job.lineSpacing } else { 1.0 }
+if ($fontScale -lt 0.85 -or $fontScale -gt 1.15 -or $lineSpacing -lt 1 -or $lineSpacing -gt 1.5) {
+  throw 'Unsupported font/line spacing setting.'
+}
 if ($job -and $job.layout) {
   $layout = @($job.layout)
 }
 
-if (-not $PrinterName) {
+if (-not $PrinterName -and -not $PreviewPath) {
   throw "PrinterName is required. Run scripts\configure-printer.ps1 first."
 }
 
@@ -78,10 +84,16 @@ if (-not $Text -and $layout.Count -eq 0) {
   throw "Receipt text is empty."
 }
 
-if (Get-Command Get-Printer -ErrorAction SilentlyContinue) {
-  $printer = Get-Printer -Name $PrinterName -ErrorAction SilentlyContinue
+if (-not $PreviewPath -and (Get-Command Get-Printer -ErrorAction SilentlyContinue)) {
+  $printer = Get-Printer | Where-Object { $_.Name -ceq $PrinterName } | Select-Object -First 1
   if (-not $printer) {
     throw "Printer '$PrinterName' was not found in Windows printers."
+  }
+  if ([string]$printer.PrinterStatus -match 'Offline|Error|NotAvailable|Paused|PaperOut') {
+    throw 'Selected printer is unavailable. Check its Windows queue.'
+  }
+  if ($printer.PortName -match '^(PORTPROMPT:|FILE:)$' -or $printer.DriverName -match 'PDF|XPS|OneNote|Fax') {
+    throw 'Unattended receipt printing requires a physical printer, not a file prompt.'
   }
 }
 
@@ -106,7 +118,7 @@ function New-ReceiptFont {
   $size = switch ($Style) {
     "header" { if ($ReceiptPaperWidth -eq "58mm") { 9.5 } else { 11.0 } }
     "token" { if ($ReceiptPaperWidth -eq "58mm") { 10.0 } else { 11.0 } }
-    "total" { if ($ReceiptPaperWidth -eq "58mm") { 8.2 } else { 9.5 } }
+    "total" { if ($ReceiptPaperWidth -eq "58mm") { 9.5 } else { 11.0 } }
     "small" { if ($ReceiptPaperWidth -eq "58mm") { 6.3 } else { 7.0 } }
     default { if ($ReceiptPaperWidth -eq "58mm") { 7.2 } else { 8.5 } }
   }
@@ -117,9 +129,9 @@ function New-ReceiptFont {
   }
 
   try {
-    return New-Object System.Drawing.Font("Consolas", $size, $fontStyle)
+    return New-Object System.Drawing.Font("Consolas", ($size * $fontScale), $fontStyle)
   } catch {
-    return New-Object System.Drawing.Font("Courier New", $size, $fontStyle)
+    return New-Object System.Drawing.Font("Courier New", ($size * $fontScale), $fontStyle)
   }
 }
 
@@ -192,12 +204,13 @@ function Get-ReceiptGeometry {
   $printableRight = [single]([Math]::Min($paperWidth, ($printable.X + $printable.Width) * $pointsPerHundredthInch))
   $sideMargin = if ($ReceiptPaperWidth -eq "58mm") { [single]5.67 } else { [single]8.5 }
   $topMargin = if ($ReceiptPaperWidth -eq "58mm") { [single]5.67 } else { [single]8.5 }
-  $left = [single]($printableLeft + $sideMargin)
-  $right = [single]($printableRight - $sideMargin)
+  # PrintPage's origin is the printable area's top-left, not the physical paper edge.
+  $left = [single]$sideMargin
+  $right = [single]($printableRight - $printableLeft - $sideMargin)
 
   if (($right - $left) -lt 72) {
-    $left = $printableLeft
-    $right = $printableRight
+    $left = [single]0
+    $right = [single]($printableRight - $printableLeft)
   }
 
   return [pscustomobject]@{
@@ -206,6 +219,8 @@ function Get-ReceiptGeometry {
     Width = [single]($right - $left)
     Top = $topMargin
     BottomMargin = $topMargin
+    PrintableHeight = [single]($printable.Height * $pointsPerHundredthInch)
+    NonPrintableHeight = [single]([Math]::Max(0, ($page.PaperSize.Height - $printable.Height) * $pointsPerHundredthInch))
     PrintableWidthMm = [Math]::Round(($printableRight - $printableLeft) * 25.4 / 72, 2)
     ContentWidthMm = [Math]::Round(($right - $left) * 25.4 / 72, 2)
     SideMarginMm = [Math]::Round($sideMargin * 25.4 / 72, 2)
@@ -219,6 +234,28 @@ $fonts = @{
   token = New-ReceiptFont -Style "token" -ReceiptPaperWidth $PaperWidth
   total = New-ReceiptFont -Style "total" -ReceiptPaperWidth $PaperWidth
   small = New-ReceiptFont -Style "small" -ReceiptPaperWidth $PaperWidth
+}
+
+function Get-ReceiptTableCells {
+  param($Entry, [System.Drawing.Graphics]$Graphics, [System.Drawing.Font]$Font, [single]$ContentWidth)
+  $unit = [single](Measure-ReceiptText -Graphics $Graphics -Font $Font -Value '0')
+  $columnWidths = @(0, 0, 0, 0)
+  for ($column = 1; $column -lt 4; $column++) {
+    $columnWidths[$column] = [single]((Measure-ReceiptText -Graphics $Graphics -Font $Font -Value ('0' * [int]$Entry.widths[$column])) + 1)
+  }
+  $columnWidths[0] = [single]($ContentWidth - 3 * $unit - ($columnWidths | Measure-Object -Sum).Sum)
+  if ($columnWidths[0] -lt $unit) { throw 'Receipt numeric columns exceed the printable width; configure wider paper.' }
+  $offset = [single]0
+  for ($column = 0; $column -lt 4; $column++) {
+    $width = [single]$columnWidths[$column]
+    [pscustomobject]@{
+      Offset = $offset
+      Width = $width
+      Lines = @(Split-ReceiptText -Graphics $Graphics -Font $Font -Value ([string]$Entry.cells[$column]) -MaxWidth $width)
+      RightAlign = ($column -gt 0)
+    }
+    $offset += $width + $unit
+  }
 }
 
 function Get-LayoutHeight {
@@ -241,7 +278,14 @@ function Get-LayoutHeight {
 
     $style = if ($entry.style -and $fonts.ContainsKey([string]$entry.style)) { [string]$entry.style } else { "normal" }
     $font = $fonts[$style]
-    $lineHeight = [single]($font.GetHeight($Graphics) + 1.4)
+    $lineHeight = [single](($font.GetHeight($Graphics) + 1.4) * $lineSpacing)
+
+    if ($type -eq 'table') {
+      $cells = @(Get-ReceiptTableCells -Entry $entry -Graphics $Graphics -Font $font -ContentWidth $ContentWidth)
+      $lineCount = ($cells | ForEach-Object { $_.Lines.Count } | Measure-Object -Maximum).Maximum
+      $height += $lineCount * $lineHeight
+      continue
+    }
 
     if ($type -eq "pair") {
       $leftText = [string]$entry.left
@@ -251,7 +295,8 @@ function Get-LayoutHeight {
       if (($leftWidth + $rightWidth + 6) -le $ContentWidth) {
         $height += $lineHeight
       } else {
-        $height += ((Split-ReceiptText -Graphics $Graphics -Font $font -Value $leftText -MaxWidth $ContentWidth).Count + 1) * $lineHeight
+        $height += ((Split-ReceiptText -Graphics $Graphics -Font $font -Value $leftText -MaxWidth $ContentWidth).Count +
+          (Split-ReceiptText -Graphics $Graphics -Font $font -Value $rightText -MaxWidth $ContentWidth).Count) * $lineHeight
       }
       continue
     }
@@ -289,7 +334,24 @@ function Draw-ReceiptLayout {
 
       $style = if ($entry.style -and $fonts.ContainsKey([string]$entry.style)) { [string]$entry.style } else { "normal" }
       $font = $fonts[$style]
-      $lineHeight = [single]($font.GetHeight($Graphics) + 1.4)
+      $lineHeight = [single](($font.GetHeight($Graphics) + 1.4) * $lineSpacing)
+
+      if ($type -eq 'table') {
+        $cells = @(Get-ReceiptTableCells -Entry $entry -Graphics $Graphics -Font $font -ContentWidth $Geometry.Width)
+        foreach ($cell in $cells) {
+          $cellY = $y
+          foreach ($line in $cell.Lines) {
+            $lineWidth = Measure-ReceiptText -Graphics $Graphics -Font $font -Value $line
+            $x = [single]($Geometry.Left + $cell.Offset)
+            if ($cell.RightAlign) { $x += [single]([Math]::Max(0, $cell.Width - $lineWidth)) }
+            $Graphics.DrawString($line, $font, $brush, $x, $cellY, [System.Drawing.StringFormat]::GenericTypographic)
+            $cellY += $lineHeight
+          }
+        }
+        $lineCount = ($cells | ForEach-Object { $_.Lines.Count } | Measure-Object -Maximum).Maximum
+        $y += $lineCount * $lineHeight
+        continue
+      }
 
       if ($type -eq "pair") {
         $leftText = [string]$entry.left
@@ -305,9 +367,11 @@ function Draw-ReceiptLayout {
             $Graphics.DrawString($line, $font, $brush, $Geometry.Left, $y, [System.Drawing.StringFormat]::GenericTypographic)
             $y += $lineHeight
           }
-          $rightWidth = Measure-ReceiptText -Graphics $Graphics -Font $font -Value $rightText
-          $Graphics.DrawString($rightText, $font, $brush, $Geometry.Right - $rightWidth, $y, [System.Drawing.StringFormat]::GenericTypographic)
-          $y += $lineHeight
+          foreach ($line in (Split-ReceiptText -Graphics $Graphics -Font $font -Value $rightText -MaxWidth $Geometry.Width)) {
+            $rightWidth = Measure-ReceiptText -Graphics $Graphics -Font $font -Value $line
+            $Graphics.DrawString($line, $font, $brush, $Geometry.Right - $rightWidth, $y, [System.Drawing.StringFormat]::GenericTypographic)
+            $y += $lineHeight
+          }
         }
         continue
       }
@@ -328,6 +392,37 @@ function Draw-ReceiptLayout {
   }
 }
 
+# Render through the same measured drawing path without accessing the print spooler.
+if ($PreviewPath) {
+  $paperMm = if ($PaperWidth -eq '58mm') { 58 } else { 80 }
+  $printableMm = if ($PaperWidth -eq '58mm') { 48 } else { 72 }
+  $margin = if ($PaperWidth -eq '58mm') { 5.67 } else { 8.5 }
+  $paperPoints = $paperMm * 72 / 25.4
+  $contentPoints = $printableMm * 72 / 25.4 - 2 * $margin
+  $left = ($paperPoints - $contentPoints) / 2
+  $geometry = [pscustomobject]@{ Left=$left; Right=$left+$contentPoints; Width=$contentPoints; Top=$margin }
+  $measurementBitmap = New-Object System.Drawing.Bitmap(1, 1)
+  $measurementGraphics = [System.Drawing.Graphics]::FromImage($measurementBitmap)
+  $measurementGraphics.PageUnit = [System.Drawing.GraphicsUnit]::Point
+  $height = Get-LayoutHeight -Graphics $measurementGraphics -ContentWidth $contentPoints
+  $measurementGraphics.Dispose()
+  $measurementBitmap.Dispose()
+  $bitmap = New-Object System.Drawing.Bitmap([int][Math]::Ceiling($paperPoints * 203 / 72), [int][Math]::Ceiling(($height + 2 * $margin + 4) * 203 / 72))
+  $bitmap.SetResolution(203, 203)
+  $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+  try {
+    $graphics.Clear([System.Drawing.Color]::White)
+    Draw-ReceiptLayout -Graphics $graphics -Geometry $geometry
+    $bitmap.Save([IO.Path]::GetFullPath($PreviewPath), [System.Drawing.Imaging.ImageFormat]::Png)
+  } finally {
+    $graphics.Dispose()
+    $bitmap.Dispose()
+    foreach ($font in $fonts.Values) { $font.Dispose() }
+  }
+  Write-Host "Receipt preview saved (no printer accessed): $PreviewPath"
+  return
+}
+
 $copiesToPrint = [Math]::Min([Math]::Max($Copies, 1), 5)
 $selectedPaperName = ""
 $selectedHeightMm = 0
@@ -335,9 +430,20 @@ $selectedHeightMm = 0
 for ($copy = 1; $copy -le $copiesToPrint; $copy++) {
   $document = New-Object System.Drawing.Printing.PrintDocument
   $document.PrinterSettings.PrinterName = $PrinterName
+  if (-not $document.PrinterSettings.IsValid) { throw 'Selected Windows printer is not available.' }
   $document.DocumentName = "RestaurantAI receipt"
   $document.PrintController = New-Object System.Drawing.Printing.StandardPrintController
   $document.DefaultPageSettings.Margins = New-Object System.Drawing.Printing.Margins(0, 0, 0, 0)
+
+  # Everycom 58-series exposes a 48mm printable-head form for its 58mm roll.
+  $minimumMm = if ($PaperWidth -eq '58mm') { 47 } else { 69 }
+  $maximumMm = if ($PaperWidth -eq '58mm') { 61 } else { 83 }
+  $matchingForms = @($document.PrinterSettings.PaperSizes | Where-Object {
+    $widthMm = $_.Width * 25.4 / 100
+    $widthMm -ge $minimumMm -and $widthMm -le $maximumMm
+  })
+  if ($matchingForms.Count -eq 0) { throw "No $PaperWidth paper form is installed for this driver. Configure the roll size in Windows." }
+  $document.DefaultPageSettings.PaperSize = $matchingForms | Sort-Object Height -Descending | Select-Object -First 1
 
   $geometry = Get-ReceiptGeometry -Document $document -ReceiptPaperWidth $PaperWidth
   $measurementBitmap = New-Object System.Drawing.Bitmap(1, 1)
@@ -348,20 +454,19 @@ for ($copy = 1; $copy -le $copiesToPrint; $copy++) {
   $measurementBitmap.Dispose()
 
   $heightPoints = [single]($geometry.Top + $contentHeight + $geometry.BottomMargin + 4)
-  $requiredPaperHeight = [Math]::Max([int][Math]::Ceiling($heightPoints / 0.72), 200)
+  $requiredPaperHeight = [Math]::Max([int][Math]::Ceiling(($heightPoints + $geometry.NonPrintableHeight) / 0.72), 200)
   $defaultPaperWidth = $document.DefaultPageSettings.PaperSize.Width
   $supportedPaper = @($document.PrinterSettings.PaperSizes) |
     Where-Object { $_.Width -eq $defaultPaperWidth -and $_.Height -ge $requiredPaperHeight } |
     Sort-Object Height |
     Select-Object -First 1
-  if (-not $supportedPaper) {
-    $supportedPaper = @($document.PrinterSettings.PaperSizes) |
-      Where-Object { $_.Width -eq $defaultPaperWidth } |
-      Sort-Object Height -Descending |
-      Select-Object -First 1
-  }
+  if (-not $supportedPaper) { throw 'Receipt exceeds the installed roll form height. Configure a longer roll form before printing; nothing was truncated.' }
   if ($supportedPaper) {
     $document.DefaultPageSettings.PaperSize = $supportedPaper
+  }
+  $geometry = Get-ReceiptGeometry -Document $document -ReceiptPaperWidth $PaperWidth
+  if ($heightPoints -gt $geometry.PrintableHeight) {
+    throw 'Receipt exceeds the selected form printable height. Configure a longer roll form before printing; nothing was truncated.'
   }
   $selectedPaperName = $document.DefaultPageSettings.PaperSize.PaperName
   $selectedHeightMm = [Math]::Round($document.DefaultPageSettings.PaperSize.Height * 25.4 / 100, 1)

@@ -1042,17 +1042,7 @@ export async function getTestReceipt(client = pool) {
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
     items: sampleItems,
-    totals: {
-      subtotal: 15,
-      discount: 0,
-      tax: 0,
-      cgst: 0,
-      sgst: 0,
-      cgst_rate: 0.025,
-      sgst_rate: 0.025,
-      packing: 0,
-      grand_total: 15,
-    },
+    totals: receiptTotalsFromRow({ subtotal: 15, tax: 0, total_amount: 15 }),
     restaurant: settings,
     is_test_receipt: true,
   };

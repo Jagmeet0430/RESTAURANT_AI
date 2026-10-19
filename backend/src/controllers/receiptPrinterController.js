@@ -51,7 +51,7 @@ export const printKioskOrderReceipt = asyncHandler(async (req, res) => {
     ensureTrustedPrintRequest(req);
     const orderId = parseOrderId(req.params.orderId);
     const result = await printOrderReceipt(pool, orderId, { source: "kiosk" });
-    return successResponse(res, result, result.printed ? "Receipt printed" : "Receipt print skipped");
+    return successResponse(res, result, result.queued ? "Receipt queued; physical output not confirmed" : "Receipt print skipped");
   } catch (error) {
     return errorResponse(res, error.message || "Unable to print receipt", error.statusCode || 500);
   }
@@ -65,7 +65,7 @@ export const reprintOrderReceipt = asyncHandler(async (req, res) => {
       force: true,
       duplicate: true,
     });
-    return successResponse(res, result, result.printed ? "Receipt reprinted" : "Receipt reprint skipped");
+    return successResponse(res, result, result.queued ? "Receipt reprint queued; physical output not confirmed" : "Receipt reprint skipped");
   } catch (error) {
     return errorResponse(res, error.message || "Unable to reprint receipt", error.statusCode || 500);
   }

@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 
 import { getRazorpayClient } from "../config/razorpay.js";
 import { pool } from "../config/database.js";
+import { checkoutMenu, checkQuotedPrices } from '../services/menuCheckoutService.js';
 import { publicOrderOtpRequired } from "../config/publicOrderConfig.js";
 import { authMiddleware, authorizeRoles } from "../middleware/index.js";
 import { createBillForOrder, normalizeStaffPaymentMethod, payOrder } from "../services/billingService.js";
@@ -11,6 +12,7 @@ import { requireVerifiedPhoneToken } from "../services/otpService.js";
 import { requestKioskReceiptAutoPrint } from "../services/kioskReceiptAutoPrintService.js";
 import { ensureOrderSecuritySchema } from "../services/orderSchemaService.js";
 import { sendOrderStatusNotification } from "../services/notificationService.js";
+import { requestAdminOrderCreated } from '../services/adminOrderNotificationService.js';
 import {
   DEFAULT_GST_RATE,
   DEFAULT_PACKING_CHARGE,
@@ -252,12 +254,8 @@ async function calculateOrderAmount(client, items, { orderType = "pickup", order
   const normalizedItems = normalizeItems(items);
   const menuIds = normalizedItems.map((item) => item.menuId);
 
-  const menuResult = await client.query(
-    `SELECT id, name, price, is_available
-     FROM menu
-     WHERE id = ANY($1::int[])`,
-    [menuIds]
-  );
+  const menuResult = await checkoutMenu(client, menuIds, orderSource);
+  checkQuotedPrices(items,menuResult.rows);
 
   const menuById = new Map(menuResult.rows.map((item) => [Number(item.id), item]));
   let subtotal = 0;
@@ -538,6 +536,7 @@ export const createPaymentOrder = async (req, res) => {
     );
 
     await client.query("COMMIT");
+    void requestAdminOrderCreated(order.id);
     sendOrderStatusNotification({ ...order, customer_name: customer.name, customer_phone: order.customer_phone }).catch((error) =>
       console.error("WhatsApp order confirmation failed:", error.message)
     );
@@ -746,6 +745,7 @@ export const createCashOrder = async (req, res) => {
 
     await client.query("COMMIT");
     // Optional notifications must not poison the order transaction or delay its response.
+    void requestAdminOrderCreated(order.id);
     const notification = null;
     void createCustomerNotification({
       client: pool,

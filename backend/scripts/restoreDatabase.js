@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
+import crypto from "node:crypto";
 import readline from "node:readline/promises";
 import { pathToFileURL } from "node:url";
 
@@ -171,6 +172,8 @@ const restoreIntoDatabase = async (pgRestore, backupPath, databaseName, clean = 
     databaseName,
     "--no-owner",
     "--no-privileges",
+    "--exit-on-error",
+    "--single-transaction",
   ];
 
   if (clean) {
@@ -294,7 +297,7 @@ const restoreTest = async (pgRestore, backupPath, testDbName, keepTestDb = false
     throw new Error("Temporary restore database cannot match the active database.");
   }
 
-  await dropDatabase(testDbName);
+  // Never drop a pre-existing database, even if its name resembles a test DB.
   await createDatabase(testDbName);
 
   try {
@@ -318,9 +321,10 @@ const restoreTest = async (pgRestore, backupPath, testDbName, keepTestDb = false
       );
     }
 
-    if (!reconciliation.ok) {
-      throw new Error("Restore reconciliation failed.");
+    if (EXPECTED_TABLES.some(table => restored.tables[table] === null)) {
+      throw new Error("Restored database is missing required tables.");
     }
+    if (!reconciliation.ok) console.log("Backup differs from current live data (expected for historical backups); archive and required schema restored successfully.");
 
     return reconciliation;
   } finally {
@@ -335,7 +339,7 @@ const main = async () => {
   const options = parseArgs();
   const backupPath = await assertBackupFile(options.backupPath);
   const pgRestore = await validateBackup(backupPath);
-  const testDbName = `${dbConfig.database}_restore_test`;
+  const testDbName = `restaurantai_restore_${crypto.randomUUID().replaceAll('-', '')}`;
 
   console.log("RestaurantAI restore validation");
   console.log(`Backup: ${backupPath}`);

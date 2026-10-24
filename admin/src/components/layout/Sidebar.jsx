@@ -16,6 +16,7 @@ import PointOfSaleIcon from "@mui/icons-material/PointOfSale";
 import TableRestaurantIcon from "@mui/icons-material/TableRestaurant";
 import PaymentsIcon from "@mui/icons-material/Payments";
 import EventAvailableIcon from "@mui/icons-material/EventAvailable";
+import { useOrderNotifications } from '../../context/OrderNotificationsContext';
 
 const navGroups = [
   {
@@ -53,6 +54,7 @@ const navGroups = [
 ];
 
 function Sidebar() {
+  const { pendingCount, hasMore } = useOrderNotifications();
   return (
     <aside
       style={{
@@ -95,6 +97,7 @@ function Sidebar() {
             <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
               {group.items.map((item) => {
                 const Icon = item.icon;
+                const pending = item.to === '/orders' && (pendingCount > 0 || hasMore);
                 return (
                   <NavLink
                     key={item.to}
@@ -104,7 +107,7 @@ function Sidebar() {
                       alignItems: "center",
                       gap: 11,
                       color: isActive ? "#F8FAFC" : "#CBD5E1",
-                      background: isActive ? "rgba(148, 163, 184, 0.18)" : "transparent",
+                      background: pending ? '#713f12' : isActive ? "rgba(148, 163, 184, 0.18)" : "transparent",
                       padding: "0.72rem 0.78rem",
                       borderRadius: "0.85rem",
                       textDecoration: "none",
@@ -118,6 +121,7 @@ function Sidebar() {
                         {item.helper}
                       </span>
                     </span>
+                    {pending && <span aria-label={`${pendingCount}${hasMore ? '+' : ''} pending orders`} style={{ marginLeft: 'auto', fontWeight: 800, color: '#fde68a' }}>{pendingCount}{hasMore ? '+' : ''}</span>}
                   </NavLink>
                 );
               })}

@@ -2,6 +2,7 @@
 
 import express from "express";
 import { authMiddleware, authorizeRoles } from "../middleware/index.js";
+import { localMenuAuthority } from '../controllers/menuSyncController.js';
 import {
   getAllCategories,
   getCategoryById,
@@ -18,8 +19,8 @@ router.get("/", getAllCategories);
 router.get("/:id", getCategoryById);
 
 // Protected routes (requires authentication)
-router.post("/", authMiddleware, operatorRoles, createCategory);
-router.put("/:id", authMiddleware, operatorRoles, updateCategory);
-router.delete("/:id", authMiddleware, operatorRoles, deleteCategory);
+router.post("/", authMiddleware, operatorRoles, localMenuAuthority, createCategory);
+router.put("/:id", authMiddleware, operatorRoles, localMenuAuthority, updateCategory);
+router.delete("/:id", authMiddleware, operatorRoles, localMenuAuthority, deleteCategory);
 
 export default router;

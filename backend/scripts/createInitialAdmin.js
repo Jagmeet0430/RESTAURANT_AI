@@ -11,7 +11,7 @@ const envPath =
   process.env.RESTAURANTAI_ENV_PATH ||
   path.resolve(__dirname, "../.env");
 
-dotenv.config({ path: envPath });
+dotenv.config({ path: envPath, override: true });
 
 const { Pool } = pg;
 

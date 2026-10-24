@@ -2,10 +2,12 @@ import { Outlet } from "react-router-dom";
 import Sidebar from "../components/layout/Sidebar";
 import Header from "../components/layout/Header";
 import MainContent from "../components/layout/MainContent";
+import { OrderNotificationsProvider } from '../context/OrderNotificationsContext';
+import OrderNotificationPopup from '../components/orders/OrderNotificationPopup';
 
 function AdminLayout() {
   return (
-    <div
+    <OrderNotificationsProvider><div
       style={{
         display: "flex",
         height: "100vh",
@@ -28,7 +30,8 @@ function AdminLayout() {
           <Outlet />
         </MainContent>
       </div>
-    </div>
+      <OrderNotificationPopup />
+    </div></OrderNotificationsProvider>
   );
 }
 

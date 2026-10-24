@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { cancelAdminSpeech, enqueueAdminSpeech } from '../services/adminSpeech';
 import axios from "axios";
 import {
   Box,
@@ -26,6 +27,13 @@ function ChatbotWidget() {
   const [question, setQuestion] = useState("");
   const [loading, setLoading] = useState(false);
   const [listening, setListening] = useState(false);
+  const speechOwner = useRef(`chatbot-${Math.random().toString(36).slice(2)}`).current;
+  const mounted = useRef(true);
+  const [speechError, setSpeechError] = useState('');
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; cancelAdminSpeech(speechOwner); };
+  }, [speechOwner]);
 
   const [messages, setMessages] = useState([
     {
@@ -36,18 +44,9 @@ function ChatbotWidget() {
   ]);
 
   const speakText = (text) => {
-    if (!("speechSynthesis" in window)) {
-      console.warn("Text-to-speech is not supported in this browser.");
-      return;
-    }
-
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = "en-US";
-    utterance.rate = 1;
-    utterance.pitch = 1;
-    utterance.volume = 1;
-    window.speechSynthesis.speak(utterance);
+    if (!mounted.current) return;
+    setSpeechError('');
+    enqueueAdminSpeech({ owner: speechOwner, key: `${speechOwner}-${text}`, text, language: 'en', volume: 1, onError: setSpeechError });
   };
 
   const askChatbot = async () => {
@@ -143,6 +142,7 @@ function ChatbotWidget() {
     <>
       {!open && (
         <Fab
+          aria-label="Open assistant"
           onClick={() => setOpen(true)}
           sx={{
             position: "fixed",
@@ -205,9 +205,10 @@ function ChatbotWidget() {
             </Box>
 
             <IconButton
+              aria-label="Close assistant"
               size="small"
               onClick={() => {
-                window.speechSynthesis.cancel();
+                cancelAdminSpeech(speechOwner);
                 setOpen(false);
               }}
               sx={{ color: "white" }}
@@ -295,6 +296,7 @@ function ChatbotWidget() {
           </Box>
 
           <Divider />
+          {speechError && <Typography role="status" variant="caption" sx={{ p: 1 }}>{speechError}</Typography>}
 
           <Box
             sx={{

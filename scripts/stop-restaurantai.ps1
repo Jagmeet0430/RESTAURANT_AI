@@ -12,6 +12,8 @@ function Get-Paths {
     [System.IO.Path]::GetFullPath($StateRoot)
   } elseif ($env:RESTAURANTAI_STATE_ROOT) {
     [System.IO.Path]::GetFullPath($env:RESTAURANTAI_STATE_ROOT)
+  } elseif (Test-Path (Join-Path $root 'app\backend\src\server.js')) {
+    Join-Path ([Environment]::GetFolderPath('CommonApplicationData')) 'RestaurantAI'
   } else {
     $root
   }
@@ -47,28 +49,20 @@ function Get-RestaurantProcess {
 
   try {
     $metadata = Get-Content $MetadataPath -Raw | ConvertFrom-Json
-    if ($metadata.pid -ne $ProcessId -or -not $metadata.server_script) {
+    if ($metadata.pid -ne $ProcessId -or $metadata.server_script -ne (Join-Path $paths.Backend 'src\server.js')) {
       return $null
     }
 
-    $expectedStart = [datetime]$metadata.process_start_time_utc
+    $expectedStart = ([datetime]$metadata.process_start_time_utc).ToUniversalTime()
     $actualStart = $process.StartTime.ToUniversalTime()
     $delta = [Math]::Abs(($actualStart - $expectedStart).TotalSeconds)
 
-    if ($delta -lt 300) {
+    if ($delta -lt 1) {
       return $process
     }
 
-    return $process
-  } catch {
-    try {
-      if ($metadata.pid -eq $ProcessId -and $metadata.server_script) {
-        return $process
-      }
-    } catch {
-      return $null
-    }
-  }
+    return $null
+  } catch { return $null }
 
   return $null
 }
@@ -93,7 +87,19 @@ if (-not $restaurantProcess) {
 }
 
 Write-Host "Stopping RestaurantAI PID $restaurantPid..."
-Stop-Process -Id $restaurantPid
+$metadata = Get-Content $metadataPath -Raw | ConvertFrom-Json
+if ($metadata.control_pipe -match '^\\\\\.\\pipe\\restaurantai-[a-f0-9]{32}$') {
+  $pipe = New-Object IO.Pipes.NamedPipeClientStream('.', ($metadata.control_pipe -replace '^.*\\', ''), [IO.Pipes.PipeDirection]::Out)
+  try {
+    $pipe.Connect(3000)
+    $bytes = [Text.Encoding]::ASCII.GetBytes('shutdown')
+    $pipe.Write($bytes, 0, $bytes.Length)
+  } finally { $pipe.Dispose() }
+} else {
+  # Older releases did not expose a graceful Windows control pipe.
+  Write-Warning 'Legacy backend: stopping the verified process. PostgreSQL rolls back any open transactions.'
+  Stop-Process -Id $restaurantPid
+}
 
 $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
 while ((Get-Date) -lt $deadline) {

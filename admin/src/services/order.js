@@ -3,7 +3,7 @@
 // Orders Service
 export const ordersService = {
   // Get all orders
-  getAllOrders: async (filters = {}) => {
+  getAllOrders: async (filters = {}, options = {}) => {
     const params = new URLSearchParams();
     if (filters.status) params.append("status", filters.status);
     if (filters.payment_status) params.append("payment_status", filters.payment_status);
@@ -14,13 +14,13 @@ export const ordersService = {
     if (filters.include_expired) params.append("include_expired", "true");
 
     const query = params.toString();
-    const response = await apiClient.get(query ? `/orders?${query}` : "/orders");
+    const response = await apiClient.get(query ? `/orders?${query}` : "/orders", options);
     return response.data;
   },
 
   // Get order by ID with items
-  getOrderById: async (id) => {
-    const response = await apiClient.get(`/orders/${id}`);
+  getOrderById: async (id, options = {}) => {
+    const response = await apiClient.get(`/orders/${id}`, options);
     return response.data;
   },
 
@@ -37,14 +37,20 @@ export const ordersService = {
   },
 
   // Update order status
-  updateOrderStatus: async (id, status, payment_status, extra = {}) => {
+  updateOrderStatus: async (id, status, payment_status, extra = {}, options = {}) => {
     const response = await apiClient.patch(`/admin/orders/${id}/status`, {
       status,
       payment_status,
       ...extra,
-    });
+    }, options);
     return response.data;
   },
+
+  getPendingNotifications: async (options = {}) =>
+    (await apiClient.get('/admin/orders/notifications?limit=100', options)).data,
+
+  acknowledgeNotification: async (id, options = {}) =>
+    (await apiClient.post(`/admin/orders/notifications/${encodeURIComponent(id)}/ack`, {}, options)).data,
 
   getStatusHistory: async (id) => {
     const response = await apiClient.get(`/admin/orders/${id}/status-history`);

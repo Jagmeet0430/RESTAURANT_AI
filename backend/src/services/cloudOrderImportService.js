@@ -5,6 +5,7 @@ import { generateTrackingToken } from "../utils/trackingToken.js";
 import { deductInventoryForOrder } from "./inventoryStockService.js";
 import { createBillForOrder } from "./billingService.js";
 import { syncError } from "../config/cloudSyncConfig.js";
+import { requestAdminOrderCreated } from './adminOrderNotificationService.js';
 
 const cents = value => {
   if (value == null || value === "" || !Number.isFinite(Number(value)) || Number(value) < 0 || Number(value) >= 100000000) {
@@ -49,6 +50,11 @@ export function validateCloudOrder(order) {
 }
 
 async function mapMenuItem(client, item) {
+  if(item.stable_product_id) {
+    const match=await client.query("SELECT id FROM menu m WHERE to_jsonb(m)->>'sync_id'=$1",[String(item.stable_product_id)]);
+    if(match.rowCount!==1)throw syncError('SYNC_MENU_MAPPING_FAILED');
+    return match.rows[0].id;
+  }
   // Barcodes survive database ID changes. Without one, require a unique exact
   // product/category match; an ID alone is never considered proof of identity.
   const barcode = String(item.barcode || "").trim();
@@ -123,6 +129,7 @@ export async function importCloudOrder(db, order, origin) {
     await client.query(`INSERT INTO order_status_history(order_id, previous_status, new_status, cancellation_reason, created_at)
       VALUES ($1,NULL,$2,$3,$4)`, [local.id, status, order.cancellation_reason || null, timestamp(order.created_at)]);
     await client.query("COMMIT");
+    void requestAdminOrderCreated(local.id, db);
     return { order: local, duplicate: false };
   } catch (error) {
     await client.query("ROLLBACK");

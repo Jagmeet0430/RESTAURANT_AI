@@ -28,6 +28,7 @@ import VerifiedUserIcon from "@mui/icons-material/VerifiedUser";
 import { PageHeader, StatCard, StatGrid } from "../../components/common/PageKit";
 import { settingsService } from "../../services/settings";
 import PrinterSettings from './PrinterSettings';
+import OrderNotificationSettings from './OrderNotificationSettings';
 
 const STORAGE_KEY = "restaurantai_settings";
 
@@ -414,6 +415,7 @@ function Settings() {
           accent="#c81f25"
         />
       </StatGrid>
+      <OrderNotificationSettings />
 
       <Alert severity={saveStatus === "error" ? "error" : saveStatus === "offline" ? "warning" : "info"} sx={{ mb: 3 }}>
         {statusMessage}

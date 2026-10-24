@@ -297,8 +297,8 @@ const PUBLIC_MENU_CACHE_KEY = "restaurantai_menu_cache_v1";
 const KIOSK_PRINTED_RECEIPTS_STORAGE_KEY = "restaurantai_kiosk_printed_receipts";
 const DEFAULT_LOGO_PATH = "assets/mahesh-logo.svg";
 const MENU_IMAGE_FALLBACK_SRC = "assets/hero-food.png";
-const PUBLIC_MENU_CACHE_VERSION = 1;
-const PUBLIC_MENU_CACHE_TTL_MS = 15 * 60 * 1000;
+const PUBLIC_MENU_CACHE_VERSION = 2;
+const PUBLIC_MENU_CACHE_TTL_MS = 60 * 1000;
 const PUBLIC_MENU_REQUEST_TIMEOUT_MS = 15000;
 const GST_RATE = 0.05;
 const PACKING_CHARGE = 10;
@@ -309,6 +309,9 @@ const RAZORPAY_CHECKOUT_SCRIPT = "https://checkout.razorpay.com/v1/checkout.js";
 const ONLINE_PAYMENT_METHODS = new Set(["upi", "card", "netbanking", "wallet"]);
 const PHONE_VERIFICATION_RESEND_FALLBACK_SECONDS = 30;
 let liveMenuRequest = null;
+let menuVersionRequest = null;
+let observedMenuVersion = null;
+let successfulMenuFetches = 0;
 
 function apiUrl(path) {
   if (!API_BASE_URL) throw new Error("Unable to connect right now. Please try again.");
@@ -726,6 +729,7 @@ function paymentMethodLabel(method = selectedPaymentMethod()) {
 }
 
 function updatePlaceOrderButtonText() {
+  if (!state.kiosk.enabled) elements.placeOrder?.setAttribute('aria-busy', String(state.isSubmittingOrder));
   if (!elements.placeOrder) return;
   if (state.isSubmittingOrder || state.pendingPublicOrder) {
     elements.placeOrder.textContent = state.isSubmittingOrder ? 'Placing order...' : 'Check order';
@@ -973,27 +977,20 @@ function categories() {
   return ["All", ...new Set(menuItems.map((item) => item.category))];
 }
 
-function categoryIcon(category) {
-  const normalizedCategory = category.toLowerCase();
-
-  if (category === "All") return "🍽";
-  if (normalizedCategory.includes("pizza")) return "🍕";
-  if (normalizedCategory.includes("burger") || normalizedCategory.includes("sandwich")) return "🍔";
-  if (normalizedCategory.includes("puff") || normalizedCategory.includes("bakery") || normalizedCategory.includes("roll")) return "🥐";
-  if (normalizedCategory.includes("dessert") || normalizedCategory.includes("pastr") || normalizedCategory.includes("pudding") || normalizedCategory.includes("donut") || normalizedCategory.includes("muffin") || normalizedCategory.includes("pie")) return "🍰";
-  if (normalizedCategory.includes("beverage") || normalizedCategory.includes("shake") || normalizedCategory.includes("mocktail") || normalizedCategory.includes("coffee") || normalizedCategory.includes("tea")) return "🥤";
-  if (normalizedCategory.includes("momos")) return "🥟";
-  if (normalizedCategory.includes("chaat")) return "🌮";
-  if (normalizedCategory.includes("chinese") || normalizedCategory.includes("noodle")) return "🍜";
-  if (normalizedCategory.includes("south indian") || normalizedCategory.includes("snack")) return "🥘";
-
-  return "🍴";
+function categoryImageMarkup(category) {
+  if (category === 'All') return '';
+  const item = menuItems.find(item => item.category === category);
+  if (!item) return '';
+  // Reuse an actual product URL, including the existing photo mapping and browser cache.
+  return `<img src="${escapeHtml(photoForItem(item).src)}" alt="" width="30" height="30" loading="lazy" decoding="async"
+    onerror="this.onerror=null;this.src='${escapeHtml(MENU_IMAGE_FALLBACK_SRC)}';" />`;
 }
 
 function normalizeApiMenuItem(item, index) {
   const stockStatus = String(item.stock_status || item.availability_status || "").toLowerCase();
   const isUnavailable =
     item.is_available === false ||
+    item.isAvailable === false ||
     item.available === false ||
     item.out_of_stock === true ||
     stockStatus.includes("out") ||
@@ -1004,10 +1001,16 @@ function normalizeApiMenuItem(item, index) {
     name: item.name || item.item_name || item.menu_name || `Menu Item ${index + 1}`,
     category: item.category_name || item.category || "Uncategorized",
     price: Number(item.price || 0),
-    image: item.image || item.image_url || "",
+    image: resolveMenuImage(item.image || item.image_url || ""),
+    imageFallbackId: Number(item.image_fallback_id || item.imageFallbackId || item.id),
     description: item.description || "",
     isAvailable: !isUnavailable,
   };
+}
+
+function resolveMenuImage(image) {
+  if(/^\/api\/menu\/images\/[a-f0-9]{64}\.webp$/.test(image)) return new URL(image,API_BASE_URL).href;
+  return image;
 }
 
 function menuItemsEqual(leftItems, rightItems) {
@@ -1021,6 +1024,7 @@ function menuItemsEqual(leftItems, rightItems) {
       left.category === right.category &&
       left.price === right.price &&
       left.image === right.image &&
+      left.imageFallbackId === right.imageFallbackId &&
       left.description === right.description &&
       left.isAvailable === right.isAvailable
     );
@@ -1038,6 +1042,7 @@ function publicMenuCachePayload(items) {
     category: item.category,
     price: item.price,
     image: item.image,
+    imageFallbackId: item.imageFallbackId,
     description: item.description,
     isAvailable: item.isAvailable,
   }));
@@ -1166,7 +1171,7 @@ async function refreshLiveMenu({ background = false } = {}) {
   }
 
   try {
-    const payload = await requestJson("/menu?available=true", {
+    const payload = await requestJson(`/menu?channel=${state.kiosk.enabled ? 'kiosk' : 'website'}`, {
       headers: {
         Accept: "application/json",
       },
@@ -1175,14 +1180,16 @@ async function refreshLiveMenu({ background = false } = {}) {
 
     const apiItems = Array.isArray(payload) ? payload : Array.isArray(payload?.data) ? payload.data : [];
     const availableItems = normalizeMenuItems(apiItems);
+    successfulMenuFetches++;
 
     const hadMenuError = Boolean(state.menuError);
     const menuChanged = !menuItemsEqual(menuItems, availableItems);
     state.menuError = "";
     writePublicMenuCache(availableItems);
     if (!menuChanged) {
+      const finishPublicLoading = !state.kiosk.enabled && state.menuStatus === 'loading';
       state.menuStatus = availableItems.length ? "ready" : "empty";
-      if (hadMenuError) {
+      if (hadMenuError || finishPublicLoading) {
         if (state.kiosk.enabled) {
           renderKioskPreservingMenuView();
         } else {
@@ -1213,16 +1220,21 @@ async function refreshLiveMenu({ background = false } = {}) {
       state.selectedCategory = "All";
     }
 
-    if (!state.kiosk.enabled || !kioskResetBlocked()) {
-      state.cart = state.cart.filter((cartItem) =>
-        menuItems.some((menuItem) => menuItem.id === cartItem.id)
-      );
+    if (!state.isSubmittingOrder && !state.pendingPublicOrder && (!state.kiosk.enabled || !kioskResetBlocked())) {
+      let changed=false;
+      state.cart = state.cart.map(cartItem => {
+        const current=menuItems.find(item=>item.id===cartItem.id);
+        if(!current) return {...cartItem,isAvailable:false};
+        if(current.price!==cartItem.price)changed=true;
+        return {...cartItem,...current,qty:cartItem.qty};
+      });
+      if(changed){state.publicQuote=null;showToast('Menu prices updated','Please review your cart total.','info');}
     }
     saveCart();
 
     updateMenuStats();
     if (state.kiosk.enabled) {
-      renderKioskPreservingMenuView();
+      if(['menu','review','welcome'].includes(state.kiosk.screen)) renderKioskPreservingMenuView();
     } else {
       renderFilters();
       renderMenu();
@@ -1286,6 +1298,23 @@ function loadLiveMenu(options = {}) {
   return liveMenuRequest;
 }
 
+function refreshMenuIfChanged() {
+  if(document.hidden||menuVersionRequest) return menuVersionRequest;
+  menuVersionRequest=(async()=>{
+    try {
+      const result=await requestJson('/menu/version',{timeoutMs:8000});
+      const version=String(result?.version ?? result?.data?.version ?? '');
+      if(!version || version!==observedMenuVersion) {
+        const before=successfulMenuFetches;
+        await loadLiveMenu({background:true});
+        // A failed refresh must be retried even if the catalog version stays the same.
+        if(successfulMenuFetches>before) observedMenuVersion=version;
+      }
+    } catch { await loadLiveMenu({background:true}); }
+  })().finally(()=>{menuVersionRequest=null;});
+  return menuVersionRequest;
+}
+
 function triggerClass(element, className, duration = 320) {
   if (!element) return;
   element.classList.remove(className);
@@ -1343,7 +1372,7 @@ function slugifyMenuItemName(name) {
 }
 
 function itemPhotoPath(item) {
-  return `assets/menu-items/items/item-${String(item.id).padStart(3, "0")}-${slugifyMenuItemName(item.name)}.png`;
+  return `assets/menu-items/items/item-${String(item.imageFallbackId || item.id).padStart(3, "0")}-${slugifyMenuItemName(item.name)}.png`;
 }
 
 const milkShakePhotoRules = [
@@ -1506,6 +1535,8 @@ function photoForItem(item) {
 }
 
 function renderFilters() {
+  const focusedCategory = elements.filters.contains(document.activeElement) ? document.activeElement.dataset.category : null;
+  const scrollLeft = elements.filters.scrollLeft;
   if (state.menuStatus === "loading") {
     elements.filters.innerHTML = "";
     return;
@@ -1521,12 +1552,44 @@ function renderFilters() {
       const isActive = category === state.selectedCategory;
       return `
         <button class="filter-btn ${isActive ? "is-active" : ""}" data-category="${escapeHtml(category)}" type="button" aria-pressed="${isActive}">
-          <span class="filter-icon" aria-hidden="true">${categoryIcon(category)}</span>
+          <span class="filter-icon" aria-hidden="true">${categoryImageMarkup(category)}</span>
           <span>${escapeHtml(category)}</span>
         </button>
       `;
     })
     .join("");
+  elements.filters.scrollLeft = scrollLeft;
+  if (focusedCategory) [...elements.filters.children].find(button => button.dataset.category === focusedCategory)?.focus({preventScroll:true});
+  updateCategoryScrollButtons();
+}
+
+function updateCategoryScrollButtons() {
+  document.querySelectorAll('[data-category-scroll]').forEach(button => {
+    button.disabled = Number(button.dataset.categoryScroll) < 0
+      ? elements.filters.scrollLeft <= 1
+      : elements.filters.scrollLeft + elements.filters.clientWidth >= elements.filters.scrollWidth - 1;
+  });
+}
+
+function bindCategorySelector() {
+  elements.filters.addEventListener('scroll', updateCategoryScrollButtons, {passive:true});
+  const observer = new ResizeObserver(updateCategoryScrollButtons);
+  observer.observe(elements.filters);
+  document.querySelectorAll('[data-category-scroll]').forEach(button => button.addEventListener('click', () => {
+    elements.filters.scrollBy({left:Number(button.dataset.categoryScroll) * elements.filters.clientWidth * .8,
+      behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth'});
+  }));
+  elements.filters.addEventListener('keydown', event => {
+    const buttons = [...elements.filters.querySelectorAll('[data-category]')];
+    const index = buttons.indexOf(document.activeElement);
+    if (index < 0 || !['ArrowLeft','ArrowRight','Home','End'].includes(event.key)) return;
+    event.preventDefault();
+    const next = event.key === 'Home' ? 0 : event.key === 'End' ? buttons.length-1
+      : Math.max(0,Math.min(buttons.length-1,index+(event.key === 'ArrowRight' ? 1 : -1)));
+    buttons[next].focus({preventScroll:true});
+    buttons[next].scrollIntoView({block:'nearest',inline:'nearest',behavior:'instant'});
+  });
+  window.addEventListener('pagehide', () => {observer.disconnect();elements.filters.removeEventListener('scroll',updateCategoryScrollButtons);}, {once:true});
 }
 
 function renderMenu() {
@@ -1594,7 +1657,7 @@ function renderMenu() {
   }
 
   elements.menuGrid.innerHTML = items
-    .map((item) => {
+    .map((item, index) => {
       const photo = photoForItem(item);
       const cartQty = cartQuantityForItem(item.id);
       const isAvailable = itemAvailable(item);
@@ -1605,7 +1668,8 @@ function renderMenu() {
             <img
               src="${escapeHtml(photo.src)}"
               alt="${escapeHtml(photo.alt)}"
-              loading="lazy"
+              loading="${index<2?'eager':'lazy'}"
+              decoding="async"
               onerror="this.onerror=null;this.src='${escapeHtml(MENU_IMAGE_FALLBACK_SRC)}';"
             />
           </div>
@@ -1624,9 +1688,9 @@ function renderMenu() {
                   ? `<div class="card-qty-control" aria-label="${escapeHtml(item.name)} quantity in cart">
                       <button class="card-qty-btn" data-menu-id="${item.id}" data-menu-delta="-1" type="button" aria-label="Decrease ${escapeHtml(item.name)}">-</button>
                       <span>${cartQty}</span>
-                      <button class="card-qty-btn" data-menu-id="${item.id}" data-menu-delta="1" type="button" aria-label="Increase ${escapeHtml(item.name)}">+</button>
+                      <button class="card-qty-btn" data-menu-id="${item.id}" data-menu-delta="1" type="button" aria-label="Increase ${escapeHtml(item.name)}" ${cartQty >= MAX_ITEM_QUANTITY ? 'disabled' : ''}>+</button>
                     </div>`
-                  : `<button class="add-btn" data-menu-add="${item.id}" type="button">ADD</button>`
+                  : `<button class="add-btn" data-menu-add="${item.id}" type="button" aria-label="Add ${escapeHtml(item.name)}">Add</button>`
               }
             </div>
           </div>
@@ -1931,7 +1995,7 @@ function renderCart() {
           <div class="cart-qty">
             <button class="qty-btn" data-id="${item.id}" data-delta="-1" type="button" aria-label="Remove one ${escapeHtml(item.name)}">-</button>
             <span class="qty-value">${item.qty}</span>
-            <button class="qty-btn" data-id="${item.id}" data-delta="1" type="button" aria-label="Add one ${escapeHtml(item.name)}">+</button>
+            <button class="qty-btn" data-id="${item.id}" data-delta="1" type="button" aria-label="Add one ${escapeHtml(item.name)}" ${item.qty >= MAX_ITEM_QUANTITY ? 'disabled' : ''}>+</button>
             <button class="remove-btn" data-id="${item.id}" data-remove="true" type="button" aria-label="Remove ${escapeHtml(item.name)} from cart">x</button>
           </div>
         </div>
@@ -2456,7 +2520,7 @@ function mobileCartLinesMarkup() {
           <div class="cart-qty">
             <button class="qty-btn" data-mobile-id="${item.id}" data-mobile-delta="-1" type="button" aria-label="Remove one ${escapeHtml(item.name)}">-</button>
             <span class="qty-value">${item.qty}</span>
-            <button class="qty-btn" data-mobile-id="${item.id}" data-mobile-delta="1" type="button" aria-label="Add one ${escapeHtml(item.name)}">+</button>
+            <button class="qty-btn" data-mobile-id="${item.id}" data-mobile-delta="1" type="button" aria-label="Add one ${escapeHtml(item.name)}" ${item.qty >= MAX_ITEM_QUANTITY ? 'disabled' : ''}>+</button>
             <button class="remove-btn" data-mobile-id="${item.id}" data-mobile-remove="true" type="button" aria-label="Remove ${escapeHtml(item.name)}">x</button>
           </div>
           <strong>${formatPrice(item.price * item.qty)}</strong>
@@ -2622,7 +2686,7 @@ async function requestJson(path, options = {}) {
       if (!response.ok || payload.success === false) {
         throw Object.assign(new Error(response.status >= 500
           ? 'Unable to connect right now. Please try again.'
-          : friendlyNetworkError({ message: payload.message || 'Request failed' })), { status: response.status });
+          : friendlyNetworkError({ message: payload.message || 'Request failed' })), { status: response.status, code: payload.code });
       }
       return payload.data ?? payload;
     })()]);
@@ -2677,6 +2741,7 @@ function buildPaymentPayload(customer) {
     items: state.cart.map((item) => ({
       menu_id: item.id,
       quantity: item.qty,
+      expected_unit_price: item.price,
     })),
   };
 
@@ -3112,6 +3177,7 @@ async function placeOrder() {
     void loadCustomerNotifications({ announce: false });
   } catch (error) {
     const message = error.message || "Please try again.";
+    if(error.code==='MENU_PRICE_CHANGED'&&!state.pendingPublicOrder)state.menuRequoteRequested=true;
     if (error.status === 401 && !state.kiosk.enabled && !state.tableQr.enabled) {
       if (state.pendingPublicOrder) elements.customerPhone.value = state.pendingPublicOrder.customer.phone;
       resetPhoneVerification({ keepPhone: true });
@@ -3127,6 +3193,7 @@ async function placeOrder() {
     }
   } finally {
     state.isSubmittingOrder = false;
+    if(state.menuRequoteRequested){state.menuRequoteRequested=false;await loadLiveMenu({background:true});}
     elements.placeOrder.disabled = false;
     updatePlaceOrderButtonText();
     renderCart();
@@ -4377,7 +4444,7 @@ function renderKioskMenuScreen() {
       ? `<div class="kiosk-empty-state"><strong>No menu items available</strong><span>Please ask the counter team for help.</span></div>`
       : items.length
       ? items
-          .map((item) => {
+          .map((item, index) => {
             const photo = photoForItem(item);
             const cartQty = cartQuantityForItem(item.id);
             const isAvailable = itemAvailable(item);
@@ -4387,7 +4454,7 @@ function renderKioskMenuScreen() {
                   <img
                     src="${escapeHtml(photo.src)}"
                     alt="${escapeHtml(photo.alt)}"
-                    loading="lazy"
+                    loading="${index<2?'eager':'lazy'}"
                     draggable="false"
                     onerror="this.onerror=null;this.src='${escapeHtml(MENU_IMAGE_FALLBACK_SRC)}';"
                   />
@@ -4856,6 +4923,7 @@ async function placeKioskOrder() {
     if (state.kiosk.screen === 'confirmation') renderKiosk();
   } catch (error) {
     state.isSubmittingOrder = false;
+    if(error.code==='MENU_PRICE_CHANGED'&&!state.kiosk.pendingOrder)await loadLiveMenu({background:true});
     state.kiosk.submissionError = state.kiosk.pendingOrder
       ? 'Your order is not yet confirmed. Tap Check order to safely retry the same order, or ask the counter team for help. Nothing has been cleared.'
       : `We could not place this order. Nothing was cleared. ${friendlyNetworkError(error)} Please try again.`;
@@ -5018,13 +5086,14 @@ function clearKioskPollingTimers() {
 
 function startKioskPolling() {
   clearKioskPollingTimers();
-  state.kiosk.menuRefreshTimer = window.setInterval(() => loadLiveMenu({ background: true }), 60000);
+  state.kiosk.menuRefreshTimer = window.setInterval(refreshMenuIfChanged, 10000);
   state.kiosk.settingsRefreshTimer = window.setInterval(() => loadPublicSettings({ background: true }), 5000);
   updateKioskTimerDebug();
 }
 
 function handleKioskWindowFocus() {
   loadPublicSettings({ background: true });
+  refreshMenuIfChanged();
 }
 
 function bindKioskEvents() {
@@ -5230,7 +5299,18 @@ function setupCustomerOverlays() {
   elements.mobileCartButton?.addEventListener("click", () => closeChat(false));
 }
 
+function updateQuantityFromControl(button, id, delta) {
+  if (button.disabled) return;
+  const restoreFocus = document.activeElement === button;
+  const attributes = ['data-menu-id','data-menu-delta','data-id','data-delta','data-mobile-id','data-mobile-delta'];
+  const selector = attributes.filter(name => button.hasAttribute(name)).map(name => `[${name}="${CSS.escape(button.getAttribute(name))}"]`).join('');
+  changeQty(id, delta);
+  // Restore only after the existing synchronous cart/menu render has completed.
+  if (restoreFocus && selector) document.querySelector(selector)?.focus({preventScroll:true});
+}
+
 function bindEvents() {
+  bindCategorySelector();
   window.addEventListener('popstate', () => {
     if (!state.tableQr.enabled && state.mobileCartOpen && !history.state?.restaurantaiCart) setMobileCartOpen(false);
   });
@@ -5254,7 +5334,7 @@ function bindEvents() {
 
     const qtyButton = event.target.closest("[data-menu-id][data-menu-delta]");
     if (qtyButton) {
-      changeQty(Number(qtyButton.dataset.menuId), Number(qtyButton.dataset.menuDelta));
+      updateQuantityFromControl(qtyButton, Number(qtyButton.dataset.menuId), Number(qtyButton.dataset.menuDelta));
       return;
     }
 
@@ -5272,7 +5352,7 @@ function bindEvents() {
 
     const button = event.target.closest("[data-id][data-delta]");
     if (!button) return;
-    changeQty(Number(button.dataset.id), Number(button.dataset.delta));
+    updateQuantityFromControl(button, Number(button.dataset.id), Number(button.dataset.delta));
   });
 
   elements.phoneVerification?.addEventListener("click", (event) => {
@@ -5326,7 +5406,7 @@ function bindEvents() {
 
     const qtyButton = event.target.closest("[data-mobile-id][data-mobile-delta]");
     if (qtyButton) {
-      changeQty(Number(qtyButton.dataset.mobileId), Number(qtyButton.dataset.mobileDelta));
+      updateQuantityFromControl(qtyButton, Number(qtyButton.dataset.mobileId), Number(qtyButton.dataset.mobileDelta));
       return;
     }
 
@@ -5730,7 +5810,15 @@ if (startTrackingPage()) {
   loadPublicSettings();
   loadPaymentMethods();
   resolveTableQrContext();
-  window.setInterval(() => loadLiveMenu({ background: true }), 60000);
+  const menuTimer=window.setInterval(refreshMenuIfChanged,15000);
+  window.addEventListener('focus',refreshMenuIfChanged);
+  window.addEventListener('hashchange',refreshMenuIfChanged);
+  document.addEventListener('visibilitychange',refreshMenuIfChanged);
+  elements.menuGrid?.closest('section')?.addEventListener('pointerenter',refreshMenuIfChanged);
+  window.addEventListener('pagehide',()=>{window.clearInterval(menuTimer);window.removeEventListener('focus',refreshMenuIfChanged);
+    window.removeEventListener('hashchange',refreshMenuIfChanged);
+    elements.menuGrid?.closest('section')?.removeEventListener('pointerenter',refreshMenuIfChanged);
+    document.removeEventListener('visibilitychange',refreshMenuIfChanged);},{once:true});
   window.setInterval(loadPublicSettings, 5000);
   window.addEventListener("focus", loadPublicSettings);
 }

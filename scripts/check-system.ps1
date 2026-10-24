@@ -129,7 +129,7 @@ if (-not $nodeExe) {
 if ($nodeExe -and (Test-Path $nodeExe)) {
   $version = (& $nodeExe --version)
   $major = [int]($version.TrimStart("v").Split(".")[0])
-  $checks.Add((Add-Check ($(if ($major -ge 18) { "PASS" } else { "FAIL" })) "Node.js" $version))
+  $checks.Add((Add-Check ($(if ($major -ge 22) { "PASS" } else { "FAIL" })) "Node.js" $version))
 } else {
   $checks.Add((Add-Check "FAIL" "Node.js" "node.exe not found on PATH"))
 }

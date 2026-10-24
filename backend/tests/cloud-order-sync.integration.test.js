@@ -1,10 +1,14 @@
 import assert from "node:assert/strict";
 import { test, mock } from "node:test";
 import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import net from "node:net";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { AsyncLocalStorage } from "node:async_hooks";
 import crypto from "node:crypto";
 import pg from "pg";
-import dotenv from "dotenv";
 import express from "express";
 import jwt from "jsonwebtoken";
 import { cloudSyncConfig } from "../src/config/cloudSyncConfig.js";
@@ -19,14 +23,23 @@ test("cloud sync configuration is opt-in and HTTPS-only", () => {
   }
 });
 
-// Requires local PostgreSQL CREATE DATABASE permission. Only these randomly
-// named fixture databases are written/dropped; restaurant_db is never opened.
-test("cloud-to-local order sync with two disposable PostgreSQL databases", { timeout: 120000 }, async t => {
-  const env = dotenv.parse(await fs.readFile(new URL("../.env", import.meta.url)));
-  const connection = { host: "127.0.0.1", port: Number(env.DB_PORT || 5432),
-    user: env.DB_USER || "postgres", password: env.DB_PASSWORD, connectionTimeoutMillis: 3000 };
+// Both fixture databases live in a separate temporary cluster, never the
+// development/installed PostgreSQL server. No DROP DATABASE is needed.
+test("cloud-to-local order sync with two disposable PostgreSQL databases", { timeout: 180000 }, async t => {
+  const exec = promisify(execFile);
+  const savedEnv = { ...process.env };
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'restaurantai-sync-isolated-'));
+  const data = path.join(root, 'data');
+  const bin = process.env.RESTAURANTAI_TEST_PG_BIN || 'C:/Program Files/PostgreSQL/18/bin';
+  const executable = name => path.join(bin, name + (process.platform === 'win32' ? '.exe' : ''));
+  const listener = net.createServer();
+  await new Promise(resolve => listener.listen(0, '127.0.0.1', resolve));
+  const port = listener.address().port;
+  await new Promise(resolve => listener.close(resolve));
+  const connection = { host: "127.0.0.1", port, user: "postgres", connectionTimeoutMillis: 3000 };
   const admin = new pg.Pool({ ...connection, database: "postgres" });
-  const created = [], pools = [], servers = [], workers = [];
+  const pools = [], servers = [], workers = [];
+  let started = false;
   const prefix = `restaurantai_sync_test_${Date.now()}`;
   const logs = [];
   const log = { warn: (message, metadata) => logs.push({ message, ...metadata }) };
@@ -34,13 +47,17 @@ test("cloud-to-local order sync with two disposable PostgreSQL databases", { tim
   const context = new AsyncLocalStorage();
   let local, cloud;
   try {
+    await exec(executable('initdb'), ['-D',data,'-U','postgres','-A','trust','--no-locale','-E','UTF8'], { windowsHide:true,timeout:30000 });
+    await exec(executable('pg_ctl'), ['-D',data,'-l',path.join(root,'postgres.log'),'-o',`-h 127.0.0.1 -p ${port} -F`,'-w','start'], { windowsHide:true,timeout:30000 });
+    started = true;
+    process.env.RESTAURANTAI_ENV_FILE = path.join(root, 'absent.env');
+    process.env.RESTAURANTAI_ENV_PATH = process.env.RESTAURANTAI_ENV_FILE;
     const bootstrap = (await fs.readFile(new URL("../database/bootstrap/offline_v1_schema.sql", import.meta.url), "utf8"))
       .split(/\r?\n/).filter(line => !line.startsWith("\\")).join("\n");
     for (const side of ["cloud", "local"]) {
       const name = `${prefix}_${side}`;
       assert.match(name, /^restaurantai_sync_test_\d+_(cloud|local)$/);
       await admin.query(`CREATE DATABASE "${name}"`);
-      created.push(name);
       const db = new pg.Pool({ ...connection, database: name });
       pools.push(db);
       const client = await db.connect();
@@ -250,10 +267,33 @@ test("cloud-to-local order sync with two disposable PostgreSQL databases", { tim
       assert.equal(response.status, 201, response.body.message);
       assert.equal(response.body.data.order.cloud_order_id, null);
       assert.equal(response.body.data.order.order_source, "kiosk");
+      assert.equal(Number(response.body.data.order.delivery_charge), 0);
+      assert.equal(Number(response.body.data.order.total_amount), 210);
       await worker.tick();
       assert.equal((await local.query("SELECT COUNT(*) AS n FROM cloud_order_sync_events")).rows[0].n, queued);
       assert.equal((await api("/api/kitchen/orders")).status, 200);
       offline = false;
+    });
+    await t.test("kiosk takeaway persists zero packing in both order APIs and receipts; retry creates one order", async () => {
+      const { getOrderReceipt } = await import('../src/services/billingService.js');
+      for (const route of ['/local-order', '/api/orders']) {
+        const payload = { customer_id: 1, order_type: 'pickup', order_source: 'kiosk',
+          payment_method: 'pay_at_counter', items: [{ menu_id: 77, quantity: 1 }], idempotency_key: crypto.randomUUID() };
+        const response = await api(route, payload);
+        assert.equal(response.status, 201, response.body.message);
+        const order = response.body.data.order || response.body.data;
+        assert.equal(Number(order.delivery_charge), 0);
+        assert.equal(Number(order.total_amount), 210);
+        const saved = (await local.query('SELECT * FROM orders WHERE id=$1', [order.id])).rows[0];
+        assert.equal(Number(saved.delivery_charge), 0);
+        const receipt = await getOrderReceipt(local, order.id);
+        assert.equal(receipt.totals.packing, 0);
+        assert.equal(receipt.totals.grand_total, 210);
+        assert.ok(!receipt.totals.summary_lines.some(line => line.label === 'Packing'));
+        const retry = await api(route, payload);
+        assert.equal((retry.body.data.order || retry.body.data).id, order.id);
+        assert.equal((await local.query('SELECT COUNT(*)::int AS n FROM orders WHERE idempotency_key=$1', [payload.idempotency_key])).rows[0].n, 1);
+      }
     });
     await t.test("unpaid online payments wait; paid orders import without recharging; non-website sources excluded", async () => {
       const next = await websiteOrder();
@@ -306,10 +346,13 @@ test("cloud-to-local order sync with two disposable PostgreSQL databases", { tim
       await new Promise(resolve => server.close(resolve));
     }
     for (const db of pools) await db.end();
-    for (const name of created) {
-      assert.match(name, /^restaurantai_sync_test_\d+_(cloud|local)$/);
-      await admin.query(`DROP DATABASE "${name}"`);
-    }
     await admin.end();
+    if (started || await fs.access(path.join(data,'postmaster.pid')).then(()=>true,()=>false)) {
+      await exec(executable('pg_ctl'), ['-D',data,'-m','fast','-w','stop'], { windowsHide:true,timeout:30000 });
+    }
+    assert.equal(await fs.access(path.join(data,'postmaster.pid')).then(()=>true,()=>false), false);
+    for (const key of Object.keys(process.env)) if (!(key in savedEnv)) delete process.env[key];
+    Object.assign(process.env,savedEnv);
+    console.log(`Temporary cloud-sync PostgreSQL stopped; fixtures retained: ${root}`);
   }
 });

@@ -137,7 +137,7 @@ function Categories() {
 
       let response;
       if (editingCategory) {
-        response = await categoriesService.updateCategory(editingCategory.id, categoryData);
+        response = await categoriesService.updateCategory(editingCategory.id, { ...categoryData, sync_version: editingCategory.sync_version });
       } else {
         response = await categoriesService.createCategory(categoryData);
       }

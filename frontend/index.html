@@ -15,7 +15,7 @@
         document.head.appendChild(base);
       }
     </script>
-    <link rel="stylesheet" href="styles.css?v=kiosk-attract-1" />
+    <link rel="stylesheet" href="styles.css?v=customer-usability-1" />
     <script src="config.js?v=canonical-api-1"></script>
   </head>
   <body>
@@ -105,7 +105,11 @@
             <span>Search food</span>
             <input id="searchInput" type="search" placeholder="Search pizza, pastry, chaat..." />
           </label>
-          <div id="categoryFilters" class="category-filters" aria-label="Menu category filters"></div>
+          <div class="category-selector">
+            <button class="category-scroll ghost-btn" type="button" data-category-scroll="-1" aria-label="Previous categories" title="Previous categories" aria-controls="categoryFilters" disabled>&larr;</button>
+            <div id="categoryFilters" class="category-filters" role="group" aria-label="Menu category filters"></div>
+            <button class="category-scroll ghost-btn" type="button" data-category-scroll="1" aria-label="Next categories" title="Next categories" aria-controls="categoryFilters">&rarr;</button>
+          </div>
         </div>
 
         <div class="menu-layout">
@@ -421,6 +425,6 @@
     </section>
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
-    <script src="script.js?v=kiosk-attract-1"></script>
+    <script src="script.js?v=customer-usability-1"></script>
   </body>
 </html>

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   Alert,
   Box,
@@ -22,9 +22,7 @@ import OrderFilters from "../../components/orders/OrderFilters";
 import OrderDetails from "../../components/orders/OrderDetails";
 import OrderBoard from "../../components/orders/OrderBoard";
 import { ordersService } from "../../services/order";
-
-const LIVE_POLL_INTERVAL_MS = 3000;
-const HIDDEN_POLL_INTERVAL_MS = 15000;
+import { useOrderNotifications } from '../../context/OrderNotificationsContext';
 
 function formatCurrency(value) {
   const amount = Number(value || 0);
@@ -93,14 +91,12 @@ function matchesSearch(order, query) {
 }
 
 function Orders() {
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const initialSearch = searchParams.get("table")
     ? `table ${searchParams.get("table")}`
     : searchParams.get("search") || "";
-  const [orders, setOrders] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [usingFallback, setUsingFallback] = useState(false);
-  const [ordersError, setOrdersError] = useState("");
+  const { orders, setOrders, loading, ordersError, lastSyncedAt, watchOrders, refresh: loadOrders } = useOrderNotifications();
+  const usingFallback = Boolean(ordersError);
   const [filters, setFilters] = useState({
     status: "",
     payment_status: "",
@@ -112,110 +108,26 @@ function Orders() {
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [snackbar, setSnackbar] = useState({ open: false, message: "", severity: "success" });
-  const [lastSyncedAt, setLastSyncedAt] = useState(null);
-  const requestInFlightRef = useRef(false);
-  const pollTimerRef = useRef(null);
-  const seenOrderIdsRef = useRef(new Set());
-  const hasLoadedOnceRef = useRef(false);
-
-  const loadOrders = useCallback(async ({ silent = false } = {}) => {
-    if (requestInFlightRef.current) {
-      return;
-    }
-
-    requestInFlightRef.current = true;
-    if (!silent) setLoading(true);
-    try {
-      const response = await ordersService.getAllOrders({
-        status: filters.status,
-        payment_status: filters.payment_status,
-        date: filters.date,
-        include_expired: orderScope === "history",
-      });
-      if (response.success) {
-        const nextOrders = response.data || [];
-        const nextIds = new Set(nextOrders.map((order) => String(order.id)));
-        const newOrderCount = nextOrders.filter((order) => !seenOrderIdsRef.current.has(String(order.id))).length;
-
-        setOrders(nextOrders);
-        setSelectedOrder((current) => {
-          if (!current) return current;
-          return nextOrders.find((order) => Number(order.id) === Number(current.id)) || current;
-        });
-        if (hasLoadedOnceRef.current && newOrderCount > 0 && orderScope === "live") {
-          setSnackbar({
-            open: true,
-            message: `${newOrderCount} new order${newOrderCount === 1 ? "" : "s"} received.`,
-            severity: "info",
-          });
-        }
-        seenOrderIdsRef.current = nextIds;
-        hasLoadedOnceRef.current = true;
-        setUsingFallback(false);
-        setOrdersError("");
-        setLastSyncedAt(new Date());
-      } else {
-        const message = response.message || "Live orders API did not return a successful response.";
-        setUsingFallback(true);
-        setOrdersError(message);
-        if (!silent) setSnackbar({ open: true, message, severity: "warning" });
-      }
-    } catch (error) {
-      const message =
-        error?.response?.data?.message ||
-        (!error?.response
-          ? "Restaurant server unavailable. Reconnecting..."
-          : "Live orders could not be loaded from the backend.");
-      setUsingFallback(true);
-      setOrdersError(message);
-      if (!silent) {
-        setSnackbar({
-          open: true,
-          message,
-          severity: "warning",
-        });
-      }
-    } finally {
-      requestInFlightRef.current = false;
-      if (!silent) setLoading(false);
-    }
-  }, [filters.status, filters.payment_status, filters.date, orderScope]);
+  useEffect(() => watchOrders({
+    status: filters.status, payment_status: filters.payment_status, date: filters.date,
+    include_expired: orderScope === 'history',
+  }), [watchOrders, filters.status, filters.payment_status, filters.date, orderScope]);
 
   useEffect(() => {
-    seenOrderIdsRef.current = new Set();
-    hasLoadedOnceRef.current = false;
-    loadOrders();
-  }, [loadOrders]);
+    setSelectedOrder(current => current ? orders.find(order => Number(order.id) === Number(current.id)) || current : null);
+  }, [orders]);
 
+  const requestedOrderId = searchParams.get('order');
   useEffect(() => {
-    let stopped = false;
-
-    const scheduleNextPoll = () => {
-      if (stopped) return;
-      const interval = document.hidden ? HIDDEN_POLL_INTERVAL_MS : LIVE_POLL_INTERVAL_MS;
-      pollTimerRef.current = window.setTimeout(runPoll, interval);
-    };
-
-    const runPoll = async () => {
-      await loadOrders({ silent: true });
-      scheduleNextPoll();
-    };
-
-    const handleVisibilityChange = () => {
-      if (document.hidden) return;
-      window.clearTimeout(pollTimerRef.current);
-      runPoll();
-    };
-
-    pollTimerRef.current = window.setTimeout(runPoll, LIVE_POLL_INTERVAL_MS);
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-
-    return () => {
-      stopped = true;
-      window.clearTimeout(pollTimerRef.current);
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-    };
-  }, [loadOrders]);
+    if (!/^\d+$/.test(requestedOrderId || '')) return;
+    const controller = new AbortController();
+    ordersService.getOrderById(requestedOrderId, { signal: controller.signal }).then(response => {
+      if (!controller.signal.aborted && response.success) { setSelectedOrder(response.data); setDetailsOpen(true); }
+    }).catch(() => {
+      if (!controller.signal.aborted) setSnackbar({ open: true, message: 'Order details could not be loaded.', severity: 'error' });
+    });
+    return () => controller.abort();
+  }, [requestedOrderId]);
 
   const filteredOrders = useMemo(() => {
     return orders.filter((order) => {
@@ -267,6 +179,7 @@ function Orders() {
       if (response.success) {
         setOrders((prev) => prev.map((order) => (order.id === orderId ? { ...order, ...response.data } : order)));
         setSelectedOrder((prev) => (prev?.id === orderId ? { ...prev, ...response.data } : prev));
+        loadOrders();
         setSnackbar({
           open: true,
           message: "Order status updated. Kitchen will refresh automatically.",
@@ -503,7 +416,14 @@ function Orders() {
       <OrderDetails
         open={detailsOpen}
         order={selectedOrder}
-        onClose={() => setDetailsOpen(false)}
+        onClose={() => {
+          setDetailsOpen(false);
+          if (searchParams.has('order')) {
+            const next = new URLSearchParams(searchParams);
+            next.delete('order');
+            setSearchParams(next, { replace: true });
+          }
+        }}
         onStatusUpdate={handleStatusChange}
         onMarkPaid={handleMarkPaid}
         onRetryWhatsApp={handleRetryWhatsApp}

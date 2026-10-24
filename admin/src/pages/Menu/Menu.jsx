@@ -20,6 +20,7 @@ import SearchBar from "../../components/menu/SearchBar";
 import CategoryFilter from "../../components/menu/CategoryFilter";
 import MenuCatalog from "../../components/menu/MenuCatalog";
 import MenuTable from "../../components/menu/MenuTable";
+import MenuSyncStatus from '../../components/menu/MenuSyncStatus';
 import AddFoodDialog from "../../components/menu/AddFoodDialog";
 import { menuService, categoriesService } from "../../services/menu";
 import { publishMenuUpdated, subscribeToMenuUpdates } from "../../utils/menuEvents";
@@ -29,6 +30,7 @@ function Menu() {
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [loadError, setLoadError] = useState("");
   const [success, setSuccess] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("All");
@@ -54,10 +56,11 @@ function Menu() {
   const fetchMenuAndCategories = async () => {
     try {
       setLoading(true);
-      setError("");
+      setLoadError("");
 
       const categoriesRes = await categoriesService.getAllCategories();
-      const availableCategories = categoriesRes.success ? categoriesRes.data || [] : [];
+      if (!categoriesRes.success) throw new Error(categoriesRes.message || "Failed to fetch categories");
+      const availableCategories = categoriesRes.data || [];
       setCategories(availableCategories);
 
       const filters = {};
@@ -71,11 +74,12 @@ function Menu() {
       }
 
       const menuRes = await menuService.getAllItems(filters);
+      if (!menuRes.success) throw new Error(menuRes.message || "Failed to fetch menu items");
       if (menuRes.success) {
         setMenuItems(menuRes.data || []);
       }
     } catch (err) {
-      setError(err.response?.data?.message || "Failed to fetch menu items");
+      setLoadError(err.response?.data?.message || err.message || "Failed to fetch menu items");
     } finally {
       setLoading(false);
     }
@@ -211,6 +215,11 @@ function Menu() {
         </Button>
       </Box>
 
+      <MenuSyncStatus/>
+      {loadError && <Alert severity="error" sx={{ mb: 2 }}
+        action={<Button color="inherit" onClick={fetchMenuAndCategories} disabled={loading}>Retry menu</Button>}>
+        Menu could not load. {loadError}
+      </Alert>}
       {error && (
         <Alert severity="error" sx={{ mb: 2 }}>
           {error}
@@ -259,7 +268,7 @@ function Menu() {
         </ToggleButtonGroup>
       </Box>
 
-      {viewMode === "catalog" ? (
+      {loadError ? null : viewMode === "catalog" ? (
         <MenuCatalog
           items={sortedMenuItems}
           categories={categories}

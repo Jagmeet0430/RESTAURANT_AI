@@ -1,5 +1,7 @@
 # RestaurantAI Backup, Restore, and Disaster Recovery
 
+For Windows installer v1.4.4, use [Customer Installation](CUSTOMER_INSTALLATION.md) for current paths and recovery steps. Full Windows backups now include an ACL-restricted configuration copy containing secrets; never share that copy. Restore tests use a unique disposable database. Older examples below describe the earlier development workflow.
+
 RestaurantAI stores sales, customers, inventory, products, payments, admin users, and report source data in PostgreSQL. A good backup protects the restaurant from Windows failure, accidental deletion, database corruption, server replacement, software update failure, and disk failure.
 
 ## Backup Location

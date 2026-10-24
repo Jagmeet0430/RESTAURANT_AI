@@ -2,7 +2,7 @@ import { useState } from "react";
 import { TextField, MenuItem, FormControlLabel, Switch, Box, Stack, Button, Typography, Alert } from "@mui/material";
 import UploadFileIcon from "@mui/icons-material/UploadFile";
 
-const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
+const MAX_UPLOAD_BYTES = 2 * 1024 * 1024;
 const MAX_IMAGE_EDGE = 900;
 const IMAGE_QUALITY = 0.82;
 
@@ -21,12 +21,13 @@ async function compressImageFile(file) {
   }
 
   if (file.size > MAX_UPLOAD_BYTES) {
-    throw new Error("Image is too large. Please upload a photo under 8 MB.");
+    throw new Error("Image is too large. Please upload a photo under 2 MB.");
   }
 
   const objectUrl = URL.createObjectURL(file);
   try {
     const image = await loadImage(objectUrl);
+    if(image.width>6000||image.height>6000||image.width*image.height>16000000) throw new Error('Image dimensions are too large.');
     const scale = Math.min(1, MAX_IMAGE_EDGE / Math.max(image.width, image.height));
     const width = Math.max(1, Math.round(image.width * scale));
     const height = Math.max(1, Math.round(image.height * scale));
@@ -158,7 +159,7 @@ function MenuForm({ formData, onFormChange, categories }) {
           {uploadingImage ? "Preparing..." : "Upload Image"}
           <input
             hidden
-            accept="image/*"
+            accept="image/jpeg,image/png,image/webp"
             type="file"
             onChange={handleFileChange}
           />
@@ -194,6 +195,10 @@ function MenuForm({ formData, onFormChange, categories }) {
         }
         label={formData.is_available ? "✓ Available" : "✗ Out of Stock"}
       />
+      <FormControlLabel control={<Switch name="visible_kiosk" checked={formData.visible_kiosk!==false} onChange={handleSwitchChange}/>} label="Visible on kiosk"/>
+      <FormControlLabel control={<Switch name="visible_website" checked={formData.visible_website!==false} onChange={handleSwitchChange}/>} label="Visible on website"/>
+      <TextField label="Display order" type="number" name="display_order" value={formData.display_order??0}
+        onChange={e=>onFormChange({...formData,display_order:Number(e.target.value)})}/>
     </Stack>
   );
 }

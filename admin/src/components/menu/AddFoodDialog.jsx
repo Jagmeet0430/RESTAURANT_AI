@@ -16,6 +16,9 @@ const defaultForm = {
   veg_type: "Veg",
   image_url: "",
   is_available: true,
+  visible_kiosk: true,
+  visible_website: true,
+  display_order: 0,
 };
 
 function AddFoodDialog({ open, onClose, onAdd, categories, editingFood }) {
@@ -31,6 +34,10 @@ function AddFoodDialog({ open, onClose, onAdd, categories, editingFood }) {
         veg_type: editingFood.veg_type || "Veg",
         image_url: editingFood.image_url || "",
         is_available: editingFood.is_available ?? true,
+        sync_version: editingFood.sync_version,
+        visible_kiosk: editingFood.visible_kiosk ?? true,
+        visible_website: editingFood.visible_website ?? true,
+        display_order: editingFood.display_order ?? 0,
       });
     } else {
       setFormData(defaultForm);

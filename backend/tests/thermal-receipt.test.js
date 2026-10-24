@@ -41,11 +41,38 @@ function reconciles(totals) {
   assert.equal(totals.tax_lines.reduce((sum, entry) => sum + cents(entry.amount), 0), cents(totals.tax));
 }
 
+function assertOnlyLegacyLinkMaintenance(queries) {
+  // Existing schema setup backfills links, but receipt reads must not create or reprice sales.
+  assert.deepEqual(queries.filter(sql => /^\s*(?:INSERT|UPDATE|DELETE)\b/i.test(sql)), [
+    "UPDATE bills SET source_type = 'order', source_id = order_id WHERE source_id IS NULL AND order_id IS NOT NULL",
+    "UPDATE payments SET source_type = 'order', source_id = order_id WHERE source_id IS NULL AND order_id IS NOT NULL",
+  ]);
+}
+
 test('existing exclusive checkout calculation remains unchanged', () => {
   const totals = calculateOrderTotals({ subtotal: 200, orderType: 'pickup', discount: 10 });
   assert.equal(totals.total, 210);
   assert.equal(totals.tax, 10);
   assert.equal(totals.packing, 10);
+});
+
+test('kiosk dine-in and takeaway never charge packing; other channels and saved bills retain fees', () => {
+  for (const orderType of ['dine_in', 'pickup', 'takeaway']) {
+    const totals = calculateOrderTotals({ subtotal: 200, orderType, orderSource: 'kiosk', packingCharge: 25 });
+    assert.equal(totals.packing, 0);
+    assert.equal(totals.deliveryCharge, 0);
+    assert.equal(totals.total, 210);
+    const receipt = receiptTotalsFromRow({ subtotal: totals.subtotal, tax: totals.tax,
+      delivery_charge: totals.deliveryCharge, total_amount: totals.total });
+    reconciles(receipt);
+    assert.ok(!receipt.summary_lines.some(line => line.label === 'Packing'));
+  }
+  assert.equal(calculateOrderTotals({ subtotal: 200, orderSource: 'website' }).packing, 0);
+  assert.equal(receiptTotalsFromRow({ ...savedBill, order_source: 'website' }).packing, 10);
+  for (const orderSource of [undefined, 'customer_web', 'pos']) {
+    assert.equal(calculateOrderTotals({ subtotal: 200, orderType: 'pickup', orderSource }).packing, 10);
+  }
+  assert.equal(receiptTotalsFromRow({ ...savedBill, order_source: 'kiosk' }).packing, 10);
 });
 
 test('saved bill/settings win over changed live settings; no mutation or financial update', async () => {
@@ -87,7 +114,7 @@ test('POS receipt lookup accepts saved sale ID or bill number without recalculat
     assert.equal(receipt.totals.grand_total, 236);
     assert.equal(receipt.totals.adjustment, 0);
     reconciles(receipt.totals);
-    assert.ok(queries.every(entry => !/\b(?:INSERT|UPDATE|DELETE)\b/i.test(entry.sql)));
+    assertOnlyLegacyLinkMaintenance(queries.map(entry => entry.sql));
   }
 });
 
@@ -102,7 +129,7 @@ test('test receipt uses canonical totals without creating a sale', async () => {
   assert.equal(receipt.totals.grand_total, 15);
   assert.equal(receipt.totals.adjustment, 0);
   reconciles(receipt.totals);
-  assert.ok(queries.every(sql => !/\b(?:INSERT|UPDATE|DELETE)\b/i.test(sql)));
+  assertOnlyLegacyLinkMaintenance(queries);
 });
 
 const cases = [

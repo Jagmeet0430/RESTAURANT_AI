@@ -41,11 +41,17 @@ $frontendOut = Join-Path $appRoot "frontend"
 $resolvedPackageRoot = [System.IO.Path]::GetFullPath($packageRoot)
 $resolvedRepoRoot = [System.IO.Path]::GetFullPath($repoRoot)
 $appVersion = (Get-Content -LiteralPath (Join-Path $repoRoot "package.json") -Raw | ConvertFrom-Json).version
-if (-not $resolvedPackageRoot.StartsWith($resolvedRepoRoot)) {
+if ($resolvedPackageRoot -ne (Join-Path $resolvedRepoRoot 'dist\RestaurantAI-Windows')) {
   throw "Refusing to build package outside repository: $resolvedPackageRoot"
 }
 
 if (Test-Path $packageRoot) {
+  foreach ($folder in @('data','backups','logs','runtime')) {
+    if (Get-ChildItem -LiteralPath (Join-Path $packageRoot $folder) -Recurse -File -Force -ErrorAction SilentlyContinue) {
+      throw "Package contains runtime state in $folder. Archive it manually; build will not delete it."
+    }
+  }
+  if (Test-Path -LiteralPath (Join-Path $packageRoot 'config\.env')) { throw 'Refusing to delete a configured portable installation.' }
   Remove-Item -LiteralPath $packageRoot -Recurse -Force
 }
 
@@ -64,6 +70,7 @@ if (-not $SkipAdminBuild) {
     $previousBasePath = $env:VITE_BASE_PATH
     $env:VITE_BASE_PATH = "/admin/"
     npm.cmd run build
+    if ($LASTEXITCODE -ne 0) { throw "Admin production build failed." }
   } finally {
     if ($null -eq $previousBasePath) {
       Remove-Item Env:\VITE_BASE_PATH -ErrorAction SilentlyContinue
@@ -75,6 +82,7 @@ if (-not $SkipAdminBuild) {
 }
 
 Copy-FileIfExists (Join-Path $repoRoot "backend\package.json") (Join-Path $backendOut "package.json")
+Copy-FileIfExists (Join-Path $repoRoot "package.json") (Join-Path $appRoot "package.json")
 Copy-FileIfExists (Join-Path $repoRoot "backend\package-lock.json") (Join-Path $backendOut "package-lock.json")
 Copy-FileIfExists (Join-Path $repoRoot "backend\.env.example") (Join-Path $packageRoot "config\.env.example")
 Copy-FileIfExists (Join-Path $repoRoot "config\printer.example.json") (Join-Path $packageRoot "config\printer.example.json")
@@ -89,7 +97,11 @@ Copy-Directory (Join-Path $repoRoot "scripts") (Join-Path $packageRoot "scripts"
 foreach ($path in @(
   (Join-Path $frontendOut "server.log"),
   (Join-Path $frontendOut "frontend\server.log"),
-  (Join-Path $packageRoot "scripts\build-windows-package.ps1")
+  (Join-Path $packageRoot "scripts\build-windows-package.ps1"),
+  (Join-Path $packageRoot "scripts\build-installer.ps1"),
+  (Join-Path $packageRoot "scripts\validate-windows-package.cjs"),
+  (Join-Path $backendOut "scripts\seedMaheshMenu.js"),
+  (Join-Path $backendOut "scripts\freePort.js")
 )) {
   Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
 }
@@ -97,7 +109,8 @@ foreach ($path in @(
 if (-not $SkipBackendInstall) {
   Push-Location $backendOut
   try {
-    npm.cmd install --omit=dev --ignore-scripts
+    npm.cmd ci --omit=dev --ignore-scripts
+    if ($LASTEXITCODE -ne 0) { throw "Production dependency installation failed." }
   } finally {
     Pop-Location
   }
@@ -108,7 +121,7 @@ $manifest = [ordered]@{
   name = "RestaurantAI"
   version = $appVersion
   package_type = "portable-windows"
-  requires = @("Windows", "Node.js 18+", "PostgreSQL 15+")
+  requires = @("Windows 10/11 x64", "Node.js 22+ x64", "PostgreSQL 18+ with command-line tools")
   entrypoints = @{
     setup = "scripts\setup-restaurantai.ps1"
     preflight = "scripts\check-system.ps1"
@@ -147,7 +160,7 @@ $manifest | ConvertTo-Json -Depth 5 | Set-Content -Path (Join-Path $packageRoot 
 @"
 RestaurantAI Windows Portable Package
 
-1. Install Node.js 18+ and PostgreSQL 15+ on the server PC.
+1. Install Node.js 22+ x64 and PostgreSQL 18+ with command-line tools on the server PC.
 2. Run scripts\setup-restaurantai.ps1.
 3. Run scripts\check-system.ps1.
 4. Run scripts\start-restaurantai.ps1.
@@ -158,7 +171,11 @@ Laptop 1 can use scripts\install-kiosk-autostart.ps1.
 Laptop 2 should use only the Admin client scripts and should not install PostgreSQL.
 
 No real .env file, database dump, or secret is included in this package.
+See docs\CUSTOMER_INSTALLATION.md for the current installation and upgrade checklist.
 "@ | Set-Content -Path (Join-Path $packageRoot "README.txt") -Encoding UTF8
+
+& node (Join-Path $PSScriptRoot "validate-windows-package.cjs") $packageRoot --write-manifest
+if ($LASTEXITCODE -ne 0) { throw "Production package validation failed." }
 
 Write-Host "RestaurantAI portable package built."
 Write-Host "Package: $packageRoot"

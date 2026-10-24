@@ -1,5 +1,6 @@
 // Orders Controller
 import { pool } from "../config/database.js";
+import { checkoutMenu, checkQuotedPrices } from '../services/menuCheckoutService.js';
 import { publicOrderOtpRequired } from "../config/publicOrderConfig.js";
 import { successResponse, errorResponse, asyncHandler } from "../utils/index.js";
 import {
@@ -20,6 +21,7 @@ import {
   updateOrderStatusWithHistory,
 } from "../services/orderStatusService.js";
 import { sendOrderStatusNotification } from "../services/notificationService.js";
+import { requestAdminOrderCreated } from '../services/adminOrderNotificationService.js';
 import {
   DEFAULT_GST_RATE,
   DEFAULT_PACKING_CHARGE,
@@ -98,8 +100,8 @@ async function enforcePublicWebsiteOrderRules(client, { orderSource, orderType, 
 }
 
 // Generate unique order number
-const generateOrderNumber = async () => {
-  const result = await pool.query("SELECT COUNT(*) as count FROM orders");
+const generateOrderNumber = async (client) => {
+  const result = await client.query("SELECT COUNT(*) as count FROM orders");
   const count = parseInt(result.rows[0].count) + 1;
   return `ORD-${Date.now()}-${count}`;
 };
@@ -363,10 +365,8 @@ export const createOrder = asyncHandler(async (req, res) => {
       const menuIds = items.map((item) => item.menu_id);
 
       // Get menu item prices
-      const menuResult = await client.query(
-        `SELECT id, name, price, is_available FROM menu WHERE id = ANY($1)`,
-        [menuIds]
-      );
+      const menuResult = await checkoutMenu(client,menuIds,normalizedOrderSource);
+      checkQuotedPrices(items,menuResult.rows);
 
       const menuPrices = {};
       const menuAvailability = {};
@@ -418,7 +418,7 @@ export const createOrder = asyncHandler(async (req, res) => {
       }
 
       // Generate order number
-      const orderNumber = await generateOrderNumber();
+      const orderNumber = await generateOrderNumber(client);
       const dailyToken = await generateDailyTokenNumber(client);
 
       // Insert order
@@ -488,6 +488,7 @@ export const createOrder = asyncHandler(async (req, res) => {
 
       await client.query("COMMIT");
       requestKioskReceiptAutoPrint(order, { reason: "public_order_created" });
+      void requestAdminOrderCreated(order.id);
       sendOrderStatusNotification(order).catch((error) =>
         console.error("WhatsApp order confirmation failed:", error.message)
       );

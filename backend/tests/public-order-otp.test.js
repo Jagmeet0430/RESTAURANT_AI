@@ -14,6 +14,10 @@ const client = {
     if (query.startsWith("SELECT value FROM app_settings")) return result([{ value: { public_order_otp_required: false } }]);
     if (query.includes("FROM customers WHERE id")) return result([fixture.customer]);
     if (query.includes("FROM menu WHERE id")) return result([fixture.menu]);
+    if (query.includes('FROM menu m JOIN categories c')) {
+      assert.match(query,/FOR SHARE OF m,c/);
+      return result([fixture.menu]);
+    }
     if (query.includes("WHERE idempotency_key")) return result(fixture.orders.filter(order => order.idempotency_key === values[0]));
     if (query.startsWith("SELECT COUNT(*)::int AS count")) {
       fixture.limitChecks++;

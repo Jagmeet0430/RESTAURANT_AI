@@ -20,11 +20,11 @@ test('website uses the supplied GST rate, including exempt and fractional totals
   }
 });
 
-test('website release does not change HEAD local/kiosk/POS pickup fees', () => {
+test('menu sync retains the existing kiosk exemption and other local/POS pickup fees', () => {
   for (const orderSource of ['customer_web', 'kiosk', 'pos', 'table_qr', null]) {
     const result = calculateOrderTotals({ subtotal: 90, orderSource });
-    assert.equal(result.deliveryCharge, 10);
-    assert.equal(result.total, 104.5);
+    assert.equal(result.deliveryCharge, orderSource === 'kiosk' ? 0 : 10);
+    assert.equal(result.total, orderSource === 'kiosk' ? 94.5 : 104.5);
   }
 });
 

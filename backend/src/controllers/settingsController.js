@@ -21,6 +21,12 @@ const defaultSettings = {
   logo: "",
   theme: "light",
   kioskDisplayMode: "auto",
+  orderNotificationPopup: "true",
+  orderNotificationSound: "true",
+  orderNotificationVoice: "false",
+  orderNotificationLanguage: "en",
+  orderNotificationRepeatSeconds: "0",
+  orderNotificationAutoNavigate: "false",
 };
 
 const editableFields = Object.keys(defaultSettings);
@@ -46,6 +52,9 @@ const placeholderValues = {
 
 function cleanSettingValue(field, value) {
   const text = String(value ?? "").trim();
+  if (field.startsWith('orderNotification')) {
+    return validNotificationSetting(field, text) ? text : defaultSettings[field];
+  }
   if (field === "kioskDisplayMode") {
     const normalized = text.toLowerCase();
     return ["auto", "landscape", "portrait"].includes(normalized) ? normalized : defaultSettings.kioskDisplayMode;
@@ -68,6 +77,12 @@ function cleanSettingValue(field, value) {
   }
 
   return field === "restaurantName" || field === "address" ? defaultSettings[field] : "";
+}
+
+function validNotificationSetting(field, value) {
+  if (field === 'orderNotificationLanguage') return ['en', 'hi'].includes(value);
+  if (field === 'orderNotificationRepeatSeconds') return ['0', '30', '60', '120', '300'].includes(value);
+  return ['true', 'false'].includes(value);
 }
 
 async function ensureSettingsTable() {
@@ -128,6 +143,12 @@ export const getSettings = asyncHandler(async (req, res) => {
   return successResponse(res, { ...settings, password: "" }, "Settings retrieved successfully");
 });
 
+export const getOrderNotificationSettings = asyncHandler(async (req, res) => {
+  const settings = await readSettings();
+  res.set('Cache-Control', 'no-store');
+  return successResponse(res, Object.fromEntries(Object.entries(settings).filter(([key]) => key.startsWith('orderNotification'))));
+});
+
 export const getPublicSettings = asyncHandler(async (req, res) => {
   const settings = await readSettings();
   res.set("Cache-Control", "no-store");
@@ -137,6 +158,12 @@ export const getPublicSettings = asyncHandler(async (req, res) => {
 export const updateSettings = asyncHandler(async (req, res) => {
   const current = await readSettings();
   const next = { ...current };
+
+  for (const field of editableFields.filter(key => key.startsWith('orderNotification'))) {
+    if (Object.hasOwn(req.body, field) && !validNotificationSetting(field, String(req.body[field]))) {
+      return errorResponse(res, 'Invalid order notification setting.', 400);
+    }
+  }
 
   editableFields.forEach((field) => {
     if (Object.prototype.hasOwnProperty.call(req.body, field)) {

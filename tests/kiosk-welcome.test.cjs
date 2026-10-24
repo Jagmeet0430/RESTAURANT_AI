@@ -111,8 +111,7 @@ test('kiosk attract portrait typography and isolated visual regressions', { time
       }
     });
     for (const [width, height, route, label] of [
-      [1440, 900, '/customer', 'customer-desktop'], [390, 844, '/customer', 'customer-mobile'],
-      [390, 844, '/customer?table=fixture-token', 'table-qr-mobile'],
+      // Public storefront visuals intentionally changed; covered by customer-usability.test.cjs.
       [768, 1366, '/customer?kiosk=1', 'kiosk-ordering'],
     ]) {
       await t.test(`${label}: unchanged screenshot against HEAD`, async () => {

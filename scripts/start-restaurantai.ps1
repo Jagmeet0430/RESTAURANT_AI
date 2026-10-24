@@ -77,28 +77,20 @@ function Get-RestaurantProcess {
 
   try {
     $metadata = Get-Content $MetadataPath -Raw | ConvertFrom-Json
-    if ($metadata.pid -ne $ProcessId -or -not $metadata.server_script) {
+    if ($metadata.pid -ne $ProcessId -or $metadata.server_script -ne $serverScript) {
       return $null
     }
 
-    $expectedStart = [datetime]$metadata.process_start_time_utc
+    $expectedStart = ([datetime]$metadata.process_start_time_utc).ToUniversalTime()
     $actualStart = $process.StartTime.ToUniversalTime()
     $delta = [Math]::Abs(($actualStart - $expectedStart).TotalSeconds)
 
-    if ($delta -lt 300) {
+    if ($delta -lt 1) {
       return $process
     }
 
-    return $process
-  } catch {
-    try {
-      if ($metadata.pid -eq $ProcessId -and $metadata.server_script) {
-        return $process
-      }
-    } catch {
-      return $null
-    }
-  }
+    return $null
+  } catch { return $null }
 
   return $null
 }
@@ -177,12 +169,17 @@ $serverScript = Join-Path $paths.Backend "src\server.js"
 
 New-Item -ItemType Directory -Path $paths.Runtime -Force | Out-Null
 New-Item -ItemType Directory -Path $paths.Logs -Force | Out-Null
-
-Rotate-LogFile -Path $outLog
-Rotate-LogFile -Path $errLog
+$startupLock = [IO.File]::Open((Join-Path $paths.Runtime 'startup.lock'), 'OpenOrCreate', 'ReadWrite', 'None')
 
 if (-not (Test-Path $paths.Config)) {
   throw "Environment file missing: $($paths.Config). Run scripts\setup-restaurantai.ps1 first."
+}
+
+$envValues = Read-EnvFile $paths.Config
+$portValue = if ($envValues.ContainsKey('PORT')) { $envValues.PORT } else { '5001' }
+[int]$port = 0
+if ($portValue -cnotmatch '\A[0-9]{1,5}\z' -or -not [int]::TryParse($portValue, [ref]$port) -or $port -lt 1 -or $port -gt 65535) {
+  throw 'Configured backend PORT must be a decimal integer from 1 to 65535.'
 }
 
 if (Test-Path $pidPath) {
@@ -196,14 +193,13 @@ if (Test-Path $pidPath) {
   Remove-Item -LiteralPath $metadataPath -Force -ErrorAction SilentlyContinue
 }
 
-$envValues = Read-EnvFile $paths.Config
-$port = if ($envValues.PORT) { $envValues.PORT } else { "5001" }
 $hostValue = if ($envValues.HOST) { $envValues.HOST } else { "127.0.0.1" }
-if (Test-TcpPortInUse ([int]$port)) {
+if (Test-TcpPortInUse $port) {
   throw "Backend port $port is already in use. Stop the existing process or set a different PORT in $($paths.Config)."
 }
 
 $env:RESTAURANTAI_ENV_PATH = $paths.Config
+$env:RESTAURANTAI_ENV_FILE = $paths.Config
 $env:RESTAURANTAI_STATE_ROOT = $paths.State
 $env:NODE_ENV = if ($envValues.NODE_ENV) { $envValues.NODE_ENV } else { "production" }
 $env:RESTAURANTAI_MODE = if ($envValues.RESTAURANTAI_MODE) { $envValues.RESTAURANTAI_MODE } else { "local" }
@@ -225,6 +221,12 @@ if (-not $nodeExe -or -not (Test-Path $nodeExe)) {
   throw "node.exe not found. Install Node.js before starting RestaurantAI."
 }
 
+& $nodeExe (Join-Path $paths.Backend 'scripts\deployment.js') wait $paths.Config
+if ($LASTEXITCODE -ne 0) { throw 'Local database is not ready. Check configuration and run setup; backend was not started.' }
+Rotate-LogFile -Path $outLog
+Rotate-LogFile -Path $errLog
+$env:RESTAURANTAI_CONTROL_PIPE = '\\.\pipe\restaurantai-' + [guid]::NewGuid().ToString('N')
+
 $process = Start-Process -FilePath $nodeExe -ArgumentList @("`"$serverScript`"") -WorkingDirectory $paths.Backend -RedirectStandardOutput $outLog -RedirectStandardError $errLog -PassThru -WindowStyle Hidden
 Set-Content -Path $pidPath -Value $process.Id -Encoding ASCII
 
@@ -233,6 +235,7 @@ $metadata = [ordered]@{
   process_start_time_utc = $process.StartTime.ToUniversalTime().ToString("o")
   server_script = $serverScript
   backend = $paths.Backend
+  control_pipe = $env:RESTAURANTAI_CONTROL_PIPE
 }
 $metadata | ConvertTo-Json -Depth 4 | Set-Content -Path $metadataPath -Encoding UTF8
 

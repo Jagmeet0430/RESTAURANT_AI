@@ -1,6 +1,6 @@
 {
   "name": "restaurantai-backend",
-  "version": "1.4.4",
+  "version": "1.4.7",
   "description": "RestaurantAI Backend - Express.js API Server",
   "main": "src/server.js",
   "type": "module",
@@ -35,7 +35,8 @@
     "multer": "^1.4.5-lts.2",
     "pdfkit": "^0.13.0",
     "pg": "^8.11.3",
-    "razorpay": "^2.9.6"
+    "razorpay": "^2.9.6",
+    "sharp": "0.35.5"
   },
   "devDependencies": {
     "nodemon": "^3.0.2"

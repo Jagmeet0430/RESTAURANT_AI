@@ -36,6 +36,10 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 $issPath = Join-Path $repoRoot "installer\RestaurantAI.iss"
 $portableRoot = Join-Path $repoRoot "dist\RestaurantAI-Windows"
 $outputDir = Join-Path $repoRoot "dist\installer"
+$version = (Get-Content -LiteralPath (Join-Path $repoRoot "package.json") -Raw | ConvertFrom-Json).version
+if ((Get-Content $issPath -Raw) -notmatch ('#define MyAppVersion "' + [regex]::Escape($version) + '"')) {
+  throw "Installer and package version mismatch."
+}
 
 if (-not (Test-Path -LiteralPath $issPath)) {
   throw "Installer script not found: $issPath"
@@ -73,6 +77,8 @@ if ($leakedFiles) {
 }
 
 New-Item -ItemType Directory -Path $outputDir -Force | Out-Null
+& node (Join-Path $PSScriptRoot "validate-windows-package.cjs") $portableRoot
+if ($LASTEXITCODE -ne 0) { throw "Installer package validation failed." }
 
 $iscc = Find-Iscc $IsccPath
 if (-not $iscc) {
@@ -102,3 +108,4 @@ $installer = Get-Item -LiteralPath $installerPath
 Write-Host "Installer built successfully."
 Write-Host "Path: $($installer.FullName)"
 Write-Host "Size: $([Math]::Round($installer.Length / 1MB, 2)) MB"
+Write-Host "SHA-256: $((Get-FileHash -LiteralPath $installerPath -Algorithm SHA256).Hash)"

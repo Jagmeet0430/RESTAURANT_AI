@@ -38,7 +38,7 @@ export function calculateOrderTotals({
   const normalizedOrderType = normalizeOrderTypeForTotals(orderType);
   const tax = money(safeSubtotal * Number(gstRate || 0));
   const { cgst, sgst } = splitTaxAmount(tax);
-  const packing = orderSource === "website" || isDineInOrderType(normalizedOrderType)
+  const packing = ["kiosk", "website"].includes(orderSource) || isDineInOrderType(normalizedOrderType)
     ? 0
     : safeSubtotal > 0
     ? money(packingCharge)

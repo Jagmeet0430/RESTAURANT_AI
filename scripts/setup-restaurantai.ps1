@@ -113,7 +113,8 @@ function Test-DatabaseExists {
   $env:PGPASSWORD = $Password
   try {
     $result = & $Psql -h $HostName -p $Port -U $User -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname = '$($Database.Replace("'", "''"))';" 2>$null
-    return $LASTEXITCODE -eq 0 -and (($result | Select-Object -First 1) -eq "1")
+    if ($LASTEXITCODE -ne 0) { throw "PostgreSQL connection check failed. No database will be created." }
+    return (($result | Select-Object -First 1) -eq "1")
   } finally {
     Remove-Item Env:\PGPASSWORD -ErrorAction SilentlyContinue
   }
@@ -181,12 +182,14 @@ function Invoke-InitialAdminSetup {
   }
 
   $previousEnvPath = $env:RESTAURANTAI_ENV_PATH
+  $previousEnvFile = $env:RESTAURANTAI_ENV_FILE
   $previousName = $env:ADMIN_SETUP_NAME
   $previousEmail = $env:ADMIN_SETUP_EMAIL
   $previousPassword = $env:ADMIN_SETUP_PASSWORD
 
   try {
     $env:RESTAURANTAI_ENV_PATH = $ConfigPath
+    $env:RESTAURANTAI_ENV_FILE = $ConfigPath
     $env:ADMIN_SETUP_NAME = $Name
     $env:ADMIN_SETUP_EMAIL = $Email
     $env:ADMIN_SETUP_PASSWORD = $Password
@@ -202,17 +205,43 @@ function Invoke-InitialAdminSetup {
     }
   } finally {
     if ($null -eq $previousEnvPath) { Remove-Item Env:\RESTAURANTAI_ENV_PATH -ErrorAction SilentlyContinue } else { $env:RESTAURANTAI_ENV_PATH = $previousEnvPath }
+    if ($null -eq $previousEnvFile) { Remove-Item Env:\RESTAURANTAI_ENV_FILE -ErrorAction SilentlyContinue } else { $env:RESTAURANTAI_ENV_FILE = $previousEnvFile }
     if ($null -eq $previousName) { Remove-Item Env:\ADMIN_SETUP_NAME -ErrorAction SilentlyContinue } else { $env:ADMIN_SETUP_NAME = $previousName }
     if ($null -eq $previousEmail) { Remove-Item Env:\ADMIN_SETUP_EMAIL -ErrorAction SilentlyContinue } else { $env:ADMIN_SETUP_EMAIL = $previousEmail }
     if ($null -eq $previousPassword) { Remove-Item Env:\ADMIN_SETUP_PASSWORD -ErrorAction SilentlyContinue } else { $env:ADMIN_SETUP_PASSWORD = $previousPassword }
   }
 }
 
+function Merge-SetupConfig {
+  param([string[]]$Defaults, [hashtable]$Existing)
+  $merged = @{}
+  foreach ($line in $Defaults) { $pair = $line -split '=', 2; $merged[$pair[0]] = $pair[1] }
+  foreach ($key in $Existing.Keys) { $merged[$key] = $Existing[$key] }
+  foreach ($key in @('PORT','HOST','ALLOW_LAN_ORIGINS','DB_HOST','DB_PORT','DB_NAME','DB_USER','DB_PASSWORD','POSTGRES_BIN_DIR')) {
+    $line = $Defaults | Where-Object { $_.StartsWith("$key=") } | Select-Object -First 1
+    if ($line) { $merged[$key] = ($line -split '=', 2)[1] }
+  }
+  foreach ($key in ($merged.Keys | Sort-Object)) {
+    $value = [string]$merged[$key]
+    if ($value -match '[\r\n]') { throw "Multiline setting not supported by Windows setup: $key" }
+    if ($value -match '[#\s\x22\x27\x60]') {
+      $quote = @([char]39, [char]34, [char]96) | Where-Object { -not $value.Contains([string]$_) } | Select-Object -First 1
+      if (-not $quote) { throw "Setting contains all quoting delimiters; configure it manually: $key" }
+      $value = "$quote$value$quote"
+    }
+    "$key=$value"
+  }
+}
+
+if ($env:RESTAURANTAI_SCRIPT_TEST_MODE -eq '1') { return }
+
 $root = if ($InstallRoot) { $InstallRoot } else { Split-Path -Parent $PSScriptRoot }
 $stateRoot = if ($StateRoot) {
   [System.IO.Path]::GetFullPath($StateRoot)
 } elseif ($env:RESTAURANTAI_STATE_ROOT) {
   [System.IO.Path]::GetFullPath($env:RESTAURANTAI_STATE_ROOT)
+} elseif (Test-Path (Join-Path $root 'app\backend\src\server.js')) {
+  Join-Path ([Environment]::GetFolderPath('CommonApplicationData')) 'RestaurantAI'
 } else {
   $root
 }
@@ -237,11 +266,10 @@ Write-Host ""
 
 $existing = @{}
 if (Test-Path $configPath) {
-  foreach ($line in Get-Content $configPath) {
-    if ($line -match "^\s*([^#][^=]+)=(.*)$") {
-      $existing[$matches[1].Trim()] = $matches[2]
-    }
-  }
+  $json = & node -e "const fs=require('fs');const req=require('module').createRequire(process.argv[1]);process.stdout.write(JSON.stringify(req('dotenv').parse(fs.readFileSync(process.argv[2]))));" (Join-Path $backendPath 'package.json') $configPath
+  if ($LASTEXITCODE -ne 0) { throw 'Cannot read existing configuration safely.' }
+  $parsed = $json | ConvertFrom-Json
+  foreach ($property in $parsed.PSObject.Properties) { $existing[$property.Name] = $property.Value }
 }
 
 $port = if ($DryRun) { Get-ExistingOrDefault $existing "PORT" "5001" } else { Read-Default "Backend port" (Get-ExistingOrDefault $existing "PORT" "5001") }
@@ -285,14 +313,13 @@ if ($DryRun -or $SkipDatabaseCheck) {
       Write-Host "Bootstrap schema applied."
       $databaseReadyForAdmin = $true
     } else {
-      Write-Host "Bootstrap schema was not applied. Apply it before first use."
+      throw "Setup incomplete: bootstrap schema was not applied."
     }
   } else {
-    Write-Host "Database was not created. Create it before starting RestaurantAI."
+    throw "Setup incomplete: database was not created."
   }
 } else {
-  Write-Host "Skipping database existence check because PostgreSQL tools or password are unavailable."
-  $databaseReadyForAdmin = $false
+  throw "Setup requires PostgreSQL tools and database credentials."
 }
 
 $jwtSecret = Get-ExistingOrDefault $existing "JWT_SECRET" (New-Secret)
@@ -318,14 +345,30 @@ $envLines = @(
   "BACKUP_DIR=../backups/database",
   "POSTGRES_BIN_DIR=$postgresBinDir",
   "BACKUP_RETENTION_DAYS=30",
-  "BACKUP_RETENTION_COUNT=30"
+  "BACKUP_RETENTION_COUNT=30",
+  "WHATSAPP_ENABLED=false",
+  "CLOUD_SYNC_ENABLED=false",
+  "CLOUD_SYNC_BASE_URL=https://restaurant-ai-4myq.onrender.com/api",
+  "CLOUD_SYNC_INTERVAL_SECONDS=10"
 )
 
 if ($DryRun) {
   Write-Host "Dry run: configuration was not written."
   Write-Host "Dry run target config: $configPath"
 } else {
-  Set-Content -Path $configPath -Value $envLines -Encoding UTF8
+  # Preserve every existing setting, including sync, messaging and receipt configuration.
+  $merged = @(Merge-SetupConfig -Defaults $envLines -Existing $existing)
+  $pendingPath = "$configPath.pending"
+  Set-Content -LiteralPath $pendingPath -Value $merged -Encoding UTF8
+  try {
+    if (-not $SkipDatabaseCheck) {
+      & node (Join-Path $backendPath 'scripts\deployment.js') migrate $pendingPath
+      if ($LASTEXITCODE -ne 0) { throw 'Database preparation failed. Existing configuration was preserved.' }
+    }
+    Move-Item -LiteralPath $pendingPath -Destination $configPath -Force
+  } finally {
+    Remove-Item -LiteralPath $pendingPath -Force -ErrorAction SilentlyContinue
+  }
 }
 
 if (-not $DryRun -and $databaseReadyForAdmin -and (Read-YesNo "Create the first admin account now if the admins table is empty" $true)) {

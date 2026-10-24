@@ -28,19 +28,21 @@ if (-not (Test-Path $startScript)) {
   throw "Start script not found: $startScript"
 }
 
-$action = New-ScheduledTaskAction `
+$taskAction = New-ScheduledTaskAction `
   -Execute $powershell `
-  -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$startScript`" -InstallRoot `"$root`"$stateArg" `
+  -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$startScript`" -InstallRoot `"$root`"$stateArg" `
   -WorkingDirectory $root
 
 $trigger = New-ScheduledTaskTrigger -AtStartup
-$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -StartWhenAvailable -MultipleInstances IgnoreNew
+$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -MultipleInstances IgnoreNew -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
+$principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
 
 Register-ScheduledTask `
   -TaskName $TaskName `
-  -Action $action `
+  -Action $taskAction `
   -Trigger $trigger `
   -Settings $settings `
+  -Principal $principal `
   -Description "Starts RestaurantAI backend after Windows boots." `
   -Force | Out-Null
 

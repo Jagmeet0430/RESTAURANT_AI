@@ -13,14 +13,17 @@
     "pg": "^8.22.0"
   },
   "name": "restaurantai",
-  "version": "1.4.4",
+  "version": "1.4.7",
   "description": "Project structure for the RestaurantAI application.",
   "main": "index.js",
   "directories": {
     "doc": "docs"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "npm run test:receipt && npm run test:kiosk && npm run test:receipt:browser",
+    "test:receipt": "node --experimental-test-module-mocks --test backend/tests/thermal-receipt.test.js",
+    "test:kiosk": "node --test tests/kiosk-welcome.test.cjs",
+    "test:receipt:browser": "node --test tests/thermal-receipt-browser.test.cjs"
   },
   "keywords": [],
   "author": "",

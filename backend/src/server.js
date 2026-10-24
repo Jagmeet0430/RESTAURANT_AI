@@ -1,5 +1,6 @@
 import dotenv from "dotenv";
 import os from "os";
+import net from "node:net";
 import path from "path";
 import { fileURLToPath } from "url";
 
@@ -22,6 +23,7 @@ import { appConfig } from "./config/index.js";
 import { pool, testConnection } from "./config/database.js";
 import { startOrderLifecycleWorker } from "./services/orderLifecycleService.js";
 import { startCloudOrderSyncWorker } from "./services/cloudOrderSyncService.js";
+import { startMenuSyncWorker } from './services/menuSyncService.js';
 import { logger } from "./utils/logger.js";
 
 const PORT = appConfig.port;
@@ -30,6 +32,8 @@ const sockets = new Set();
 let isShuttingDown = false;
 let orderLifecycleWorker = null;
 let cloudOrderSyncWorker = null;
+let menuSyncWorker = null;
+let controlServer = null;
 
 const isPrivateIpv4 = (address) =>
   address.startsWith("10.") ||
@@ -79,6 +83,7 @@ const server = app.listen(PORT, HOST, async () => {
   if (connected) {
     orderLifecycleWorker = startOrderLifecycleWorker();
     cloudOrderSyncWorker = startCloudOrderSyncWorker();
+    menuSyncWorker = startMenuSyncWorker();
     logger.info("RestaurantAI backend ready");
   } else {
     logger.warn("RestaurantAI backend is listening but not ready because database connection failed");
@@ -100,6 +105,7 @@ const closeServer = (signal, onClosed = () => process.exit(0)) => {
   }
 
   isShuttingDown = true;
+  controlServer?.close();
   if (orderLifecycleWorker) {
     clearInterval(orderLifecycleWorker);
   }
@@ -114,6 +120,7 @@ const closeServer = (signal, onClosed = () => process.exit(0)) => {
     finished = true;
     try {
       await cloudOrderSyncWorker?.stop();
+      await menuSyncWorker?.stop();
       await pool.end();
       logger.info("PostgreSQL pool closed");
     } catch (error) {
@@ -158,6 +165,21 @@ server.on("connection", (socket) => {
 
 process.once("SIGTERM", () => closeServer("SIGTERM"));
 process.once("SIGINT", () => closeServer("SIGINT"));
+
+// The installed Windows launcher uses a private, per-process named pipe instead
+// of Stop-Process, which cannot deliver Node's graceful SIGTERM handler on Windows.
+if (process.platform === "win32" && /^\\\\\.\\pipe\\restaurantai-[a-f0-9]{32}$/.test(process.env.RESTAURANTAI_CONTROL_PIPE || "")) {
+  controlServer = net.createServer(socket => {
+    socket.setTimeout(3000, () => socket.destroy());
+    socket.once("data", data => {
+      socket.end();
+      if (data.toString() === "shutdown") closeServer("windows-launcher");
+    });
+    socket.on("error", () => socket.destroy());
+  });
+  controlServer.on("error", error => logger.error("Windows control pipe unavailable", { code: error.code }));
+  controlServer.listen(process.env.RESTAURANTAI_CONTROL_PIPE);
+}
 
 // Nodemon uses SIGUSR2 for restarts. Close the port before nodemon starts again.
 process.once("SIGUSR2", () => {

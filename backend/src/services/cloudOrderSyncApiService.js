@@ -16,6 +16,7 @@ export async function pendingCloudOrders(db, afterId = 0) {
            o.paid_at, o.estimated_ready_at, o.actual_delivery_time,
            (SELECT json_agg(json_build_object(
              'menu_id', m.id, 'barcode', m.barcode, 'name', m.name, 'category', cat.name,
+             'stable_product_id', CASE WHEN to_jsonb(m)->>'sync_owner' IS NOT NULL THEN to_jsonb(m)->>'sync_id' END,
              'quantity', oi.quantity, 'unit_price', oi.unit_price, 'total_price', oi.total_price,
              'special_instructions', oi.special_instructions) ORDER BY oi.id)
             FROM order_items oi JOIN menu m ON m.id = oi.menu_id

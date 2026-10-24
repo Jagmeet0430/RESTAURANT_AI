@@ -6,6 +6,8 @@ import { createRateLimiter } from "../middleware/rateLimiter.js";
 import { logger } from "../utils/logger.js";
 import { syncError, syncLog } from "../config/cloudSyncConfig.js";
 import { pendingCloudOrders, acknowledgeCloudOrder, applyCloudOrderStatus } from "../services/cloudOrderSyncApiService.js";
+import { menuSyncConfig } from '../config/menuSyncConfig.js';
+import { applyMenuEvents } from '../services/menuSyncApiService.js';
 
 const digest = value => crypto.createHash("sha256").update(value).digest();
 const positiveId = value => {
@@ -14,7 +16,7 @@ const positiveId = value => {
   return id;
 };
 
-export function createCloudSyncRouter({ db = pool, mode = appConfig.mode, secret = () => process.env.CLOUD_SYNC_SECRET || "" } = {}) {
+export function createCloudSyncRouter({ db = pool, mode = appConfig.mode, secret = () => process.env.CLOUD_SYNC_SECRET || "", menuConfig = () => menuSyncConfig(process.env,{cloud:true}), menuOptions } = {}) {
   const router = express.Router();
   router.use(createRateLimiter({ windowMs: 60_000, max: 240, keyPrefix: "cloud-sync" }));
   router.use((req, res, next) => {
@@ -37,6 +39,11 @@ export function createCloudSyncRouter({ db = pool, mode = appConfig.mode, secret
         message: "Unable to synchronize this order right now." });
     }
   };
+  router.post('/menu/batch',handle(req=>{
+    const config=menuConfig();
+    if(!config.enabled) throw syncError('SYNC_MENU_DISABLED',503);
+    return applyMenuEvents(db,req.body,config,menuOptions);
+  }));
   router.get("/orders/pending", handle(async req => {
     const after = req.query.after_id == null ? 0 : positiveId(req.query.after_id);
     const orders = await pendingCloudOrders(db, after);

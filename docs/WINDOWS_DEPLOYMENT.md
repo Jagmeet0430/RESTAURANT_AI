@@ -1,5 +1,9 @@
 # RestaurantAI Windows Deployment
 
+> For release 1.4.4 use [CUSTOMER_INSTALLATION.md](CUSTOMER_INSTALLATION.md).
+> The older phase procedures below are historical; the current installer requires
+> Node.js 22+ x64 and PostgreSQL 18+, verified migrations and readiness checks.
+
 This guide is for running RestaurantAI on a restaurant Windows server PC. It is not a final signed installer yet; it describes the portable/operator setup created for Phase 4.
 
 ## 1. Supported Windows Version

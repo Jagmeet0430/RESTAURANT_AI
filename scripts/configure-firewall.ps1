@@ -34,7 +34,7 @@ New-NetFirewallRule `
   -Protocol TCP `
   -LocalPort $Port `
   -Action Allow `
-  -Profile Private | Out-Null
+  -Profile Private -RemoteAddress LocalSubnet | Out-Null
 
 Write-Host "Firewall rule added for Private networks only."
 Write-Host "Rule: $RuleName"

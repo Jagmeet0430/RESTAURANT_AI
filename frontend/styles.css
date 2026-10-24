@@ -1221,6 +1221,70 @@ input {
   font-weight: 850;
 }
 
+/* Public checkout only: keep QR receipts and kiosk confirmation unchanged. */
+body:not(.kiosk-mode):not(.table-qr-mode) .has-public-confirmation > :not(.cart-items) {
+  display: none;
+}
+body:not(.kiosk-mode):not(.table-qr-mode) .has-public-confirmation .cart-items {
+  max-height: none;
+  overflow: visible;
+}
+body:not(.kiosk-mode):not(.table-qr-mode) .public-order-confirmation {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  width: 100%;
+  max-width: 440px;
+  margin: 0 auto;
+  padding: clamp(20px, 3vw, 32px) 20px;
+  background: #fff;
+  border: 1px solid #dce8df;
+  box-shadow: 0 8px 24px rgba(20, 83, 45, 0.06);
+  text-align: center;
+  animation: none;
+}
+body:not(.kiosk-mode):not(.table-qr-mode) .public-order-confirmation::before,
+body:not(.kiosk-mode):not(.table-qr-mode) .public-order-confirmation::after {
+  content: none;
+}
+body:not(.kiosk-mode):not(.table-qr-mode) .public-order-confirmation h3 {
+  margin: 0;
+  font-size: clamp(24px, 2.5vw, 28px);
+  color: #172b20;
+}
+body:not(.kiosk-mode):not(.table-qr-mode) .public-order-confirmation p {
+  margin: 0;
+  max-width: 310px;
+  color: #536158;
+  line-height: 1.6;
+}
+.public-confirmation-icon {
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: #e8f6ed;
+  color: #15803d;
+}
+.public-confirmation-icon svg {
+  width: 40px;
+  height: 40px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.public-confirmation-actions {
+  display: grid;
+  gap: 12px;
+  width: 100%;
+  margin-top: 8px;
+}
+.public-confirmation-actions a { text-decoration: none; }
+
 .success-table-receipt {
   display: grid;
   width: min(100%, 300px);

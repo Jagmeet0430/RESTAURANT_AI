@@ -1,27 +1,11 @@
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
-import fs from "node:fs";
-import path from "node:path";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
+import { isolatedApplicationDatabase } from './helpers/isolatedApplicationDatabase.js';
 
 import bcrypt from "bcryptjs";
 
-process.env.NODE_ENV = process.env.NODE_ENV || "test";
-process.env.JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(32).toString("hex");
-process.env.OTP_SECRET = process.env.OTP_SECRET || crypto.randomBytes(32).toString("hex");
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const backendEnv = path.resolve(__dirname, "../.env");
-const programDataEnv = path.join(process.env.ProgramData || "C:\\ProgramData", "RestaurantAI", "config", ".env");
-if (!process.env.RESTAURANTAI_ENV_FILE && !process.env.RESTAURANTAI_ENV_PATH) {
-  if (fs.existsSync(backendEnv)) {
-    process.env.RESTAURANTAI_ENV_PATH = backendEnv;
-  } else if (fs.existsSync(programDataEnv)) {
-    process.env.RESTAURANTAI_ENV_PATH = programDataEnv;
-  }
-}
+await isolatedApplicationDatabase();
 
 const { default: app } = await import("../src/app.js");
 const { pool } = await import("../src/config/database.js");

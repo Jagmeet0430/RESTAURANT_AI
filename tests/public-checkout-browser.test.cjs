@@ -160,10 +160,64 @@ test('public checkout browser regressions (local API fixtures only)', { timeout:
         assert.equal(await page.evaluate(() => state.confirmation.totals.total), 94.5);
         assert.equal(await page.evaluate(() => state.cart.length), 0);
         assert.equal(await page.locator('#mobileCartSheet .order-success-card').isVisible(), true);
-        assert.match(await page.locator('#mobileCartSheet .mobile-totals').innerText(), /94\.50/);
+        assert.equal(await page.locator('#mobileCartSheet .mobile-totals').count(), 0);
         assert.equal(await page.locator('#mobileCartSheet a').getAttribute('href'), origin + '/customer/track-order/' + 'a'.repeat(64));
-        await page.locator('[data-mobile-action="close"]').click();
+        await page.locator('#mobileCartSheet [data-confirmation-menu]').click();
         assert.equal(await page.locator('#chatToggle').isVisible(), true);
+      } finally { await page.close(); }
+    });
+    for (const [width, height] of [[375, 812], [390, 844], [768, 1024], [1440, 900]]) {
+      await t.test(`${width}x${height}: minimal confirmation, working tracking and menu return`, async () => {
+        const page = await open(width, height);
+        try {
+          await prepare(page);
+          if (width > 768) await page.evaluate(() => setMobileCartOpen(false));
+          await page.evaluate(() => placeOrder());
+          const container = page.locator(width <= 768 ? '#mobileCartSheet' : '.has-public-confirmation');
+          const card = container.locator('.public-order-confirmation');
+          assert.equal(await card.isVisible(), true);
+          assert.equal(await card.locator('h3').innerText(), 'Order Confirmed');
+          assert.equal(await card.locator('p').innerText(), 'Thank you! Your order has been placed successfully.');
+          assert.equal(await card.locator('.success-order-id b').innerText(), await page.evaluate(() => state.confirmation.orderLabel));
+          assert.doesNotMatch(await container.innerText(), /https?:|Track it here|Subtotal|Grand total|restaurant team|Fixture Roll|94\.50/);
+          assert.equal(await card.locator('a, button').count(), 2);
+          assert.equal(await page.evaluate(() => state.confirmation.totals.total), 94.5, 'persisted snapshot stays intact');
+          assert.equal(await page.evaluate(() => state.cart.length), 0);
+          await card.scrollIntoViewIfNeeded();
+          for (const control of await card.locator('a, button').all()) {
+            const box = await control.boundingBox();
+            assert.ok(box.height >= 44 && box.x >= 0 && box.x + box.width <= width);
+          }
+          assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+          assert.ok(!await page.locator('.toast').filter({ hasText: /Track it here|Order saved|Payment confirmed/ }).isVisible());
+          await page.screenshot({ path: path.join(output, `confirmation-${width}.png`) });
+          const trackUrl = await card.getByRole('link', { name: 'Track Order', exact: true }).getAttribute('href');
+          assert.equal(trackUrl, origin + '/customer/track-order/' + 'a'.repeat(64));
+          // Exercise actual navigation in a second tab, retaining this confirmation for Back to Menu.
+          const tracking = await browser.newPage();
+          await tracking.route('**/*', route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort());
+          await tracking.addInitScript(base => { window.RESTAURANTAI_API_BASE_URL = base; }, origin + '/api');
+          await tracking.goto(trackUrl, { waitUntil: 'networkidle' });
+          assert.equal(await tracking.locator('#trackingTitle').innerText(), 'Order #ORD-FIXTURE');
+          await tracking.close();
+          await card.getByRole('button', { name: 'Back to Menu', exact: true }).click();
+          await page.waitForFunction(() => !state.mobileCartOpen && !state.confirmation);
+          assert.equal(await page.locator('.has-public-confirmation').count(), 0);
+          await page.locator('[data-menu-add="1"]').click();
+          assert.equal(await page.evaluate(() => state.cart.length), 1);
+        } finally { await page.close(); }
+      });
+    }
+    await t.test('a receipt without a tracking link opens existing phone-authenticated tracking', async () => {
+      const page = await open();
+      try {
+        await prepare(page);
+        await page.evaluate(async () => { await placeOrder(); state.confirmation.trackingUrl = ''; renderCart(); });
+        await page.locator('#mobileCartSheet').getByRole('link', { name: 'Track Order', exact: true }).click();
+        assert.equal(await page.locator('#trackOrdersDialog').isVisible(), true);
+        assert.equal(await page.locator('#trackOrdersPhone').isVisible(), true);
+        assert.equal(await page.evaluate(() => state.mobileCartOpen), false);
+        assert.equal(await page.evaluate(() => state.confirmation.totals.total), 94.5);
       } finally { await page.close(); }
     });
     await t.test('lost saved-order response survives reload and recovers without resubmission', async () => {

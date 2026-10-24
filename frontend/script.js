@@ -312,6 +312,18 @@ let liveMenuRequest = null;
 let menuVersionRequest = null;
 let observedMenuVersion = null;
 let successfulMenuFetches = 0;
+let publicMenuRevisionDisabled = false;
+let publicMenuPollTimer = null;
+
+function usesPublicMenuCompatibility() {
+  return !state.kiosk.enabled && !state.tableQr.enabled;
+}
+
+function disablePublicMenuRevision() {
+  publicMenuRevisionDisabled = true;
+  window.clearInterval(publicMenuPollTimer);
+  publicMenuPollTimer = null;
+}
 
 function apiUrl(path) {
   if (!API_BASE_URL) throw new Error("Unable to connect right now. Please try again.");
@@ -1178,7 +1190,16 @@ async function refreshLiveMenu({ background = false } = {}) {
       ...(canUsePublicMenuCache() ? { timeoutMs: PUBLIC_MENU_REQUEST_TIMEOUT_MS } : {}),
     });
 
+    if (usesPublicMenuCompatibility() && !Array.isArray(payload) && !Array.isArray(payload?.data)) {
+      throw new Error('Invalid menu response');
+    }
     const apiItems = Array.isArray(payload) ? payload : Array.isArray(payload?.data) ? payload.data : [];
+    // Pre-sync backends expose menu items without revision metadata. Do not send
+    // "version" into their numeric /menu/:id route on every timer tick.
+    if (usesPublicMenuCompatibility() && apiItems.length &&
+        apiItems.every(item => item && !Object.prototype.hasOwnProperty.call(item, 'sync_version'))) {
+      disablePublicMenuRevision();
+    }
     const availableItems = normalizeMenuItems(apiItems);
     successfulMenuFetches++;
 
@@ -1241,6 +1262,14 @@ async function refreshLiveMenu({ background = false } = {}) {
       renderCart();
     }
   } catch (error) {
+    if (usesPublicMenuCompatibility()) {
+      // Retain cart/menu data, but do not disguise an API failure as an empty or
+      // successfully refreshed cached catalog.
+      state.menuStatus = 'error';
+      state.menuError = 'Unable to refresh the menu. Please try again.';
+      renderMenu();
+      return;
+    }
     if (background && hasLastKnownMenu) {
       return;
     }
@@ -1299,20 +1328,62 @@ function loadLiveMenu(options = {}) {
 }
 
 function refreshMenuIfChanged() {
+  if (usesPublicMenuCompatibility() && publicMenuRevisionDisabled) return Promise.resolve();
   if(document.hidden||menuVersionRequest) return menuVersionRequest;
   menuVersionRequest=(async()=>{
     try {
       const result=await requestJson('/menu/version',{timeoutMs:8000});
       const version=String(result?.version ?? result?.data?.version ?? '');
+      if (usesPublicMenuCompatibility() && !/^\d+$/.test(version)) {
+        disablePublicMenuRevision();
+        await loadLiveMenu({background:true});
+        return;
+      }
       if(!version || version!==observedMenuVersion) {
         const before=successfulMenuFetches;
         await loadLiveMenu({background:true});
         // A failed refresh must be retried even if the catalog version stays the same.
         if(successfulMenuFetches>before) observedMenuVersion=version;
       }
-    } catch { await loadLiveMenu({background:true}); }
+    } catch (error) {
+      // A legacy /:id handler returns 500 for "version". This degrades only the
+      // optional revision feature; it does not declare the ordinary menu healthy.
+      if (usesPublicMenuCompatibility() && [404,405,500,501].includes(error.status)) disablePublicMenuRevision();
+      await loadLiveMenu({background:true});
+    }
   })().finally(()=>{menuVersionRequest=null;});
   return menuVersionRequest;
+}
+
+function setupPublicMenuRefresh() {
+  let lastRevisit = 0;
+  const revisit = () => {
+    if (document.hidden || Date.now() - lastRevisit < 2000) return;
+    lastRevisit = Date.now();
+    return publicMenuRevisionDisabled ? loadLiveMenu({background:true}) : refreshMenuIfChanged();
+  };
+  const section = elements.menuGrid?.closest('section');
+  const stop = () => {
+    window.clearInterval(publicMenuPollTimer);
+    publicMenuPollTimer = null;
+    window.removeEventListener('focus',revisit);
+    window.removeEventListener('hashchange',revisit);
+    document.removeEventListener('visibilitychange',revisit);
+    section?.removeEventListener('pointerenter',revisit);
+  };
+  const start = () => {
+    stop();
+    if (!publicMenuRevisionDisabled) publicMenuPollTimer = window.setInterval(refreshMenuIfChanged,15000);
+    window.addEventListener('focus',revisit);
+    window.addEventListener('hashchange',revisit);
+    document.addEventListener('visibilitychange',revisit);
+    section?.addEventListener('pointerenter',revisit);
+  };
+  start();
+  window.addEventListener('pagehide',stop);
+  window.addEventListener('pageshow',event=>{
+    if (event.persisted) { lastRevisit=0; start(); void revisit(); }
+  });
 }
 
 function triggerClass(element, className, duration = 320) {
@@ -1877,8 +1948,43 @@ function orderSuccessDetails(message) {
   };
 }
 
+function publicConfirmationMarkup(receipt) {
+  return `<div class="order-success-card public-order-confirmation" role="status">
+    <span class="public-confirmation-icon" aria-hidden="true">
+      <svg viewBox="0 0 52 52" focusable="false"><path d="M14 27 23 36 39 17" /></svg>
+    </span>
+    <h3>Order Confirmed</h3>
+    <p>Thank you! Your order has been placed successfully.</p>
+    <span class="success-order-id">Order ID <b>${escapeHtml(receipt.orderLabel)}</b></span>
+    <div class="public-confirmation-actions">
+      <a class="primary-btn full-width" href="${escapeHtml(receipt.trackingUrl || '#track-orders')}" ${receipt.trackingUrl ? '' : 'data-confirmation-track-fallback'}>Track Order</a>
+      <button class="secondary-btn full-width" type="button" data-confirmation-menu>Back to Menu</button>
+    </div>
+  </div>`;
+}
+
+function returnToMenuFromConfirmation() {
+  if (state.kiosk.enabled || state.tableQr.enabled) return;
+  setMobileCartOpen(false);
+  state.confirmation = null;
+  state.orderSuccess = null;
+  renderCart();
+  elements.searchInput?.focus({ preventScroll: true });
+  document.querySelector('#menu')?.scrollIntoView({ block: 'start' });
+}
+
+function handleConfirmationTrackingFallback(event) {
+  if (!event.target.closest('[data-confirmation-track-fallback]')) return false;
+  event.preventDefault();
+  setMobileCartOpen(false);
+  document.querySelector('[data-track-entry]')?.click();
+  return true;
+}
+
 function renderCart() {
   const snapshot = !state.cart.length && state.confirmation ? state.confirmation : null;
+  const publicConfirmation = Boolean(snapshot && !state.kiosk.enabled && !state.tableQr.enabled);
+  elements.cartItems.closest('.cart-card')?.classList.toggle('has-public-confirmation', publicConfirmation);
   const { count, subtotal, tax, packing, total } = snapshot?.totals || cartTotals();
   elements.cartCount.innerHTML = `<span aria-hidden="true">🛒</span><strong>${count}</strong>`;
   elements.cartCount.setAttribute("aria-label", `${count} ${count === 1 ? "item" : "items"} in cart`);
@@ -1907,7 +2013,7 @@ function renderCart() {
     state.checkoutStep = "cart";
     setPaymentSelectorVisible(false);
     const success = orderSuccessDetails(state.orderSuccess);
-    elements.cartItems.innerHTML = state.orderSuccess
+    elements.cartItems.innerHTML = publicConfirmation ? publicConfirmationMarkup(snapshot) : state.orderSuccess
       ? `<div class="order-success-card">
           <span class="empty-cart-icon" aria-hidden="true">✓</span>
           <strong>Order saved</strong>
@@ -1918,7 +2024,7 @@ function renderCart() {
           <strong>Your cart is empty</strong>
           <span>Add delicious food 🍕</span>
         </div>`;
-    if (state.orderSuccess) {
+    if (state.orderSuccess && !publicConfirmation) {
       const successItems = snapshot?.items?.length
         ? `<div class="success-receipt-lines">
             ${snapshot.items
@@ -2610,20 +2716,10 @@ function renderMobileCart() {
   updateMobileCartButton();
 
   if (!state.kiosk.enabled && !state.tableQr.enabled && !state.cart.length && state.confirmation && state.mobileCartOpen) {
-    const receipt = state.confirmation;
     elements.mobileCartSheet.innerHTML = `
       <div class="mobile-cart-sheet-handle" aria-hidden="true"></div>
-      <div class="mobile-cart-sheet-head"><strong>Order confirmed</strong>
-        <button type="button" data-mobile-action="close" aria-label="Close receipt">x</button></div>
       <div class="mobile-checkout-step">
-        ${elements.cartItems.innerHTML}
-        <div class="mobile-totals">
-          <div><span>Subtotal</span><strong>${formatPrice(receipt.totals.subtotal)}</strong></div>
-          <div><span>GST</span><strong>${formatPrice(receipt.totals.tax)}</strong></div>
-          ${receipt.totals.packing ? `<div><span>Packing</span><strong>${formatPrice(receipt.totals.packing)}</strong></div>` : ''}
-          <div class="grand-total"><span>Total</span><strong>${formatPrice(receipt.totals.total)}</strong></div>
-        </div>
-        ${receipt.trackingUrl ? `<a class="primary-btn full-width" href="${escapeHtml(receipt.trackingUrl)}">Track this order</a>` : ''}
+        ${publicConfirmationMarkup(state.confirmation)}
       </div>`;
     return;
   }
@@ -2822,6 +2918,8 @@ function completeOrderSuccess({ order, paymentData, message, customer }) {
   if (!state.kiosk.enabled && !state.tableQr.enabled) {
     state.pendingPublicOrder = null;
     sessionStorage.removeItem('restaurantai_pending_public_order');
+    window.clearTimeout(showToast.timer);
+    elements.toast.classList.remove('is-visible');
   }
   resetPhoneVerification();
   saveCart();
@@ -3163,7 +3261,7 @@ async function placeOrder() {
         order: { order_number: result.orderData.order_number, id: result.orderData.restaurant_order_id },
         customer,
       });
-      showToast("Payment confirmed", state.orderSuccess, "success");
+      if (state.kiosk.enabled || state.tableQr.enabled) showToast("Payment confirmed", state.orderSuccess, "success");
     } else {
       const order = await handleOfflinePayment(customer);
       completeOrderSuccess({
@@ -3171,7 +3269,7 @@ async function placeOrder() {
         message: "Your order was sent to the restaurant.",
         customer,
       });
-      showToast(order.notification?.title || "Order saved", order.notification?.message || state.orderSuccess, "success");
+      if (state.kiosk.enabled || state.tableQr.enabled) showToast(order.notification?.title || "Order saved", order.notification?.message || state.orderSuccess, "success");
     }
 
     void loadCustomerNotifications({ announce: false });
@@ -5344,6 +5442,11 @@ function bindEvents() {
   });
 
   elements.cartItems.addEventListener("click", (event) => {
+    if (handleConfirmationTrackingFallback(event)) return;
+    if (event.target.closest('[data-confirmation-menu]')) {
+      returnToMenuFromConfirmation();
+      return;
+    }
     const removeButton = event.target.closest("[data-id][data-remove]");
     if (removeButton) {
       removeCartItem(Number(removeButton.dataset.id));
@@ -5398,6 +5501,11 @@ function bindEvents() {
   elements.mobileCartButton?.addEventListener("click", () => setMobileCartOpen(true));
   elements.mobileCartBackdrop?.addEventListener("click", () => setMobileCartOpen(false));
   elements.mobileCartSheet?.addEventListener("click", (event) => {
+    if (handleConfirmationTrackingFallback(event)) return;
+    if (event.target.closest('[data-confirmation-menu]')) {
+      returnToMenuFromConfirmation();
+      return;
+    }
     const closeButton = event.target.closest("[data-mobile-action='close']");
     if (closeButton) {
       setMobileCartOpen(false);
@@ -5810,6 +5918,9 @@ if (startTrackingPage()) {
   loadPublicSettings();
   loadPaymentMethods();
   resolveTableQrContext();
+  if (usesPublicMenuCompatibility()) {
+    setupPublicMenuRefresh();
+  } else {
   const menuTimer=window.setInterval(refreshMenuIfChanged,15000);
   window.addEventListener('focus',refreshMenuIfChanged);
   window.addEventListener('hashchange',refreshMenuIfChanged);
@@ -5819,6 +5930,7 @@ if (startTrackingPage()) {
     window.removeEventListener('hashchange',refreshMenuIfChanged);
     elements.menuGrid?.closest('section')?.removeEventListener('pointerenter',refreshMenuIfChanged);
     document.removeEventListener('visibilitychange',refreshMenuIfChanged);},{once:true});
+  }
   window.setInterval(loadPublicSettings, 5000);
   window.addEventListener("focus", loadPublicSettings);
 }

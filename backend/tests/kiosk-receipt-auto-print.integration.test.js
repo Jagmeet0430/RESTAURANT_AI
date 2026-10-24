@@ -4,28 +4,9 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
+import { isolatedApplicationDatabase } from './helpers/isolatedApplicationDatabase.js';
 
-process.env.NODE_ENV = process.env.NODE_ENV || "test";
-process.env.JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(32).toString("hex");
-process.env.OTP_SECRET = process.env.OTP_SECRET || crypto.randomBytes(32).toString("hex");
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const backendEnv = path.resolve(__dirname, "../.env");
-const programDataEnv = path.join(process.env.ProgramData || "C:\\ProgramData", "RestaurantAI", "config", ".env");
-
-try {
-  await fs.access(backendEnv);
-  process.env.RESTAURANTAI_ENV_PATH = process.env.RESTAURANTAI_ENV_PATH || backendEnv;
-} catch {
-  try {
-    await fs.access(programDataEnv);
-    process.env.RESTAURANTAI_ENV_PATH = process.env.RESTAURANTAI_ENV_PATH || programDataEnv;
-  } catch {
-    // Let the app use its default env loading path.
-  }
-}
+await isolatedApplicationDatabase();
 
 const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "restaurantai-kiosk-print-"));
 const configDir = path.join(tempRoot, "config");
@@ -68,6 +49,7 @@ const createdOrderIds = new Set();
 const createdCustomerPhones = new Set();
 const createdMenuIds = new Set();
 const createdCategoryIds = new Set();
+const requestFixtures = new Map();
 
 function listen() {
   return new Promise((resolve, reject) => {
@@ -177,7 +159,11 @@ async function postCashOrder(server, {
   forwardedFor,
   suffix,
 } = {}) {
-  const { customerId, menuId } = await insertOrderFixtures(suffix || crypto.randomBytes(2).toString("hex"));
+  // A retry must reuse the original customer/items as well as its idempotency key.
+  if (!requestFixtures.has(idempotencyKey)) {
+    requestFixtures.set(idempotencyKey, await insertOrderFixtures(suffix || crypto.randomBytes(2).toString("hex")));
+  }
+  const { customerId, menuId } = requestFixtures.get(idempotencyKey);
   const { port } = server.address();
   const response = await fetch(`http://127.0.0.1:${port}/api/payments/cash-order`, {
     method: "POST",
